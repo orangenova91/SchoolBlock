@@ -79,6 +79,7 @@ export function createDefaultClassCounts(
 export type Subject = {
   name: string;
   units: number;
+  classCount: number;
 };
 
 export type GradeSubjects = Record<Grade, Subject[]>;
@@ -92,8 +93,16 @@ export type SubjectsDocument = {
 export const MIN_SUBJECT_UNITS = 1;
 export const MAX_SUBJECT_UNITS = 20;
 
+export const MIN_SUBJECT_CLASS_COUNT = 1;
+export const MAX_SUBJECT_CLASS_COUNT = 20;
+export const DEFAULT_SUBJECT_CLASS_COUNT = 1;
+
 export function createEmptySubject(): Subject {
-  return { name: "", units: MIN_SUBJECT_UNITS };
+  return {
+    name: "",
+    units: MIN_SUBJECT_UNITS,
+    classCount: DEFAULT_SUBJECT_CLASS_COUNT,
+  };
 }
 
 export function createDefaultGradeSubjects(): GradeSubjects {

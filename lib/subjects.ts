@@ -1,6 +1,9 @@
 import {
+  DEFAULT_SUBJECT_CLASS_COUNT,
   GRADES,
+  MAX_SUBJECT_CLASS_COUNT,
   MAX_SUBJECT_UNITS,
+  MIN_SUBJECT_CLASS_COUNT,
   MIN_SUBJECT_UNITS,
   type Grade,
   type GradeSubjects,
@@ -30,6 +33,12 @@ export function ensureGradeSubjects(
       units:
         parsePositiveIntInRange(s?.units, MIN_SUBJECT_UNITS, MAX_SUBJECT_UNITS) ??
         MIN_SUBJECT_UNITS,
+      classCount:
+        parsePositiveIntInRange(
+          s?.classCount,
+          MIN_SUBJECT_CLASS_COUNT,
+          MAX_SUBJECT_CLASS_COUNT,
+        ) ?? DEFAULT_SUBJECT_CLASS_COUNT,
     }));
   }
   return next;
@@ -53,6 +62,7 @@ export function parseSubjectsFromClipboard(text: string): Subject[] {
 
     const name = cols[0] ?? "";
     const unitsRaw = cols[1] ?? "";
+    const classCountRaw = cols[2] ?? "";
 
     if (i === 0 && HEADER_NAMES.has(name.toLowerCase())) {
       continue;
@@ -67,7 +77,14 @@ export function parseSubjectsFromClipboard(text: string): Subject[] {
     );
     if (units === null) continue;
 
-    subjects.push({ name, units });
+    const classCount =
+      parsePositiveIntInRange(
+        classCountRaw,
+        MIN_SUBJECT_CLASS_COUNT,
+        MAX_SUBJECT_CLASS_COUNT,
+      ) ?? DEFAULT_SUBJECT_CLASS_COUNT;
+
+    subjects.push({ name, units, classCount });
   }
 
   return subjects;
@@ -84,11 +101,21 @@ export function parseGradeSubjects(value: unknown): GradeSubjects | null {
     if (Array.isArray(raw)) {
       for (const item of raw) {
         if (!item || typeof item !== "object") return null;
-        const { name, units } = item as Record<string, unknown>;
+        const { name, units, classCount } = item as Record<string, unknown>;
         if (typeof name !== "string") return null;
         if (
           parsePositiveIntInRange(units, MIN_SUBJECT_UNITS, MAX_SUBJECT_UNITS) ===
           null
+        ) {
+          return null;
+        }
+        if (
+          classCount !== undefined &&
+          parsePositiveIntInRange(
+            classCount,
+            MIN_SUBJECT_CLASS_COUNT,
+            MAX_SUBJECT_CLASS_COUNT,
+          ) === null
         ) {
           return null;
         }
@@ -107,8 +134,53 @@ export function sanitizeGradeSubjects(subjects: GradeSubjects): GradeSubjects {
       .map((s) => ({
         name: s.name.trim(),
         units: s.units,
+        classCount: s.classCount,
       }))
       .filter((s) => s.name.length > 0);
   }
   return next;
+}
+
+const CLASS_COUNT_HEADERS = new Set([
+  "수업 학반 수",
+  "수업학반수",
+  "학반수",
+  "학반 수",
+  "classcount",
+  "class count",
+]);
+
+/** Paste a single column of class counts onto existing subject rows (by order). */
+export function applyClassCountsFromClipboard(
+  subjects: Subject[],
+  text: string,
+): Subject[] | null {
+  const lines = text
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  if (lines.length === 0) return null;
+
+  const values: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const first = (lines[i].split("\t")[0] ?? "").trim();
+    if (i === 0 && CLASS_COUNT_HEADERS.has(first.toLowerCase())) continue;
+
+    const n = parsePositiveIntInRange(
+      first,
+      MIN_SUBJECT_CLASS_COUNT,
+      MAX_SUBJECT_CLASS_COUNT,
+    );
+    if (n === null) return null;
+    values.push(n);
+  }
+
+  if (values.length === 0) return null;
+
+  return subjects.map((row, index) =>
+    index < values.length ? { ...row, classCount: values[index] } : row,
+  );
 }

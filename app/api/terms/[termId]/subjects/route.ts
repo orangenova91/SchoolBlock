@@ -96,7 +96,10 @@ export async function PUT(request: Request, context: RouteContext) {
   const parsed = parseGradeSubjects((body as { subjects?: unknown }).subjects);
   if (!parsed) {
     return NextResponse.json(
-      { error: "학년별 교과 정보(교과명, 단위수 1~20)가 올바르지 않습니다." },
+      {
+        error:
+          "학년별 교과 정보(교과명, 단위수 1~20, 수업 학반 수 1~20)가 올바르지 않습니다.",
+      },
       { status: 400 },
     );
   }

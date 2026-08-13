@@ -3,15 +3,23 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { SubjectGradeTable } from "@/components/subject-grade-table";
+import { sumWeekdayPeriods } from "@/lib/day-schedule";
 import {
+  applyClassCountsFromClipboard,
   ensureGradeSubjects,
   sanitizeGradeSubjects,
 } from "@/lib/subjects";
 import {
   GRADES,
+  MAX_SUBJECT_CLASS_COUNT,
+  MIN_SUBJECT_CLASS_COUNT,
+  createDefaultClassCounts,
+  createDefaultGradeDaySchedules,
   createDefaultGradeSubjects,
   createEmptySubject,
   type Grade,
+  type GradeClassCounts,
+  type GradeDaySchedules,
   type GradeSubjects,
   type Semester,
   type Subject,
@@ -27,6 +35,14 @@ type TermSummary = {
 
 type SubjectsFormProps = {
   termId: string;
+};
+
+type FormMode = "edit" | "classCount";
+
+type GradeScheduleTotal = {
+  classCount: number;
+  weekdaySum: number;
+  total: number;
 };
 
 function hasAnySubjects(subjects: GradeSubjects): boolean {
@@ -47,34 +63,234 @@ function withEditRows(subjects: GradeSubjects): GradeSubjects {
   return next;
 }
 
-function SubjectListView({ subjects }: { subjects: GradeSubjects }) {
+function gradeTotalHours(subjects: Subject[]): number {
+  return subjects.reduce(
+    (sum, row) => sum + row.units * row.classCount,
+    0,
+  );
+}
+
+function buildScheduleTotals(
+  grades: GradeDaySchedules,
+  classCounts: GradeClassCounts,
+): Record<Grade, GradeScheduleTotal> {
+  const next = {} as Record<Grade, GradeScheduleTotal>;
+  for (const grade of GRADES) {
+    const weekdaySum = sumWeekdayPeriods(grades[grade]);
+    const classCount = classCounts[grade];
+    next[grade] = {
+      classCount,
+      weekdaySum,
+      total: classCount * weekdaySum,
+    };
+  }
+  return next;
+}
+
+function SubjectClassCountEditor({
+  subjects,
+  scheduleTotals,
+  savingGrade,
+  onChange,
+  onSaveGrade,
+}: {
+  subjects: GradeSubjects;
+  scheduleTotals: Record<Grade, GradeScheduleTotal> | null;
+  savingGrade: Grade | null;
+  onChange: (grade: Grade, rows: Subject[]) => void;
+  onSaveGrade: (grade: Grade) => void;
+}) {
+  function handlePaste(
+    grade: Grade,
+    event: React.ClipboardEvent<HTMLElement>,
+  ) {
+    const text = event.clipboardData.getData("text/plain");
+    if (!text.trim()) return;
+    // 한 칸에 숫자 하나만 붙이는 경우는 기본 입력 동작 유지
+    if (!text.includes("\n") && !text.includes("\r")) return;
+
+    const applied = applyClassCountsFromClipboard(subjects[grade], text);
+    if (!applied) return;
+
+    event.preventDefault();
+    onChange(grade, applied);
+  }
+
   return (
-    <div className="grid w-full grid-cols-1 gap-4 lg:grid-cols-3">
-      {GRADES.map((grade) => (
-        <section
-          key={grade}
-          className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
-        >
-          <h2 className="mb-3 text-center text-base font-semibold text-zinc-900">
-            {grade}학년
-          </h2>
-          {subjects[grade].length === 0 ? (
-            <p className="text-center text-sm text-zinc-500">저장된 교과 없음</p>
-          ) : (
-            <ul className="divide-y divide-zinc-100 text-sm">
-              {subjects[grade].map((row, index) => (
-                <li
-                  key={`${grade}-${index}-${row.name}`}
-                  className="flex items-center justify-between gap-3 px-1 py-2"
+    <div className="flex w-full flex-col gap-4">
+      <div className="grid w-full grid-cols-1 gap-4 lg:grid-cols-3">
+        {GRADES.map((grade) => {
+          const rows = subjects[grade];
+          const totalHours = gradeTotalHours(rows);
+          const isSaving = savingGrade === grade;
+
+          return (
+            <section
+              key={grade}
+              className="flex h-full flex-col rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+            >
+              <h2 className="mb-3 text-center text-base font-semibold text-zinc-900">
+                {grade}학년
+              </h2>
+              {rows.length === 0 ? (
+                <p className="text-center text-sm text-zinc-500">
+                  저장된 교과 없음
+                </p>
+              ) : (
+                <>
+                  <div
+                    className="overflow-x-auto"
+                    onPaste={(e) => handlePaste(grade, e)}
+                  >
+                    <table className="w-full border-collapse text-sm">
+                      <thead>
+                        <tr className="border-b border-zinc-200 text-left text-zinc-600">
+                          <th className="px-2 py-2 font-medium">교과명</th>
+                          <th className="w-24 px-2 py-2 font-medium">단위수</th>
+                          <th className="w-28 px-2 py-2 font-medium">
+                            수업 학반 수
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((row, index) => (
+                          <tr
+                            key={`${grade}-${index}-${row.name}`}
+                            className="border-b border-zinc-100"
+                          >
+                            <td className="px-2 py-1.5 font-medium text-zinc-900">
+                              {row.name}
+                            </td>
+                            <td className="px-2 py-1.5 text-center text-zinc-600">
+                              {row.units}
+                            </td>
+                            <td className="px-2 py-1.5">
+                              <input
+                                type="number"
+                                min={MIN_SUBJECT_CLASS_COUNT}
+                                max={MAX_SUBJECT_CLASS_COUNT}
+                                value={row.classCount}
+                                onChange={(e) => {
+                                  const n = Number(e.target.value);
+                                  if (!Number.isInteger(n)) return;
+                                  if (
+                                    n < MIN_SUBJECT_CLASS_COUNT ||
+                                    n > MAX_SUBJECT_CLASS_COUNT
+                                  ) {
+                                    return;
+                                  }
+                                  onChange(
+                                    grade,
+                                    rows.map((item, i) =>
+                                      i === index
+                                        ? { ...item, classCount: n }
+                                        : item,
+                                    ),
+                                  );
+                                }}
+                                onPaste={(e) => handlePaste(grade, e)}
+                                aria-label={`${grade}학년 ${row.name} 수업 학반 수`}
+                                className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-center text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                              />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="mt-auto border-t border-zinc-100 pt-3 text-center">
+                    <p className="text-sm font-medium text-zinc-900">
+                      수업 총 시수{" "}
+                      <span className="tabular-nums">{totalHours}</span>
+                    </p>
+                    <p className="mt-0.5 text-xs text-zinc-500">
+                      Σ(단위수 × 수업 학반 수)
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => onSaveGrade(grade)}
+                      disabled={savingGrade !== null}
+                      className="mt-3 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {isSaving ? "저장 중…" : "수업 학반 수 저장"}
+                    </button>
+                  </div>
+                </>
+              )}
+            </section>
+          );
+        })}
+      </div>
+
+      <div className="grid w-full grid-cols-1 gap-4 lg:grid-cols-3">
+        {GRADES.map((grade) => {
+          const schedule = scheduleTotals?.[grade];
+          const subjectTotal = gradeTotalHours(subjects[grade]);
+          const matched =
+            schedule !== undefined ? subjectTotal === schedule.total : null;
+
+          return (
+            <section
+              key={`schedule-total-${grade}`}
+              className={`rounded-2xl border p-4 shadow-sm ${
+                matched === true
+                  ? "border-emerald-300 bg-emerald-50"
+                  : matched === false
+                    ? "border-red-300 bg-red-50"
+                    : "border-zinc-200 bg-white"
+              }`}
+            >
+              {schedule ? (
+                <div
+                  className={`relative text-sm ${
+                    matched === true
+                      ? "text-emerald-800"
+                      : matched === false
+                        ? "text-red-800"
+                        : "text-zinc-700"
+                  }`}
                 >
-                  <span className="font-medium text-zinc-900">{row.name}</span>
-                  <span className="shrink-0 text-zinc-600">{row.units}단위</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      ))}
+                  {matched === true || matched === false ? (
+                    <span
+                      className={`absolute left-0 top-1/2 z-10 -translate-y-1/2 rounded-md px-2 py-1 text-xs font-semibold ${
+                        matched === true
+                          ? "bg-emerald-200 text-emerald-900"
+                          : "bg-red-200 text-red-900"
+                      }`}
+                    >
+                      {matched === true ? "일치" : "불일치"}
+                    </span>
+                  ) : null}
+                  <div className="text-center">
+                    <p className="flex flex-wrap items-baseline justify-center gap-x-0.5 gap-y-1">
+                      <span className="font-medium">수업 총 시수</span>
+                      <span className="tabular-nums">
+                        ({schedule.classCount} × {schedule.weekdaySum}=)
+                        <span className="font-semibold">{schedule.total}</span>
+                      </span>
+                    </p>
+                    <p
+                      className={`mt-0.5 text-xs ${
+                        matched === true
+                          ? "text-emerald-700"
+                          : matched === false
+                            ? "text-red-700"
+                            : "text-zinc-500"
+                      }`}
+                    >
+                      학반 수 × 요일 차시 합
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-center text-xs text-zinc-500">
+                  학반 설정 값을 불러오는 중…
+                </p>
+              )}
+            </section>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -85,7 +301,12 @@ export function SubjectsForm({ termId }: SubjectsFormProps) {
   const [subjects, setSubjects] = useState<GradeSubjects>(
     createDefaultGradeSubjects(),
   );
-  const [mode, setMode] = useState<"edit" | "view">("edit");
+  const [mode, setMode] = useState<FormMode>("edit");
+  const [scheduleTotals, setScheduleTotals] = useState<Record<
+    Grade,
+    GradeScheduleTotal
+  > | null>(null);
+  const [savingGrade, setSavingGrade] = useState<Grade | null>(null);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<"idle" | "saving" | "success" | "error">(
     "idle",
@@ -121,8 +342,10 @@ export function SubjectsForm({ termId }: SubjectsFormProps) {
             ensureGradeSubjects(data.subjects ?? createDefaultGradeSubjects()),
           );
           const hasSaved = hasAnySubjects(loaded);
-          setSubjects(hasSaved ? loaded : createDefaultGradeSubjects());
-          setMode(hasSaved ? "view" : "edit");
+          setSubjects(
+            hasSaved ? withEditRows(loaded) : createDefaultGradeSubjects(),
+          );
+          setMode("edit");
           setStatus("idle");
         }
       } catch {
@@ -140,6 +363,54 @@ export function SubjectsForm({ termId }: SubjectsFormProps) {
       cancelled = true;
     };
   }, [termId]);
+
+  useEffect(() => {
+    if (mode !== "classCount") return;
+
+    let cancelled = false;
+
+    async function loadScheduleTotals() {
+      try {
+        const response = await fetch(`/api/terms/${termId}/day-schedule`);
+        const data = (await response.json()) as {
+          grades?: GradeDaySchedules;
+          classCounts?: GradeClassCounts;
+          error?: string;
+        };
+
+        if (!response.ok) {
+          if (!cancelled) {
+            setScheduleTotals(null);
+            setStatus("error");
+            setMessage(
+              data.error ?? "학반 설정의 학년 수업 총 시수를 불러오지 못했습니다.",
+            );
+          }
+          return;
+        }
+
+        if (!cancelled) {
+          setScheduleTotals(
+            buildScheduleTotals(
+              data.grades ?? createDefaultGradeDaySchedules(),
+              data.classCounts ?? createDefaultClassCounts(),
+            ),
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setScheduleTotals(null);
+          setStatus("error");
+          setMessage("학반 설정의 학년 수업 총 시수를 불러오지 못했습니다.");
+        }
+      }
+    }
+
+    void loadScheduleTotals();
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, termId]);
 
   function updateGrade(grade: Grade, rows: Subject[]) {
     setSubjects((prev) => ({
@@ -159,8 +430,58 @@ export function SubjectsForm({ termId }: SubjectsFormProps) {
     setMessage("");
   }
 
+  async function saveSubjects(
+    nextSubjects: GradeSubjects,
+    options: { successMessage: string; nextMode: FormMode },
+  ) {
+    setStatus("saving");
+    setMessage("");
+
+    const sanitized = sanitizeGradeSubjects(nextSubjects);
+
+    try {
+      const response = await fetch(`/api/terms/${termId}/subjects`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subjects: sanitized }),
+      });
+
+      const data = (await response.json()) as {
+        subjects?: GradeSubjects;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        setStatus("error");
+        setMessage(data.error ?? "저장에 실패했습니다.");
+        return false;
+      }
+
+      const saved = sanitizeGradeSubjects(
+        ensureGradeSubjects(data.subjects ?? sanitized),
+      );
+      setSubjects(saved);
+      setMode(options.nextMode);
+      setStatus("success");
+      setMessage(options.successMessage);
+      return true;
+    } catch {
+      setStatus("error");
+      setMessage("서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+      return false;
+    }
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    await saveSubjects(subjects, {
+      successMessage: "교과명·단위수가 저장되었습니다.",
+      nextMode: "classCount",
+    });
+  }
+
+  async function handleSaveGradeClassCounts(grade: Grade) {
+    setSavingGrade(grade);
     setStatus("saving");
     setMessage("");
 
@@ -188,13 +509,38 @@ export function SubjectsForm({ termId }: SubjectsFormProps) {
         ensureGradeSubjects(data.subjects ?? sanitized),
       );
       setSubjects(saved);
-      setMode("view");
+      setMode("classCount");
       setStatus("success");
-      setMessage("수업 교과 설정이 저장되었습니다.");
+      setMessage(`${grade}학년 수업 학반 수가 저장되었습니다.`);
     } catch {
       setStatus("error");
       setMessage("서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setSavingGrade(null);
     }
+  }
+
+  async function handleClassCountSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (
+      !scheduleTotals ||
+      !GRADES.every(
+        (grade) =>
+          gradeTotalHours(subjects[grade]) === scheduleTotals[grade].total,
+      )
+    ) {
+      setStatus("error");
+      setMessage(
+        "세 학년의 수업 총 시수가 모두 일치해야 다음 단계로 진행할 수 있습니다.",
+      );
+      return;
+    }
+
+    await saveSubjects(subjects, {
+      successMessage: "수업 학반 수가 저장되었습니다.",
+      nextMode: "classCount",
+    });
   }
 
   if (loading) {
@@ -213,8 +559,27 @@ export function SubjectsForm({ termId }: SubjectsFormProps) {
     );
   }
 
+  const isStep2 = mode === "classCount";
+  const allTotalsMatched =
+    scheduleTotals !== null &&
+    GRADES.every(
+      (grade) =>
+        gradeTotalHours(subjects[grade]) === scheduleTotals[grade].total,
+    );
+
   return (
     <div className="flex w-full flex-col gap-6">
+      <header className="text-center">
+        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
+          {isStep2 ? "수업 교과 설정(2/2)" : "수업 교과 설정(1/2)"}
+        </h1>
+        <p className="mt-2 text-sm text-zinc-600">
+          {isStep2
+            ? "수업 학반 수를 입력해주세요. 엑셀에서 1개 열을 복사한 뒤 표 안에서 Ctrl+V로 붙여넣을 수 있습니다."
+            : "학년별 교과명과 단위수를 입력하세요. 엑셀에서 두 열(교과명, 단위수)을 복사한 뒤 표 안에서 Ctrl+V로 붙여넣을 수 있습니다."}
+        </p>
+      </header>
+
       {term ? (
         <p className="text-center text-sm text-zinc-600">
           {term.timetableName ? `${term.timetableName} · ` : null}
@@ -222,26 +587,56 @@ export function SubjectsForm({ termId }: SubjectsFormProps) {
         </p>
       ) : null}
 
-      {mode === "view" ? (
-        <>
-          <SubjectListView subjects={subjects} />
+      {isStep2 ? (
+        <form
+          onSubmit={handleClassCountSubmit}
+          className="flex w-full flex-col gap-6"
+        >
+          <SubjectClassCountEditor
+            subjects={subjects}
+            scheduleTotals={scheduleTotals}
+            savingGrade={savingGrade}
+            onChange={updateGrade}
+            onSaveGrade={(grade) => {
+              void handleSaveGradeClassCounts(grade);
+            }}
+          />
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
             <button
               type="button"
-              onClick={() => router.push(`/terms/${termId}/days`)}
+              onClick={startEdit}
               className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
             >
               이전
             </button>
-            <button
-              type="button"
-              onClick={startEdit}
-              className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700"
+            <span
+              className="inline-flex"
+              title={
+                !allTotalsMatched
+                  ? "세 학년의 수업 총 시수가 모두 일치해야 다음 단계로 진행할 수 있습니다."
+                  : savingGrade !== null
+                    ? "수업 학반 수 저장이 끝난 뒤 다시 시도해 주세요."
+                    : status === "saving"
+                      ? "저장 중입니다."
+                      : undefined
+              }
             >
-              수정
-            </button>
+              <button
+                type="submit"
+                disabled={
+                  status === "saving" ||
+                  savingGrade !== null ||
+                  !allTotalsMatched
+                }
+                className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {status === "saving" && savingGrade === null
+                  ? "저장 중…"
+                  : "다음"}
+              </button>
+            </span>
           </div>
-        </>
+        </form>
       ) : (
         <form onSubmit={handleSubmit} className="flex w-full flex-col gap-6">
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -264,22 +659,11 @@ export function SubjectsForm({ termId }: SubjectsFormProps) {
               이전
             </button>
             <button
-              type="button"
-              onClick={() => {
-                setSubjects(sanitizeGradeSubjects(subjects));
-                setMode("view");
-                setMessage("");
-              }}
-              className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
-            >
-              취소
-            </button>
-            <button
               type="submit"
               disabled={status === "saving"}
               className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {status === "saving" ? "저장 중…" : "저장"}
+              {status === "saving" ? "저장 중…" : "다음"}
             </button>
           </div>
         </form>

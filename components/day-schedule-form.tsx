@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { PeriodPaintGrid } from "@/components/period-paint-grid";
-import { setPeriod } from "@/lib/day-schedule";
+import { setPeriod, sumWeekdayPeriods } from "@/lib/day-schedule";
 import {
   GRADES,
   MAX_CLASS_COUNT,
@@ -231,6 +231,22 @@ export function DayScheduleForm({ termId }: DayScheduleFormProps) {
                 periods={grades[grade]}
                 onChange={(day, count) => updateDayPeriods(grade, day, count)}
               />
+              <div className="mt-4 border-t border-zinc-200 pt-3 text-center text-sm text-zinc-700">
+                <p className="flex flex-wrap items-baseline justify-center gap-x-0.5 gap-y-1">
+                  <span className="font-medium text-zinc-900">
+                    학년 수업 총 시수
+                  </span>
+                  <span className="tabular-nums">
+                    ({classCounts[grade]} × {sumWeekdayPeriods(grades[grade])}={""})
+                    <span className="font-semibold text-zinc-900">
+                      {classCounts[grade] * sumWeekdayPeriods(grades[grade])}
+                    </span>
+                  </span>
+                </p>
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  학반 수 × 요일 차시 합
+                </p>
+              </div>
             </section>
           ))}
         </div>
@@ -256,7 +272,7 @@ export function DayScheduleForm({ termId }: DayScheduleFormProps) {
           disabled={status === "saving"}
           className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {status === "saving" ? "저장 중…" : "저장"}
+          {status === "saving" ? "저장 중…" : "다음"}
         </button>
       </div>
 

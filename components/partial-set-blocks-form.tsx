@@ -380,7 +380,7 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const ok = await savePartial("부분 SET 블록이 저장되었습니다.", true);
-    if (ok) router.push(`/terms/${termId}/timetable`);
+    if (ok) router.push(`/terms/${termId}/constraints`);
   }
 
   if (loading) {

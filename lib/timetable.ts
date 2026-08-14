@@ -15,6 +15,7 @@ import {
   type GradeSubjects,
   type SetBlockCell,
   type Teacher,
+  type TeacherForbiddenSlot,
   type TimetableCell,
   type TimetableUnplaced,
   type Weekday,
@@ -730,6 +731,17 @@ function teacherCapacityIssues(
   return null;
 }
 
+function markTeacherBusyFromForbidden(
+  forbiddenSlots: TeacherForbiddenSlot[],
+  teacherBusy: Set<string>,
+) {
+  for (const slot of forbiddenSlots) {
+    teacherBusy.add(
+      teacherSlotKey(slot.teacherName, slot.day, slot.period),
+    );
+  }
+}
+
 export type GenerateTimetableInput = {
   teachers: Teacher[];
   subjects: GradeSubjects;
@@ -737,6 +749,8 @@ export type GenerateTimetableInput = {
   schedules: GradeDaySchedules;
   wholeCells: SetBlockCell[];
   partialCells: SetBlockCell[];
+  /** Slots where the teacher must not teach (weekday + period). */
+  forbiddenSlots?: TeacherForbiddenSlot[];
   /** Wall-clock budget for search (ms). */
   timeLimitMs?: number;
   restarts?: number;
@@ -760,6 +774,7 @@ export function generateTimetable(
     schedules,
     wholeCells,
     partialCells,
+    forbiddenSlots = [],
     timeLimitMs = 10_000,
     restarts = 20,
   } = input;
@@ -784,6 +799,7 @@ export function generateTimetable(
     catalog,
     teacherBusySeed,
   );
+  markTeacherBusyFromForbidden(forbiddenSlots, teacherBusySeed);
 
   const lessons = expandCommonLessons(teachers, subjects, classCounts);
 
@@ -884,3 +900,195 @@ export function cellsForTeacher(
 export function maxPeriods(schedules: GradeDaySchedules, grade: Grade): number {
   return Math.max(0, ...WEEKDAYS.map(({ key }) => schedules[grade][key] ?? 0));
 }
+
+function prepareBusySeeds(input: {
+  teachers: Teacher[];
+  subjects: GradeSubjects;
+  classCounts: GradeClassCounts;
+  wholeCells: SetBlockCell[];
+  partialCells: SetBlockCell[];
+  forbiddenSlots?: TeacherForbiddenSlot[];
+}): {
+  catalog: GradeSetInfo[];
+  setCells: TimetableCell[];
+  classBusySeed: Set<string>;
+  teacherBusySeed: Set<string>;
+} {
+  const catalog = catalogGradeSets(input.subjects, input.classCounts);
+  const setCells = buildSetCells({
+    wholeCells: input.wholeCells,
+    partialCells: input.partialCells,
+    subjects: input.subjects,
+    classCounts: input.classCounts,
+    teachers: input.teachers,
+    catalog,
+  });
+  const classBusySeed = new Set<string>();
+  const teacherBusySeed = new Set<string>();
+  markBusyFromSetCells(setCells, classBusySeed, teacherBusySeed);
+  markTeacherBusyFromBlocks(
+    input.wholeCells,
+    input.partialCells,
+    input.teachers,
+    catalog,
+    teacherBusySeed,
+  );
+  markTeacherBusyFromForbidden(input.forbiddenSlots ?? [], teacherBusySeed);
+  return { catalog, setCells, classBusySeed, teacherBusySeed };
+}
+
+export type TimetableSpaceUpperBound = {
+  /** Common lesson instances to place. */
+  lessonCount: number;
+  /**
+   * log10 of an independent-domain upper bound (identical lessons use P(n,k)).
+   * Null if some lesson already has zero free slots under SET locks.
+   */
+  log10UpperBound: number | null;
+  /** Human-readable ceiling, e.g. "약 10^412.3" or "0 (불가능)". */
+  upperBoundLabel: string;
+  zeroDomainGroups: number;
+  note: string;
+};
+
+/**
+ * Upper bound ignoring conflicts between different lesson groups.
+ * Same teacher/grade/class/subject hours share a domain and use P(n,k).
+ */
+export function estimateIndependentUpperBound(
+  input: Omit<GenerateTimetableInput, "timeLimitMs" | "restarts">,
+): TimetableSpaceUpperBound {
+  const { classBusySeed, teacherBusySeed } = prepareBusySeeds(input);
+  const lessons = expandCommonLessons(
+    input.teachers,
+    input.subjects,
+    input.classCounts,
+  );
+
+  type Group = { count: number; domain: number };
+  const groups = new Map<string, Group>();
+
+  for (const lesson of lessons) {
+    const key = unplacedKey(lesson);
+    const existing = groups.get(key);
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+    const domain = availableSlotsForLesson(
+      lesson,
+      input.schedules,
+      classBusySeed,
+      teacherBusySeed,
+    ).length;
+    groups.set(key, { count: 1, domain });
+  }
+
+  let zeroDomainGroups = 0;
+  let log10 = 0;
+  for (const g of groups.values()) {
+    if (g.domain <= 0 || g.count > g.domain) {
+      zeroDomainGroups += 1;
+      continue;
+    }
+    for (let i = 0; i < g.count; i++) {
+      log10 += Math.log10(g.domain - i);
+    }
+  }
+
+  if (zeroDomainGroups > 0) {
+    return {
+      lessonCount: lessons.length,
+      log10UpperBound: null,
+      upperBoundLabel: "0 (SET 잠금만으로도 후보 교시가 없는 수업 있음)",
+      zeroDomainGroups,
+      note: "서로 다른 수업 그룹 간 충돌은 무시하므로, 실제 해 개수보다 훨씬 큰 상한입니다.",
+    };
+  }
+
+  return {
+    lessonCount: lessons.length,
+    log10UpperBound: log10,
+    upperBoundLabel: `약 10^${log10.toFixed(1)}`,
+    zeroDomainGroups: 0,
+    note: "동일 (교사·학년·반·과목) 시수는 P(n,k)로, 서로 다른 그룹 간 충돌은 무시합니다. 실제 해보다 과대평가됩니다.",
+  };
+}
+
+/** Stable fingerprint of common-cell placement (SET cells ignored). */
+export function hashCommonPlacement(cells: TimetableCell[]): string {
+  const lines = cells
+    .filter((c) => c.kind === "common")
+    .map(
+      (c) =>
+        `${c.grade}|${c.classNo}|${c.day}|${c.period}|${c.subjectName}|${c.teacherName}`,
+    )
+    .sort();
+  // FNV-1a 32-bit over joined string (no Node crypto dependency at call sites)
+  let hash = 0x811c9dc5;
+  const text = lines.join("\n");
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+export type TimetableSpaceEstimate = {
+  upperBound: TimetableSpaceUpperBound;
+  samplesRequested: number;
+  samplesRun: number;
+  completeCount: number;
+  /** Lower bound from distinct complete samples. */
+  distinctComplete: number;
+  distinctHashes: string[];
+  failedCount: number;
+  elapsedMs: number;
+  summary: string;
+};
+
+export function estimateTimetableSpace(
+  input: GenerateTimetableInput & { samples?: number },
+): TimetableSpaceEstimate {
+  const samples = Math.min(10, Math.max(1, input.samples ?? 5));
+  const upperBound = estimateIndependentUpperBound(input);
+  const t0 = Date.now();
+  const hashes = new Set<string>();
+  let completeCount = 0;
+  let failedCount = 0;
+
+  for (let i = 0; i < samples; i++) {
+    const result = generateTimetable({
+      ...input,
+      timeLimitMs: input.timeLimitMs ?? 10_000,
+      restarts: input.restarts ?? 20,
+    });
+    if (result.status === "ready") {
+      completeCount += 1;
+      hashes.add(hashCommonPlacement(result.cells));
+    } else {
+      failedCount += 1;
+    }
+  }
+
+  const distinctComplete = hashes.size;
+  const elapsedMs = Date.now() - t0;
+  const summary = [
+    `상한 ${upperBound.upperBoundLabel}`,
+    `샘플 ${samples}회 중 완전해 ${completeCount}회`,
+    `서로 다른 완전해 최소 ${distinctComplete}개`,
+  ].join(" · ");
+
+  return {
+    upperBound,
+    samplesRequested: samples,
+    samplesRun: samples,
+    completeCount,
+    distinctComplete,
+    distinctHashes: [...hashes],
+    failedCount,
+    elapsedMs,
+    summary,
+  };
+}
+

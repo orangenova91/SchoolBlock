@@ -169,6 +169,35 @@ export function commonHoursByClass(
   return next;
 }
 
+export type ClassCommonHourBalance = {
+  grade: Grade;
+  perClass: number[];
+  min: number;
+  max: number;
+  balanced: boolean;
+};
+
+/** Per-grade common-hour totals by class; unbalanced if any class differs. */
+export function classCommonHourBalances(
+  teachers: Teacher[],
+  subjects: GradeSubjects,
+  classCounts: GradeClassCounts,
+): ClassCommonHourBalance[] {
+  const byGrade = commonHoursByClass(teachers, subjects, classCounts);
+  return GRADES.map((grade) => {
+    const perClass = byGrade[grade] ?? [];
+    const min = perClass.length > 0 ? Math.min(...perClass) : 0;
+    const max = perClass.length > 0 ? Math.max(...perClass) : 0;
+    return {
+      grade,
+      perClass,
+      min,
+      max,
+      balanced: perClass.length === 0 || min === max,
+    };
+  });
+}
+
 export function classCapacityIssues(
   teachers: Teacher[],
   subjects: GradeSubjects,

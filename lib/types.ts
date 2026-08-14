@@ -240,3 +240,16 @@ export type TimetableDocument = {
   updatedAt: Date;
   message?: string;
 };
+
+/** Teacher cannot be assigned any lesson at this weekday + period. */
+export type TeacherForbiddenSlot = {
+  teacherName: string;
+  day: Weekday;
+  period: number;
+};
+
+export type TeacherConstraintsDocument = {
+  termId: string;
+  forbiddenSlots: TeacherForbiddenSlot[];
+  updatedAt: Date;
+};

@@ -61,6 +61,8 @@ export function TimetableForm({ termId }: TimetableFormProps) {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [estimating, setEstimating] = useState(false);
+  const [estimateText, setEstimateText] = useState("");
   const [viewGrade, setViewGrade] = useState<Grade>(1);
   const [viewClass, setViewClass] = useState(1);
   const [error, setError] = useState("");
@@ -167,6 +169,58 @@ export function TimetableForm({ termId }: TimetableFormProps) {
     }
   }
 
+  async function handleEstimate() {
+    setEstimating(true);
+    setError("");
+    setEstimateText("");
+    try {
+      const response = await fetch(
+        `/api/terms/${termId}/timetable/estimate`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ samples: 5 }),
+        },
+      );
+      const data = (await response.json()) as {
+        error?: string;
+        summary?: string;
+        upperBound?: {
+          lessonCount?: number;
+          upperBoundLabel?: string;
+          note?: string;
+          log10UpperBound?: number | null;
+        };
+        completeCount?: number;
+        distinctComplete?: number;
+        failedCount?: number;
+        elapsedMs?: number;
+        distinctHashes?: string[];
+      };
+      if (!response.ok) {
+        setError(data.error ?? "해공간 추정에 실패했습니다.");
+        return;
+      }
+      const hashes = (data.distinctHashes ?? []).join(", ") || "(없음)";
+      setEstimateText(
+        [
+          data.summary ?? "",
+          `공통 수업 ${data.upperBound?.lessonCount ?? "?"}교시`,
+          data.upperBound?.note ?? "",
+          `소요 ${(data.elapsedMs ?? 0) / 1000}초 · 실패 ${data.failedCount ?? 0}회`,
+          `해시: ${hashes}`,
+          "※ 저장된 시간표는 변경하지 않습니다.",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+      );
+    } catch {
+      setError("서버에 연결할 수 없습니다.");
+    } finally {
+      setEstimating(false);
+    }
+  }
+
   if (loading) {
     return (
       <p className="text-sm text-zinc-600" role="status">
@@ -190,8 +244,8 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           시간표
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
-          SET 블록을 고정한 뒤 공통 수업을 자동으로 배치합니다. 나중에 교시
-          배정 불가·교과 블록 조건을 추가할 수 있습니다.
+          SET 블록을 고정하고 교사 배정 불가 교시를 반영한 뒤 공통 수업을
+          자동 배치합니다. 나중에 교과 블록 조건을 추가할 수 있습니다.
         </p>
       </header>
 
@@ -205,7 +259,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       <div className="flex flex-wrap items-center justify-center gap-2">
         <button
           type="button"
-          onClick={() => router.push(`/terms/${termId}/sets/partial`)}
+          onClick={() => router.push(`/terms/${termId}/constraints`)}
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
         >
           이전
@@ -215,7 +269,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           onClick={() => {
             void handleGenerate();
           }}
-          disabled={generating}
+          disabled={generating || estimating}
           className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {generating
@@ -223,6 +277,18 @@ export function TimetableForm({ termId }: TimetableFormProps) {
             : status === "idle"
               ? "시간표 생성"
               : "다시 생성"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            void handleEstimate();
+          }}
+          disabled={generating || estimating}
+          className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {estimating
+            ? "해공간 추정 중… (최대 약 1분)"
+            : "해공간 추정"}
         </button>
       </div>
 
@@ -235,6 +301,15 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         >
           {message}
         </p>
+      ) : null}
+
+      {estimateText ? (
+        <pre
+          role="status"
+          className="whitespace-pre-wrap rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-left text-xs leading-relaxed text-zinc-700"
+        >
+          {estimateText}
+        </pre>
       ) : null}
 
       {error ? (

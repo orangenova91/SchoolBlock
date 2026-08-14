@@ -10,6 +10,7 @@ import {
   wholeSetsPlacementComplete,
 } from "@/lib/set-blocks";
 import { ensureGradeSubjects, sanitizeGradeSubjects } from "@/lib/subjects";
+import { filterForbiddenSlots } from "@/lib/teacher-constraints";
 import { ensureTeachers, sanitizeTeachers } from "@/lib/teachers";
 import { generateTimetable } from "@/lib/timetable";
 import {
@@ -20,6 +21,7 @@ import {
   type DayScheduleDocument,
   type SetBlocksDocument,
   type SubjectsDocument,
+  type TeacherConstraintsDocument,
   type TeachersDocument,
   type TermDocument,
   type TimetableDocument,
@@ -102,12 +104,15 @@ export async function POST(_request: Request, context: RouteContext) {
     }
 
     const db = await getDb();
-    const [teachersDoc, subjectsDoc, scheduleDoc, setBlocksDoc] =
+    const [teachersDoc, subjectsDoc, scheduleDoc, setBlocksDoc, constraintsDoc] =
       await Promise.all([
         db.collection<TeachersDocument>("teachers").findOne({ termId }),
         db.collection<SubjectsDocument>("subjects").findOne({ termId }),
         db.collection<DayScheduleDocument>("daySchedules").findOne({ termId }),
         db.collection<SetBlocksDocument>("setBlocks").findOne({ termId }),
+        db
+          .collection<TeacherConstraintsDocument>("teacherConstraints")
+          .findOne({ termId }),
       ]);
 
     const teachers = sanitizeTeachers(
@@ -133,6 +138,11 @@ export async function POST(_request: Request, context: RouteContext) {
       schedules,
       catalog,
     );
+    const forbiddenSlots = filterForbiddenSlots(
+      constraintsDoc?.forbiddenSlots ?? [],
+      teachers,
+      schedules,
+    );
 
     if (!wholeSetsPlacementComplete(wholeCells, catalog)) {
       return NextResponse.json(
@@ -154,6 +164,7 @@ export async function POST(_request: Request, context: RouteContext) {
       schedules,
       wholeCells,
       partialCells,
+      forbiddenSlots,
       timeLimitMs: 15_000,
       restarts: 24,
     });

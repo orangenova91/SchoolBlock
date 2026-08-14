@@ -26,11 +26,17 @@ import {
   subjectSetBadgeClass,
 } from "@/lib/subjects";
 import {
+  classCommonHourBalances,
+  type ClassCommonHourBalance,
+} from "@/lib/set-blocks";
+import { sumWeekdayPeriods } from "@/lib/day-schedule";
+import {
   DEFAULT_SUBJECT_SET,
   GRADES,
   MAX_ASSIGNMENT_HOURS,
   MIN_ASSIGNMENT_HOURS,
   createDefaultClassCounts,
+  createDefaultGradeDaySchedules,
   createDefaultGradeSubjects,
   createDefaultTeachers,
   createEmptyTeacher,
@@ -38,6 +44,7 @@ import {
   type AssignmentItem,
   type Grade,
   type GradeClassCounts,
+  type GradeDaySchedules,
   type GradeSubjects,
   type Semester,
   type Subject,
@@ -389,6 +396,109 @@ function DraggableSubjectBadge({
   );
 }
 
+function ClassCommonHoursSummary({
+  balances,
+  schedules,
+}: {
+  balances: ClassCommonHourBalance[];
+  schedules: GradeDaySchedules;
+}) {
+  const hasImbalance = balances.some(
+    (b) => !b.balanced && b.perClass.length > 0,
+  );
+
+  return (
+    <section
+      className={`rounded-2xl border px-4 py-3 shadow-sm ${
+        hasImbalance
+          ? "border-amber-200 bg-amber-50"
+          : "border-zinc-200 bg-white"
+      }`}
+      aria-label="학반별 공통 시수 합계"
+    >
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h2
+          className={`text-sm font-semibold ${
+            hasImbalance ? "text-amber-950" : "text-zinc-900"
+          }`}
+        >
+          학반별 공통 시수 합계
+        </h2>
+        <p
+          className={`text-xs ${
+            hasImbalance ? "text-amber-800" : "text-zinc-500"
+          }`}
+        >
+          SET 제외 · 같은 학년은 학반마다 합이 같아야 합니다
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        {balances.map((balance) => {
+          const week = sumWeekdayPeriods(schedules[balance.grade]);
+          return (
+            <div
+              key={balance.grade}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm"
+            >
+              <span
+                className={`w-12 shrink-0 font-medium ${
+                  balance.balanced ? "text-zinc-700" : "text-amber-900"
+                }`}
+              >
+                {balance.grade}학년
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {balance.perClass.map((hours, index) => {
+                  const low =
+                    !balance.balanced && hours === balance.min;
+                  const high =
+                    !balance.balanced && hours === balance.max;
+                  return (
+                    <span
+                      key={index}
+                      className={`rounded-md px-1.5 py-0.5 text-xs tabular-nums ${
+                        low
+                          ? "bg-amber-200/80 font-semibold text-amber-950"
+                          : high
+                            ? "bg-white font-medium text-zinc-800 ring-1 ring-amber-300"
+                            : "bg-zinc-100 text-zinc-700"
+                      }`}
+                      title={
+                        week > 0
+                          ? `${balance.grade}학년 ${index + 1}반 공통 ${hours} · 주간 교시 ${week} (SET·부분 SET 별도)`
+                          : undefined
+                      }
+                    >
+                      {index + 1}반 {hours}
+                    </span>
+                  );
+                })}
+              </div>
+              {!balance.balanced && balance.perClass.length > 0 ? (
+                <span className="text-xs font-medium text-amber-800">
+                  차이 {balance.max - balance.min}
+                </span>
+              ) : week > 0 && balance.perClass.length > 0 ? (
+                <span className="text-xs text-zinc-500">
+                  공통 {balance.min} · 주간 {week}
+                </span>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      {hasImbalance ? (
+        <p className="mt-2 text-xs text-amber-900" role="alert">
+          학반별 공통 시수가 다른 학년이 있습니다. 시수가 적은 반(강조)의
+          학반 칸을 늘리거나, 많은 반을 줄여 맞춰 주세요.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function AssignmentHoursEditor({
   item,
   subject,
@@ -456,6 +566,9 @@ export function TeachersForm({ termId }: TeachersFormProps) {
   const [gradeClassCounts, setGradeClassCounts] = useState<GradeClassCounts>(
     createDefaultClassCounts(),
   );
+  const [schedules, setSchedules] = useState<GradeDaySchedules>(
+    createDefaultGradeDaySchedules(),
+  );
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<"idle" | "saving" | "success" | "error">(
     "idle",
@@ -494,6 +607,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
         };
         const scheduleData = (await scheduleRes.json()) as {
           classCounts?: GradeClassCounts;
+          grades?: GradeDaySchedules;
           error?: string;
         };
 
@@ -523,6 +637,11 @@ export function TeachersForm({ termId }: TeachersFormProps) {
             ? (scheduleData.classCounts ?? createDefaultClassCounts())
             : createDefaultClassCounts();
           setGradeClassCounts(loadedClassCounts);
+          setSchedules(
+            scheduleRes.ok
+              ? (scheduleData.grades ?? createDefaultGradeDaySchedules())
+              : createDefaultGradeDaySchedules(),
+          );
 
           const loadedTeachers = sanitizeTeachers(
             ensureTeachers(teachersData.teachers ?? createDefaultTeachers()),
@@ -908,6 +1027,19 @@ export function TeachersForm({ termId }: TeachersFormProps) {
       );
       return;
     }
+    const unbalanced = classCommonHourBalances(
+      teachers,
+      subjects,
+      gradeClassCounts,
+    ).filter((b) => !b.balanced && b.perClass.length > 0);
+    if (unbalanced.length > 0) {
+      const first = unbalanced[0];
+      setStatus("error");
+      setMessage(
+        `${first.grade}학년 학반별 공통 시수가 다릅니다. (최소 ${first.min} · 최대 ${first.max}) 학반 칸을 맞춰 주세요.`,
+      );
+      return;
+    }
     const ok = await saveTeachers("교사 명단이 저장되었습니다.");
     if (ok) router.push(`/terms/${termId}/sets`);
   }
@@ -917,6 +1049,16 @@ export function TeachersForm({ termId }: TeachersFormProps) {
     () => unmatchedSubjectHours(subjects, hoursBySubject).length === 0,
     [subjects, hoursBySubject],
   );
+  const classBalances = useMemo(
+    () => classCommonHourBalances(teachers, subjects, gradeClassCounts),
+    [teachers, subjects, gradeClassCounts],
+  );
+  const classHoursBalanced = useMemo(
+    () =>
+      classBalances.every((b) => b.balanced || b.perClass.length === 0),
+    [classBalances],
+  );
+  const canProceed = hoursComplete && classHoursBalanced;
 
   if (loading) {
     return (
@@ -961,6 +1103,11 @@ export function TeachersForm({ termId }: TeachersFormProps) {
           {term.school} · {term.academicYear}학년도 · {term.semester}학기
         </p>
       ) : null}
+
+      <ClassCommonHoursSummary
+        balances={classBalances}
+        schedules={schedules}
+      />
 
       <div className="grid w-full grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
         <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
@@ -1257,14 +1404,16 @@ export function TeachersForm({ termId }: TeachersFormProps) {
         </button>
         <span
           title={
-            hoursComplete
+            canProceed
               ? undefined
-              : "모든 교과의 배정 시수가 필요 시수와 같아야 합니다."
+              : !hoursComplete
+                ? "모든 교과의 배정 시수가 필요 시수와 같아야 합니다."
+                : "학년 내 학반별 공통 시수 합이 같아야 합니다."
           }
         >
           <button
             type="submit"
-            disabled={status === "saving" || !hoursComplete}
+            disabled={status === "saving" || !canProceed}
             className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {status === "saving" ? "저장 중…" : "다음"}
@@ -1276,6 +1425,11 @@ export function TeachersForm({ termId }: TeachersFormProps) {
         <p className="text-center text-xs text-zinc-500">
           교과 목록의 배정 시수와 필요 시수가 모두 일치해야 다음으로 진행할 수
           있습니다.
+        </p>
+      ) : !classHoursBalanced ? (
+        <p className="text-center text-xs text-zinc-500">
+          같은 학년의 학반별 공통 시수 합이 모두 같아야 다음으로 진행할 수
+          있습니다. (SET 시수는 제외)
         </p>
       ) : null}
 

@@ -209,3 +209,34 @@ export type SetBlocksDocument = {
   partialCells?: SetBlockCell[];
   updatedAt: Date;
 };
+
+export type TimetableCellKind = "common" | "set";
+
+export type TimetableCell = {
+  grade: Grade;
+  classNo: number;
+  day: Weekday;
+  period: number;
+  subjectName: string;
+  teacherName: string;
+  kind: TimetableCellKind;
+  set?: ElectiveSet;
+};
+
+export type TimetableUnplaced = {
+  teacherName: string;
+  grade: Grade;
+  classNo: number;
+  subjectName: string;
+  remaining: number;
+};
+
+export type TimetableDocument = {
+  termId: string;
+  status: "idle" | "ready" | "failed";
+  cells: TimetableCell[];
+  unplaced: TimetableUnplaced[];
+  generatedAt?: Date;
+  updatedAt: Date;
+  message?: string;
+};

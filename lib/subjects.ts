@@ -1,13 +1,16 @@
 import {
   DEFAULT_SUBJECT_CLASS_COUNT,
+  DEFAULT_SUBJECT_SET,
   GRADES,
   MAX_SUBJECT_CLASS_COUNT,
   MAX_SUBJECT_UNITS,
   MIN_SUBJECT_CLASS_COUNT,
   MIN_SUBJECT_UNITS,
+  SUBJECT_SETS,
   type Grade,
   type GradeSubjects,
   type Subject,
+  type SubjectSet,
 } from "@/lib/types";
 
 const HEADER_NAMES = new Set(["교과명", "과목명", "과목", "교과", "수업명", "name"]);
@@ -22,6 +25,46 @@ function parsePositiveIntInRange(
   return n;
 }
 
+export function parseSubjectSet(value: unknown): SubjectSet {
+  if (typeof value === "string" && (SUBJECT_SETS as string[]).includes(value)) {
+    return value as SubjectSet;
+  }
+  return DEFAULT_SUBJECT_SET;
+}
+
+export function nextSubjectSet(current: SubjectSet): SubjectSet {
+  const index = SUBJECT_SETS.indexOf(current);
+  const safeIndex = index >= 0 ? index : 0;
+  return SUBJECT_SETS[(safeIndex + 1) % SUBJECT_SETS.length];
+}
+
+/** Badge / button colors per subject set (A–I distinct). */
+export function subjectSetBadgeClass(set: SubjectSet | string | undefined): string {
+  switch (parseSubjectSet(set)) {
+    case "A":
+      return "border-rose-300 bg-rose-50 text-rose-800";
+    case "B":
+      return "border-orange-300 bg-orange-50 text-orange-800";
+    case "C":
+      return "border-amber-300 bg-amber-50 text-amber-900";
+    case "D":
+      return "border-lime-300 bg-lime-50 text-lime-900";
+    case "E":
+      return "border-emerald-300 bg-emerald-50 text-emerald-800";
+    case "F":
+      return "border-teal-300 bg-teal-50 text-teal-800";
+    case "G":
+      return "border-sky-300 bg-sky-50 text-sky-800";
+    case "H":
+      return "border-indigo-300 bg-indigo-50 text-indigo-800";
+    case "I":
+      return "border-fuchsia-300 bg-fuchsia-50 text-fuchsia-800";
+    case "공통":
+    default:
+      return "border-zinc-400 bg-zinc-100 text-zinc-700";
+  }
+}
+
 export function ensureGradeSubjects(
   value: Partial<Record<Grade | string, Subject[]>> | null | undefined,
 ): GradeSubjects {
@@ -29,6 +72,7 @@ export function ensureGradeSubjects(
   for (const grade of GRADES) {
     const list = value?.[grade] ?? value?.[String(grade)] ?? [];
     next[grade] = (Array.isArray(list) ? list : []).map((s) => ({
+      set: parseSubjectSet((s as Subject | undefined)?.set),
       name: typeof s?.name === "string" ? s.name : "",
       units:
         parsePositiveIntInRange(s?.units, MIN_SUBJECT_UNITS, MAX_SUBJECT_UNITS) ??
@@ -84,7 +128,12 @@ export function parseSubjectsFromClipboard(text: string): Subject[] {
         MAX_SUBJECT_CLASS_COUNT,
       ) ?? DEFAULT_SUBJECT_CLASS_COUNT;
 
-    subjects.push({ name, units, classCount });
+    subjects.push({
+      set: DEFAULT_SUBJECT_SET,
+      name,
+      units,
+      classCount,
+    });
   }
 
   return subjects;
@@ -101,7 +150,10 @@ export function parseGradeSubjects(value: unknown): GradeSubjects | null {
     if (Array.isArray(raw)) {
       for (const item of raw) {
         if (!item || typeof item !== "object") return null;
-        const { name, units, classCount } = item as Record<string, unknown>;
+        const { name, units, classCount, set } = item as Record<
+          string,
+          unknown
+        >;
         if (typeof name !== "string") return null;
         if (
           parsePositiveIntInRange(units, MIN_SUBJECT_UNITS, MAX_SUBJECT_UNITS) ===
@@ -119,6 +171,10 @@ export function parseGradeSubjects(value: unknown): GradeSubjects | null {
         ) {
           return null;
         }
+        if (set !== undefined && parseSubjectSet(set) !== set) {
+          // allow unknown sets to be coerced in ensure; only reject non-string non-undefined weird types
+          if (typeof set !== "string") return null;
+        }
       }
     }
   }
@@ -132,11 +188,13 @@ export function sanitizeGradeSubjects(subjects: GradeSubjects): GradeSubjects {
   for (const grade of GRADES) {
     next[grade] = ensured[grade]
       .map((s) => ({
+        set: parseSubjectSet(s.set),
         name: s.name.trim(),
         units: s.units,
         classCount: s.classCount,
       }))
-      .filter((s) => s.name.length > 0);
+      .filter((s) => s.name.length > 0)
+      .sort((a, b) => a.name.localeCompare(b.name, "ko"));
   }
   return next;
 }

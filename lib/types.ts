@@ -76,7 +76,41 @@ export function createDefaultClassCounts(
   };
 }
 
+export type SubjectSet =
+  | "공통"
+  | "A"
+  | "B"
+  | "C"
+  | "D"
+  | "E"
+  | "F"
+  | "G"
+  | "H"
+  | "I";
+
+export const SUBJECT_SETS: SubjectSet[] = [
+  "공통",
+  "A",
+  "B",
+  "C",
+  "D",
+  "E",
+  "F",
+  "G",
+  "H",
+  "I",
+];
+
+export const DEFAULT_SUBJECT_SET: SubjectSet = "공통";
+
+export type ElectiveSet = Exclude<SubjectSet, typeof DEFAULT_SUBJECT_SET>;
+
+export const ELECTIVE_SETS: ElectiveSet[] = SUBJECT_SETS.filter(
+  (set): set is ElectiveSet => set !== DEFAULT_SUBJECT_SET,
+);
+
 export type Subject = {
+  set: SubjectSet;
   name: string;
   units: number;
   classCount: number;
@@ -99,6 +133,7 @@ export const DEFAULT_SUBJECT_CLASS_COUNT = 1;
 
 export function createEmptySubject(): Subject {
   return {
+    set: DEFAULT_SUBJECT_SET,
     name: "",
     units: MIN_SUBJECT_UNITS,
     classCount: DEFAULT_SUBJECT_CLASS_COUNT,
@@ -112,3 +147,57 @@ export function createDefaultGradeSubjects(): GradeSubjects {
     3: [createEmptySubject()],
   };
 }
+
+export type AssignmentItem = {
+  name: string;
+  /** Per-class hours for 공통; length 1 for SET. */
+  classHours: number[];
+  /** Sum of classHours (kept for totals / CSV). */
+  hours: number;
+};
+
+export type TeacherAssignments = Record<Grade, AssignmentItem[]>;
+
+export type Teacher = {
+  name: string;
+  assignments: TeacherAssignments;
+};
+
+export type TeachersDocument = {
+  termId: string;
+  teachers: Teacher[];
+  updatedAt: Date;
+};
+
+export const MIN_ASSIGNMENT_HOURS = 1;
+export const MAX_ASSIGNMENT_HOURS = 40;
+export const DEFAULT_ASSIGNMENT_HOURS = 1;
+
+/** Per-class / SET badge click cycle: 0 … MAX → 0 */
+export const MIN_CELL_HOURS = 0;
+export const MAX_CELL_HOURS = 10;
+
+export function createEmptyTeacherAssignments(): TeacherAssignments {
+  return { 1: [], 2: [], 3: [] };
+}
+
+export function createEmptyTeacher(): Teacher {
+  return { name: "", assignments: createEmptyTeacherAssignments() };
+}
+
+export function createDefaultTeachers(): Teacher[] {
+  return [createEmptyTeacher()];
+}
+
+export type SetBlockCell = {
+  grade: Grade;
+  set: ElectiveSet;
+  day: Weekday;
+  period: number;
+};
+
+export type SetBlocksDocument = {
+  termId: string;
+  cells: SetBlockCell[];
+  updatedAt: Date;
+};

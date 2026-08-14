@@ -8,8 +8,10 @@ import {
   applyClassCountsFromClipboard,
   ensureGradeSubjects,
   sanitizeGradeSubjects,
+  subjectSetBadgeClass,
 } from "@/lib/subjects";
 import {
+  DEFAULT_SUBJECT_SET,
   GRADES,
   MAX_SUBJECT_CLASS_COUNT,
   MIN_SUBJECT_CLASS_COUNT,
@@ -33,11 +35,12 @@ type TermSummary = {
   semester: Semester;
 };
 
+type FormMode = "edit" | "classCount";
+
 type SubjectsFormProps = {
   termId: string;
+  initialStep?: FormMode;
 };
-
-type FormMode = "edit" | "classCount";
 
 type GradeScheduleTotal = {
   classCount: number;
@@ -145,10 +148,15 @@ function SubjectClassCountEditor({
                     <table className="w-full border-collapse text-sm">
                       <thead>
                         <tr className="border-b border-zinc-200 text-left text-zinc-600">
+                          <th className="w-14 px-1 py-2 text-center font-medium">
+                            set
+                          </th>
                           <th className="px-2 py-2 font-medium">교과명</th>
-                          <th className="w-24 px-2 py-2 font-medium">단위수</th>
-                          <th className="w-28 px-2 py-2 font-medium">
-                            수업 학반 수
+                          <th className="w-12 px-1 py-2 text-center font-medium">
+                            단위수
+                          </th>
+                          <th className="w-14 px-1 py-2 text-center font-medium">
+                            학반수
                           </th>
                         </tr>
                       </thead>
@@ -158,13 +166,20 @@ function SubjectClassCountEditor({
                             key={`${grade}-${index}-${row.name}`}
                             className="border-b border-zinc-100"
                           >
+                            <td className="px-1 py-1.5 text-center">
+                              <span
+                                className={`inline-block min-w-[2.5rem] rounded-md border px-1.5 py-0.5 text-xs font-medium ${subjectSetBadgeClass(row.set)}`}
+                              >
+                                {row.set ?? DEFAULT_SUBJECT_SET}
+                              </span>
+                            </td>
                             <td className="px-2 py-1.5 font-medium text-zinc-900">
                               {row.name}
                             </td>
-                            <td className="px-2 py-1.5 text-center text-zinc-600">
+                            <td className="px-1 py-1.5 text-center tabular-nums text-zinc-600">
                               {row.units}
                             </td>
-                            <td className="px-2 py-1.5">
+                            <td className="px-1 py-1.5">
                               <input
                                 type="number"
                                 min={MIN_SUBJECT_CLASS_COUNT}
@@ -190,7 +205,7 @@ function SubjectClassCountEditor({
                                 }}
                                 onPaste={(e) => handlePaste(grade, e)}
                                 aria-label={`${grade}학년 ${row.name} 수업 학반 수`}
-                                className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-center text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                                className="w-full rounded-md border border-zinc-300 px-1 py-1.5 text-center text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
                               />
                             </td>
                           </tr>
@@ -295,13 +310,16 @@ function SubjectClassCountEditor({
   );
 }
 
-export function SubjectsForm({ termId }: SubjectsFormProps) {
+export function SubjectsForm({
+  termId,
+  initialStep = "edit",
+}: SubjectsFormProps) {
   const router = useRouter();
   const [term, setTerm] = useState<TermSummary | null>(null);
   const [subjects, setSubjects] = useState<GradeSubjects>(
     createDefaultGradeSubjects(),
   );
-  const [mode, setMode] = useState<FormMode>("edit");
+  const [mode, setMode] = useState<FormMode>(initialStep);
   const [scheduleTotals, setScheduleTotals] = useState<Record<
     Grade,
     GradeScheduleTotal
@@ -345,7 +363,9 @@ export function SubjectsForm({ termId }: SubjectsFormProps) {
           setSubjects(
             hasSaved ? withEditRows(loaded) : createDefaultGradeSubjects(),
           );
-          setMode("edit");
+          setMode(
+            hasSaved && initialStep === "classCount" ? "classCount" : "edit",
+          );
           setStatus("idle");
         }
       } catch {
@@ -362,7 +382,7 @@ export function SubjectsForm({ termId }: SubjectsFormProps) {
     return () => {
       cancelled = true;
     };
-  }, [termId]);
+  }, [termId, initialStep]);
 
   useEffect(() => {
     if (mode !== "classCount") return;
@@ -537,10 +557,11 @@ export function SubjectsForm({ termId }: SubjectsFormProps) {
       return;
     }
 
-    await saveSubjects(subjects, {
+    const ok = await saveSubjects(subjects, {
       successMessage: "수업 학반 수가 저장되었습니다.",
       nextMode: "classCount",
     });
+    if (ok) router.push(`/terms/${termId}/teachers`);
   }
 
   if (loading) {

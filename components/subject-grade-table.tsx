@@ -1,13 +1,14 @@
 "use client";
 
 import {
+  DEFAULT_SUBJECT_SET,
   MAX_SUBJECT_UNITS,
   MIN_SUBJECT_UNITS,
   createEmptySubject,
   type Grade,
   type Subject,
 } from "@/lib/types";
-import { parseSubjectsFromClipboard } from "@/lib/subjects";
+import { nextSubjectSet, parseSubjectsFromClipboard, subjectSetBadgeClass } from "@/lib/subjects";
 
 type SubjectGradeTableProps = {
   grade: Grade;
@@ -25,6 +26,12 @@ export function SubjectGradeTable({
   function updateRow(index: number, patch: Partial<Subject>) {
     const base = subjects.length > 0 ? subjects : [createEmptySubject()];
     onChange(base.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  }
+
+  function cycleSet(index: number) {
+    const base = subjects.length > 0 ? subjects : [createEmptySubject()];
+    const current = base[index]?.set ?? DEFAULT_SUBJECT_SET;
+    updateRow(index, { set: nextSubjectSet(current) });
   }
 
   function addRow() {
@@ -64,8 +71,9 @@ export function SubjectGradeTable({
         >
           <thead>
             <tr className="border-b border-zinc-200 text-left text-zinc-600">
+              <th className="w-14 px-1 py-2 text-center font-medium">set</th>
               <th className="px-2 py-2 font-medium">교과명</th>
-              <th className="w-24 px-2 py-2 font-medium">단위수</th>
+              <th className="w-12 px-1 py-2 text-center font-medium">단위수</th>
               <th className="w-14 px-2 py-2 font-medium">
                 <span className="sr-only">삭제</span>
               </th>
@@ -74,6 +82,17 @@ export function SubjectGradeTable({
           <tbody>
             {rows.map((row, index) => (
               <tr key={index} className="border-b border-zinc-100">
+                <td className="px-1 py-1.5 text-center">
+                  <button
+                    type="button"
+                    onClick={() => cycleSet(index)}
+                    aria-label={`${grade}학년 set 변경, 현재 ${row.set ?? DEFAULT_SUBJECT_SET}`}
+                    title="클릭하여 set 변경"
+                    className={`min-w-[2.5rem] rounded-md border px-1.5 py-1.5 text-xs font-medium transition hover:opacity-90 ${subjectSetBadgeClass(row.set)}`}
+                  >
+                    {row.set ?? DEFAULT_SUBJECT_SET}
+                  </button>
+                </td>
                 <td className="px-2 py-1.5">
                   <input
                     type="text"
@@ -84,7 +103,7 @@ export function SubjectGradeTable({
                     className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
                   />
                 </td>
-                <td className="px-2 py-1.5">
+                <td className="px-1 py-1.5">
                   <input
                     type="number"
                     min={MIN_SUBJECT_UNITS}
@@ -97,7 +116,7 @@ export function SubjectGradeTable({
                       updateRow(index, { units: n });
                     }}
                     aria-label={`${grade}학년 단위수 ${index + 1}`}
-                    className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-center text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                    className="w-full rounded-md border border-zinc-300 px-1 py-1.5 text-center text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
                   />
                 </td>
                 <td className="px-2 py-1.5 text-center">

@@ -114,6 +114,12 @@ export type Subject = {
   name: string;
   units: number;
   classCount: number;
+  /**
+   * Partial SET: section id (1-based).
+   * 1…gradeClassCount = home room; gradeClassCount+1 = +α (이동 분반, one slot).
+   * SET subjects always use classCount = 1.
+   */
+  classNo?: number;
 };
 
 export type GradeSubjects = Record<Grade, Subject[]>;
@@ -199,5 +205,7 @@ export type SetBlockCell = {
 export type SetBlocksDocument = {
   termId: string;
   cells: SetBlockCell[];
+  /** Partial SET placements; multiple SETs may share a slot if home-rooms do not overlap. */
+  partialCells?: SetBlockCell[];
   updatedAt: Date;
 };

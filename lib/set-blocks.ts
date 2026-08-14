@@ -23,7 +23,12 @@ export type GradeSetInfo = {
   kind: GradeSetKind;
   units: number | null;
   classSum: number;
-  subjects: { name: string; units: number; classCount: number }[];
+  subjects: {
+    name: string;
+    units: number;
+    classCount: number;
+    classNo?: number;
+  }[];
 };
 
 export type SetTeacherShare = {
@@ -76,6 +81,9 @@ export function catalogGradeSets(
         name: subject.name,
         units: subject.units,
         classCount: subject.classCount,
+        ...(typeof subject.classNo === "number"
+          ? { classNo: subject.classNo }
+          : {}),
       });
       grouped.set(subject.set, list);
     }
@@ -445,4 +453,450 @@ export function wholeSetsPlacementComplete(
 
 export function catalogHasInvalidSets(catalog: GradeSetInfo[]): boolean {
   return catalog.some((item) => item.kind === "invalid");
+}
+
+export function partialGradeSets(catalog: GradeSetInfo[]): GradeSetInfo[] {
+  return catalog.filter(
+    (item) => item.kind === "partial" && item.units !== null,
+  );
+}
+
+/** Home rooms (1…N) that take this partial SET. Excludes +α. */
+export function homeRoomsForPartialSet(
+  info: GradeSetInfo,
+  gradeClassCount: number,
+): number[] {
+  const rooms = new Set<number>();
+  for (const subject of info.subjects) {
+    if (
+      typeof subject.classNo === "number" &&
+      subject.classNo >= 1 &&
+      subject.classNo <= gradeClassCount
+    ) {
+      rooms.add(subject.classNo);
+    }
+  }
+  return [...rooms].sort((a, b) => a - b);
+}
+
+export function partialSetHasAlpha(
+  info: GradeSetInfo,
+  gradeClassCount: number,
+): boolean {
+  return info.subjects.some(
+    (s) =>
+      typeof s.classNo === "number" && s.classNo === gradeClassCount + 1,
+  );
+}
+
+export function roomsOverlap(a: number[], b: number[]): boolean {
+  const setB = new Set(b);
+  return a.some((n) => setB.has(n));
+}
+
+export function parsePartialSetBlockCells(
+  value: unknown,
+): SetBlockCell[] | null {
+  if (!Array.isArray(value)) return null;
+
+  const cells: SetBlockCell[] = [];
+  const seen = new Set<string>();
+
+  for (const item of value) {
+    if (!item || typeof item !== "object") return null;
+    const { grade, set, day, period } = item as Record<string, unknown>;
+
+    if (grade !== 1 && grade !== 2 && grade !== 3) return null;
+    if (!isElectiveSet(set)) return null;
+    if (typeof day !== "string" || !WEEKDAY_KEYS.has(day)) return null;
+    if (
+      typeof period !== "number" ||
+      !Number.isInteger(period) ||
+      period < 1 ||
+      period > MAX_PERIODS
+    ) {
+      return null;
+    }
+
+    const key = `${grade}:${set}:${day}:${period}`;
+    if (seen.has(key)) return null;
+    seen.add(key);
+
+    cells.push({
+      grade,
+      set,
+      day: day as Weekday,
+      period,
+    });
+  }
+
+  return cells;
+}
+
+export function filterPartialCellsToCatalog(
+  cells: SetBlockCell[],
+  schedules: GradeDaySchedules,
+  catalog: GradeSetInfo[],
+): SetBlockCell[] {
+  const partial = new Set(
+    partialGradeSets(catalog).map((item) => `${item.grade}:${item.set}`),
+  );
+
+  return cells.filter((cell) => {
+    const allowed = schedules[cell.grade]?.[cell.day] ?? 0;
+    if (cell.period < 1 || cell.period > allowed) return false;
+    return partial.has(`${cell.grade}:${cell.set}`);
+  });
+}
+
+export function countPartialPlaced(
+  cells: SetBlockCell[],
+  grade: Grade,
+  set: ElectiveSet,
+): number {
+  return cells.filter((cell) => cell.grade === grade && cell.set === set)
+    .length;
+}
+
+export function partialSetsAtSlot(
+  cells: SetBlockCell[],
+  grade: Grade,
+  day: Weekday,
+  period: number,
+): ElectiveSet[] {
+  return cells
+    .filter(
+      (cell) =>
+        cell.grade === grade && cell.day === day && cell.period === period,
+    )
+    .map((cell) => cell.set);
+}
+
+export function removePartialCell(
+  cells: SetBlockCell[],
+  grade: Grade,
+  set: ElectiveSet,
+  day: Weekday,
+  period: number,
+): SetBlockCell[] {
+  return cells.filter(
+    (cell) =>
+      !(
+        cell.grade === grade &&
+        cell.set === set &&
+        cell.day === day &&
+        cell.period === period
+      ),
+  );
+}
+
+export function partialRoomConflictAt(
+  partialCells: SetBlockCell[],
+  catalog: GradeSetInfo[],
+  classCounts: GradeClassCounts,
+  grade: Grade,
+  set: ElectiveSet,
+  day: Weekday,
+  period: number,
+): ElectiveSet[] {
+  const target = findGradeSet(catalog, grade, set);
+  if (!target || target.kind !== "partial") return [];
+
+  const myRooms = homeRoomsForPartialSet(target, classCounts[grade]);
+  if (myRooms.length === 0) return [];
+
+  const conflicts: ElectiveSet[] = [];
+  for (const otherSet of partialSetsAtSlot(partialCells, grade, day, period)) {
+    if (otherSet === set) continue;
+    const other = findGradeSet(catalog, grade, otherSet);
+    if (!other || other.kind !== "partial") continue;
+    const otherRooms = homeRoomsForPartialSet(other, classCounts[grade]);
+    if (roomsOverlap(myRooms, otherRooms)) conflicts.push(otherSet);
+  }
+  return conflicts;
+}
+
+export function partialTeacherConflictAt(
+  wholeCells: SetBlockCell[],
+  partialCells: SetBlockCell[],
+  teachers: Teacher[],
+  catalog: GradeSetInfo[],
+  grade: Grade,
+  set: ElectiveSet,
+  day: Weekday,
+  period: number,
+): string[] {
+  const target = findGradeSet(catalog, grade, set);
+  if (!target || target.kind !== "partial") return [];
+
+  const busy = new Set(teachersForGradeSet(teachers, target));
+  if (busy.size === 0) return [];
+
+  const conflicts = new Set<string>();
+
+  // Same grade: other partial SETs in this slot
+  for (const otherSet of partialSetsAtSlot(partialCells, grade, day, period)) {
+    if (otherSet === set) continue;
+    const other = findGradeSet(catalog, grade, otherSet);
+    if (!other) continue;
+    for (const name of teachersForGradeSet(teachers, other)) {
+      if (busy.has(name)) conflicts.add(name);
+    }
+  }
+
+  // All grades: whole SETs at this slot
+  for (const otherGrade of GRADES) {
+    const wholeSet = setAtCell(wholeCells, otherGrade, day, period);
+    if (!wholeSet) continue;
+    const other = findGradeSet(catalog, otherGrade, wholeSet);
+    if (!other) continue;
+    for (const name of teachersForGradeSet(teachers, other)) {
+      if (busy.has(name)) conflicts.add(name);
+    }
+  }
+
+  // Other grades: partial SETs at this slot
+  for (const otherGrade of GRADES) {
+    if (otherGrade === grade) continue;
+    for (const otherSet of partialSetsAtSlot(
+      partialCells,
+      otherGrade,
+      day,
+      period,
+    )) {
+      const other = findGradeSet(catalog, otherGrade, otherSet);
+      if (!other) continue;
+      for (const name of teachersForGradeSet(teachers, other)) {
+        if (busy.has(name)) conflicts.add(name);
+      }
+    }
+  }
+
+  return [...conflicts];
+}
+
+export function blockedPartialSlotsForSet(
+  wholeCells: SetBlockCell[],
+  partialCells: SetBlockCell[],
+  teachers: Teacher[],
+  catalog: GradeSetInfo[],
+  classCounts: GradeClassCounts,
+  schedules: GradeDaySchedules,
+  grade: Grade,
+  set: ElectiveSet,
+): Map<string, string> {
+  const blocked = new Map<string, string>();
+  const periods = schedules[grade];
+  if (!periods) return blocked;
+
+  for (const { key: day } of WEEKDAYS) {
+    const count = periods[day];
+    for (let period = 1; period <= count; period++) {
+      const key = slotKey(day, period);
+      if (setAtCell(wholeCells, grade, day, period)) {
+        blocked.set(key, "전학년 SET");
+        continue;
+      }
+      if (partialSetsAtSlot(partialCells, grade, day, period).includes(set)) {
+        continue;
+      }
+      const rooms = partialRoomConflictAt(
+        partialCells,
+        catalog,
+        classCounts,
+        grade,
+        set,
+        day,
+        period,
+      );
+      if (rooms.length > 0) {
+        blocked.set(key, `학반 겹침: ${rooms.join(", ")}`);
+        continue;
+      }
+      const teachersConflict = partialTeacherConflictAt(
+        wholeCells,
+        partialCells,
+        teachers,
+        catalog,
+        grade,
+        set,
+        day,
+        period,
+      );
+      if (teachersConflict.length > 0) {
+        blocked.set(key, `교사: ${teachersConflict.join(", ")}`);
+      }
+    }
+  }
+
+  return blocked;
+}
+
+export function tryPaintPartialCell({
+  wholeCells,
+  partialCells,
+  catalog,
+  classCounts,
+  teachers,
+  schedules,
+  grade,
+  set,
+  day,
+  period,
+}: {
+  wholeCells: SetBlockCell[];
+  partialCells: SetBlockCell[];
+  catalog: GradeSetInfo[];
+  classCounts: GradeClassCounts;
+  teachers: Teacher[];
+  schedules: GradeDaySchedules;
+  grade: Grade;
+  set: ElectiveSet;
+  day: Weekday;
+  period: number;
+}): { cells: SetBlockCell[]; error?: string } {
+  const info = findGradeSet(catalog, grade, set);
+  if (!info || info.kind !== "partial" || info.units === null) {
+    return { cells: partialCells, error: "부분 SET만 배치할 수 있습니다." };
+  }
+
+  const allowed = schedules[grade]?.[day] ?? 0;
+  if (period < 1 || period > allowed) {
+    return { cells: partialCells, error: "수업이 없는 교시입니다." };
+  }
+
+  if (setAtCell(wholeCells, grade, day, period)) {
+    return { cells: partialCells, error: "전학년 SET가 있는 칸입니다." };
+  }
+
+  if (partialSetsAtSlot(partialCells, grade, day, period).includes(set)) {
+    return { cells: partialCells };
+  }
+
+  if (countPartialPlaced(partialCells, grade, set) >= info.units) {
+    return {
+      cells: partialCells,
+      error: `${grade}학년 SET ${set}는 ${info.units}교시까지 배치할 수 있습니다.`,
+    };
+  }
+
+  const roomConflicts = partialRoomConflictAt(
+    partialCells,
+    catalog,
+    classCounts,
+    grade,
+    set,
+    day,
+    period,
+  );
+  if (roomConflicts.length > 0) {
+    return {
+      cells: partialCells,
+      error: `같은 시간에 학반이 겹치는 SET: ${roomConflicts.join(", ")}`,
+    };
+  }
+
+  const teacherConflicts = partialTeacherConflictAt(
+    wholeCells,
+    partialCells,
+    teachers,
+    catalog,
+    grade,
+    set,
+    day,
+    period,
+  );
+  if (teacherConflicts.length > 0) {
+    return {
+      cells: partialCells,
+      error: `같은 시간에 이미 배치된 교사: ${teacherConflicts.join(", ")}`,
+    };
+  }
+
+  return {
+    cells: [...partialCells, { grade, set, day, period }],
+  };
+}
+
+export function partialSetsPlacementComplete(
+  cells: SetBlockCell[],
+  catalog: GradeSetInfo[],
+): boolean {
+  const partials = partialGradeSets(catalog);
+  if (partials.length === 0) return true;
+  return partials.every(
+    (item) =>
+      countPartialPlaced(cells, item.grade, item.set) === (item.units ?? 0),
+  );
+}
+
+/** Partial SET hours locked onto each home room (excludes +α). */
+export function partialSetHoursByClass(
+  catalog: GradeSetInfo[],
+  classCounts: GradeClassCounts,
+): Record<Grade, number[]> {
+  const next = {} as Record<Grade, number[]>;
+  for (const grade of GRADES) {
+    const n = classCounts[grade];
+    const per = Array.from({ length: n }, () => 0);
+    for (const info of partialGradeSets(catalog)) {
+      if (info.grade !== grade || info.units === null) continue;
+      for (const room of homeRoomsForPartialSet(info, n)) {
+        if (room >= 1 && room <= n) per[room - 1] += info.units;
+      }
+    }
+    next[grade] = per;
+  }
+  return next;
+}
+
+export function partialClassCapacityIssues(
+  teachers: Teacher[],
+  subjects: GradeSubjects,
+  classCounts: GradeClassCounts,
+  schedules: GradeDaySchedules,
+  catalog: GradeSetInfo[],
+): ClassCapacityIssue[] {
+  const common = commonHoursByClass(teachers, subjects, classCounts);
+  const partialHours = partialSetHoursByClass(catalog, classCounts);
+  const issues: ClassCapacityIssue[] = [];
+
+  for (const grade of GRADES) {
+    const weekdaySum = sumWeekdayPeriods(schedules[grade]);
+    const wholeHours = wholeGradeSetHours(catalog, grade);
+    const perClass = common[grade] ?? [];
+    const partial = partialHours[grade] ?? [];
+    perClass.forEach((commonHours, index) => {
+      const setHours = wholeHours + (partial[index] ?? 0);
+      if (commonHours + setHours > weekdaySum) {
+        issues.push({
+          grade,
+          classNo: index + 1,
+          commonHours,
+          setHours,
+          weekdaySum,
+        });
+      }
+    });
+  }
+
+  return issues;
+}
+
+export function partialSetsMissingClassNos(
+  catalog: GradeSetInfo[],
+  classCounts: GradeClassCounts,
+): string | null {
+  for (const info of partialGradeSets(catalog)) {
+    const n = classCounts[info.grade];
+    for (const subject of info.subjects) {
+      if (subject.classNo === undefined) {
+        return `${info.grade}학년 SET ${info.set}의 "${subject.name}"에 학반이 없습니다. 교과 설정(2/2)에서 지정해 주세요.`;
+      }
+      if (subject.classNo < 1 || subject.classNo > n + 1) {
+        return `${info.grade}학년 SET ${info.set}의 "${subject.name}" 학반 번호가 올바르지 않습니다.`;
+      }
+    }
+  }
+  return null;
 }

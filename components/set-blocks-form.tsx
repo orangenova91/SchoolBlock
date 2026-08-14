@@ -316,7 +316,8 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    await saveCells("SET 블록이 저장되었습니다.", true);
+    const ok = await saveCells("SET 블록이 저장되었습니다.", true);
+    if (ok) router.push(`/terms/${termId}/sets/partial`);
   }
 
   if (loading) {
@@ -343,8 +344,8 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
           전학년 SET를 요일·교시에 배치하세요. 같은 칸에는 SET 하나만 들어갈 수
-          있고, 다른 학년과 교사가 겹치는 시간은 막을 수 없습니다. 부분 SET는
-          다음 단계에서 다룹니다.
+          있고, 다른 학년과 교사가 겹치는 시간은 막을 수 없습니다. 다음에서 부분
+          SET를 배치합니다.
         </p>
       </header>
 

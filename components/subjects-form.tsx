@@ -5,12 +5,20 @@ import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { SubjectGradeTable } from "@/components/subject-grade-table";
 import { sumWeekdayPeriods } from "@/lib/day-schedule";
 import {
+  alignSetClassNos,
   applyClassCountsFromClipboard,
+  classNoLabel,
   ensureGradeSubjects,
+  isElectiveSubjectSet,
+  partialClassNoOptions,
   sanitizeGradeSubjects,
+  setClassKind,
   subjectSetBadgeClass,
+  usedClassNosInSet,
+  validateSetClassAssignments,
 } from "@/lib/subjects";
 import {
+  DEFAULT_SUBJECT_CLASS_COUNT,
   DEFAULT_SUBJECT_SET,
   GRADES,
   MAX_SUBJECT_CLASS_COUNT,
@@ -19,6 +27,7 @@ import {
   createDefaultGradeDaySchedules,
   createDefaultGradeSubjects,
   createEmptySubject,
+  type ElectiveSet,
   type Grade,
   type GradeClassCounts,
   type GradeDaySchedules,
@@ -109,7 +118,6 @@ function SubjectClassCountEditor({
   ) {
     const text = event.clipboardData.getData("text/plain");
     if (!text.trim()) return;
-    // 한 칸에 숫자 하나만 붙이는 경우는 기본 입력 동작 유지
     if (!text.includes("\n") && !text.includes("\r")) return;
 
     const applied = applyClassCountsFromClipboard(subjects[grade], text);
@@ -126,6 +134,7 @@ function SubjectClassCountEditor({
           const rows = subjects[grade];
           const totalHours = gradeTotalHours(rows);
           const isSaving = savingGrade === grade;
+          const gradeClassCount = scheduleTotals?.[grade]?.classCount;
 
           return (
             <section
@@ -161,55 +170,141 @@ function SubjectClassCountEditor({
                         </tr>
                       </thead>
                       <tbody>
-                        {rows.map((row, index) => (
-                          <tr
-                            key={`${grade}-${index}-${row.name}`}
-                            className="border-b border-zinc-100"
-                          >
-                            <td className="px-1 py-1.5 text-center">
-                              <span
-                                className={`inline-block min-w-[2.5rem] rounded-md border px-1.5 py-0.5 text-xs font-medium ${subjectSetBadgeClass(row.set)}`}
-                              >
-                                {row.set ?? DEFAULT_SUBJECT_SET}
-                              </span>
-                            </td>
-                            <td className="px-2 py-1.5 font-medium text-zinc-900">
-                              {row.name}
-                            </td>
-                            <td className="px-1 py-1.5 text-center tabular-nums text-zinc-600">
-                              {row.units}
-                            </td>
-                            <td className="px-1 py-1.5">
-                              <input
-                                type="number"
-                                min={MIN_SUBJECT_CLASS_COUNT}
-                                max={MAX_SUBJECT_CLASS_COUNT}
-                                value={row.classCount}
-                                onChange={(e) => {
-                                  const n = Number(e.target.value);
-                                  if (!Number.isInteger(n)) return;
-                                  if (
-                                    n < MIN_SUBJECT_CLASS_COUNT ||
-                                    n > MAX_SUBJECT_CLASS_COUNT
-                                  ) {
-                                    return;
-                                  }
-                                  onChange(
-                                    grade,
-                                    rows.map((item, i) =>
-                                      i === index
-                                        ? { ...item, classCount: n }
-                                        : item,
-                                    ),
-                                  );
-                                }}
-                                onPaste={(e) => handlePaste(grade, e)}
-                                aria-label={`${grade}학년 ${row.name} 수업 학반 수`}
-                                className="w-full rounded-md border border-zinc-300 px-1 py-1.5 text-center text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
-                              />
-                            </td>
-                          </tr>
-                        ))}
+                        {rows.map((row, index) => {
+                          const elective = isElectiveSubjectSet(row.set);
+                          const kind =
+                            elective && gradeClassCount
+                              ? setClassKind(
+                                  rows,
+                                  row.set as ElectiveSet,
+                                  gradeClassCount,
+                                )
+                              : null;
+                          const showClassDropdown = kind === "partial";
+                          const used =
+                            showClassDropdown && elective
+                              ? usedClassNosInSet(
+                                  rows,
+                                  row.set as ElectiveSet,
+                                  index,
+                                )
+                              : new Set<number>();
+
+                          return (
+                            <tr
+                              key={`${grade}-${index}-${row.name}`}
+                              className="border-b border-zinc-100"
+                            >
+                              <td className="px-1 py-1.5 text-center">
+                                <span
+                                  className={`inline-block min-w-[2.5rem] rounded-md border px-1.5 py-0.5 text-xs font-medium ${subjectSetBadgeClass(row.set)}`}
+                                >
+                                  {row.set ?? DEFAULT_SUBJECT_SET}
+                                </span>
+                              </td>
+                              <td className="px-2 py-1.5">
+                                <div className="flex min-w-0 items-center gap-1.5">
+                                  <span className="min-w-0 flex-1 truncate font-medium text-zinc-900">
+                                    {row.name}
+                                  </span>
+                                  {kind === "whole" ? (
+                                    <span className="shrink-0 text-[10px] text-zinc-400">
+                                      전학년
+                                    </span>
+                                  ) : null}
+                                  {kind === "overflow" ? (
+                                    <span className="shrink-0 text-[10px] font-medium text-red-600">
+                                      과다
+                                    </span>
+                                  ) : null}
+                                  {showClassDropdown && gradeClassCount ? (
+                                    <select
+                                      value={row.classNo ?? ""}
+                                      onChange={(e) => {
+                                        const raw = e.target.value;
+                                        const classNo =
+                                          raw === ""
+                                            ? undefined
+                                            : Number(raw);
+                                        onChange(
+                                          grade,
+                                          rows.map((item, i) =>
+                                            i === index
+                                              ? {
+                                                  ...item,
+                                                  classCount:
+                                                    DEFAULT_SUBJECT_CLASS_COUNT,
+                                                  classNo,
+                                                }
+                                              : item,
+                                          ),
+                                        );
+                                      }}
+                                      aria-label={`${grade}학년 ${row.name} 학반`}
+                                      className="w-[3rem] shrink-0 rounded-md border border-zinc-300 bg-white px-0.5 py-1 text-xs text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                                    >
+                                      <option value="">학반</option>
+                                      {partialClassNoOptions(
+                                        gradeClassCount,
+                                      ).map((n) => (
+                                        <option
+                                          key={n}
+                                          value={n}
+                                          disabled={
+                                            used.has(n) && row.classNo !== n
+                                          }
+                                        >
+                                          {classNoLabel(n, gradeClassCount)}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  ) : null}
+                                </div>
+                              </td>
+                              <td className="px-1 py-1.5 text-center tabular-nums text-zinc-600">
+                                {row.units}
+                              </td>
+                              <td className="px-1 py-1.5">
+                                {elective ? (
+                                  <span
+                                    className="block w-full rounded-md border border-zinc-200 bg-zinc-50 px-1 py-1.5 text-center tabular-nums text-zinc-500"
+                                    title="SET 과목은 분반마다 한 줄이며 학반 수는 1로 고정됩니다."
+                                  >
+                                    1
+                                  </span>
+                                ) : (
+                                  <input
+                                    type="number"
+                                    min={MIN_SUBJECT_CLASS_COUNT}
+                                    max={MAX_SUBJECT_CLASS_COUNT}
+                                    value={row.classCount}
+                                    onChange={(e) => {
+                                      const n = Number(e.target.value);
+                                      if (!Number.isInteger(n)) return;
+                                      if (
+                                        n < MIN_SUBJECT_CLASS_COUNT ||
+                                        n > MAX_SUBJECT_CLASS_COUNT
+                                      ) {
+                                        return;
+                                      }
+                                      onChange(
+                                        grade,
+                                        rows.map((item, i) =>
+                                          i === index
+                                            ? { ...item, classCount: n }
+                                            : item,
+                                        ),
+                                      );
+                                    }}
+                                    onPaste={(e) => handlePaste(grade, e)}
+                                    aria-label={`${grade}학년 ${row.name} 수업 학반 수`}
+                                    className="w-full rounded-md border border-zinc-300 px-1 py-1.5 text-center text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+                                  />
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -324,6 +419,9 @@ export function SubjectsForm({
     Grade,
     GradeScheduleTotal
   > | null>(null);
+  const [gradeClassCounts, setGradeClassCounts] = useState<GradeClassCounts>(
+    createDefaultClassCounts(),
+  );
   const [savingGrade, setSavingGrade] = useState<Grade | null>(null);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<"idle" | "saving" | "success" | "error">(
@@ -410,11 +508,16 @@ export function SubjectsForm({
         }
 
         if (!cancelled) {
+          const counts = data.classCounts ?? createDefaultClassCounts();
+          setGradeClassCounts(counts);
           setScheduleTotals(
             buildScheduleTotals(
               data.grades ?? createDefaultGradeDaySchedules(),
-              data.classCounts ?? createDefaultClassCounts(),
+              counts,
             ),
+          );
+          setSubjects((prev) =>
+            ensureGradeSubjects(sanitizeGradeSubjects(prev, counts), counts),
           );
         }
       } catch {
@@ -452,18 +555,36 @@ export function SubjectsForm({
 
   async function saveSubjects(
     nextSubjects: GradeSubjects,
-    options: { successMessage: string; nextMode: FormMode },
+    options: {
+      successMessage: string;
+      nextMode: FormMode;
+      classCounts?: GradeClassCounts;
+      requireSetClassNos?: boolean;
+    },
   ) {
     setStatus("saving");
     setMessage("");
 
-    const sanitized = sanitizeGradeSubjects(nextSubjects);
+    const counts = options.classCounts ?? gradeClassCounts;
+    let prepared = sanitizeGradeSubjects(nextSubjects, counts);
+    if (options.requireSetClassNos) {
+      prepared = sanitizeGradeSubjects(
+        alignSetClassNos(prepared, counts),
+        counts,
+      );
+      const setError = validateSetClassAssignments(prepared, counts);
+      if (setError) {
+        setStatus("error");
+        setMessage(setError);
+        return false;
+      }
+    }
 
     try {
       const response = await fetch(`/api/terms/${termId}/subjects`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subjects: sanitized }),
+        body: JSON.stringify({ subjects: prepared }),
       });
 
       const data = (await response.json()) as {
@@ -478,7 +599,8 @@ export function SubjectsForm({
       }
 
       const saved = sanitizeGradeSubjects(
-        ensureGradeSubjects(data.subjects ?? sanitized),
+        ensureGradeSubjects(data.subjects ?? prepared, counts),
+        counts,
       );
       setSubjects(saved);
       setMode(options.nextMode);
@@ -505,13 +627,13 @@ export function SubjectsForm({
     setStatus("saving");
     setMessage("");
 
-    const sanitized = sanitizeGradeSubjects(subjects);
+    const prepared = sanitizeGradeSubjects(subjects, gradeClassCounts);
 
     try {
       const response = await fetch(`/api/terms/${termId}/subjects`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subjects: sanitized }),
+        body: JSON.stringify({ subjects: prepared }),
       });
 
       const data = (await response.json()) as {
@@ -526,7 +648,8 @@ export function SubjectsForm({
       }
 
       const saved = sanitizeGradeSubjects(
-        ensureGradeSubjects(data.subjects ?? sanitized),
+        ensureGradeSubjects(data.subjects ?? prepared, gradeClassCounts),
+        gradeClassCounts,
       );
       setSubjects(saved);
       setMode("classCount");
@@ -560,6 +683,8 @@ export function SubjectsForm({
     const ok = await saveSubjects(subjects, {
       successMessage: "수업 학반 수가 저장되었습니다.",
       nextMode: "classCount",
+      classCounts: gradeClassCounts,
+      requireSetClassNos: true,
     });
     if (ok) router.push(`/terms/${termId}/teachers`);
   }
@@ -587,6 +712,10 @@ export function SubjectsForm({
       (grade) =>
         gradeTotalHours(subjects[grade]) === scheduleTotals[grade].total,
     );
+  const setAssignmentError = isStep2
+    ? validateSetClassAssignments(subjects, gradeClassCounts)
+    : null;
+  const canGoNext = allTotalsMatched && setAssignmentError === null;
 
   return (
     <div className="flex w-full flex-col gap-6">
@@ -596,8 +725,8 @@ export function SubjectsForm({
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
           {isStep2
-            ? "수업 학반 수를 입력해주세요. 엑셀에서 1개 열을 복사한 뒤 표 안에서 Ctrl+V로 붙여넣을 수 있습니다."
-            : "학년별 교과명과 단위수를 입력하세요. 엑셀에서 두 열(교과명, 단위수)을 복사한 뒤 표 안에서 Ctrl+V로 붙여넣을 수 있습니다."}
+            ? "공통 교과는 수업 학반 수를 입력하세요. SET 과목은 학반 수가 1로 고정됩니다. 부분 SET는 교과명 오른쪽에서 원학반 또는 맨 아래 +α(이동 분반)를 지정하세요."
+            : "학년별 교과명과 단위수를 입력하세요. SET 과목은 분반마다 한 줄로 입력하세요. 같은 내용을 두 학반이 들으면 물리1·물리2처럼 나누면 됩니다. 엑셀에서 두 열(교과명, 단위수)을 복사한 뒤 표 안에서 Ctrl+V로 붙여넣을 수 있습니다."}
         </p>
       </header>
 
@@ -622,6 +751,13 @@ export function SubjectsForm({
               void handleSaveGradeClassCounts(grade);
             }}
           />
+
+          {setAssignmentError ? (
+            <p className="text-center text-xs text-amber-700" role="status">
+              {setAssignmentError}
+            </p>
+          ) : null}
+
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
             <button
               type="button"
@@ -633,13 +769,15 @@ export function SubjectsForm({
             <span
               className="inline-flex"
               title={
-                !allTotalsMatched
-                  ? "세 학년의 수업 총 시수가 모두 일치해야 다음 단계로 진행할 수 있습니다."
-                  : savingGrade !== null
-                    ? "수업 학반 수 저장이 끝난 뒤 다시 시도해 주세요."
-                    : status === "saving"
-                      ? "저장 중입니다."
-                      : undefined
+                setAssignmentError
+                  ? setAssignmentError
+                  : !allTotalsMatched
+                    ? "세 학년의 수업 총 시수가 모두 일치해야 다음 단계로 진행할 수 있습니다."
+                    : savingGrade !== null
+                      ? "수업 학반 수 저장이 끝난 뒤 다시 시도해 주세요."
+                      : status === "saving"
+                        ? "저장 중입니다."
+                        : undefined
               }
             >
               <button
@@ -647,7 +785,7 @@ export function SubjectsForm({
                 disabled={
                   status === "saving" ||
                   savingGrade !== null ||
-                  !allTotalsMatched
+                  !canGoNext
                 }
                 className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
               >

@@ -31,7 +31,16 @@ export function SubjectGradeTable({
   function cycleSet(index: number) {
     const base = subjects.length > 0 ? subjects : [createEmptySubject()];
     const current = base[index]?.set ?? DEFAULT_SUBJECT_SET;
-    updateRow(index, { set: nextSubjectSet(current) });
+    const next = nextSubjectSet(current);
+    if (next === DEFAULT_SUBJECT_SET) {
+      updateRow(index, { set: next, classNo: undefined });
+    } else {
+      updateRow(index, {
+        set: next,
+        classCount: 1,
+        classNo: undefined,
+      });
+    }
   }
 
   function addRow() {

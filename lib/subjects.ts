@@ -1,13 +1,16 @@
 import {
   DEFAULT_SUBJECT_CLASS_COUNT,
   DEFAULT_SUBJECT_SET,
+  ELECTIVE_SETS,
   GRADES,
   MAX_SUBJECT_CLASS_COUNT,
   MAX_SUBJECT_UNITS,
   MIN_SUBJECT_CLASS_COUNT,
   MIN_SUBJECT_UNITS,
   SUBJECT_SETS,
+  type ElectiveSet,
   type Grade,
+  type GradeClassCounts,
   type GradeSubjects,
   type Subject,
   type SubjectSet,
@@ -30,6 +33,12 @@ export function parseSubjectSet(value: unknown): SubjectSet {
     return value as SubjectSet;
   }
   return DEFAULT_SUBJECT_SET;
+}
+
+export function isElectiveSubjectSet(
+  set: SubjectSet | string | undefined,
+): set is ElectiveSet {
+  return parseSubjectSet(set) !== DEFAULT_SUBJECT_SET;
 }
 
 export function nextSubjectSet(current: SubjectSet): SubjectSet {
@@ -65,25 +74,80 @@ export function subjectSetBadgeClass(set: SubjectSet | string | undefined): stri
   }
 }
 
+function parseClassNo(value: unknown, maxClass: number): number | undefined {
+  const n = parsePositiveIntInRange(value, 1, Math.max(1, maxClass));
+  return n ?? undefined;
+}
+
+/** +α slot for partial SET (one overflow section beyond home rooms). */
+export function alphaClassNo(gradeClassCount: number): number {
+  return gradeClassCount + 1;
+}
+
+export function isAlphaClassNo(
+  classNo: number,
+  gradeClassCount: number,
+): boolean {
+  return classNo === alphaClassNo(gradeClassCount);
+}
+
+export function classNoLabel(classNo: number, gradeClassCount: number): string {
+  if (isAlphaClassNo(classNo, gradeClassCount)) return "+α";
+  return `${classNo}반`;
+}
+
+/** Partial SET dropdown values: 1…N then +α (N+1). */
+export function partialClassNoOptions(gradeClassCount: number): number[] {
+  return Array.from({ length: gradeClassCount + 1 }, (_, i) => i + 1);
+}
+
+/** Normalize one subject: SET → classCount 1; 공통 → no classNo. */
+export function normalizeSubject(
+  raw: Partial<Subject> | null | undefined,
+  maxClass = MAX_SUBJECT_CLASS_COUNT,
+): Subject {
+  const set = parseSubjectSet(raw?.set);
+  const name = typeof raw?.name === "string" ? raw.name : "";
+  const units =
+    parsePositiveIntInRange(raw?.units, MIN_SUBJECT_UNITS, MAX_SUBJECT_UNITS) ??
+    MIN_SUBJECT_UNITS;
+
+  if (isElectiveSubjectSet(set)) {
+    // Allow +α (= home rooms + 1) when maxClass is grade class count.
+    const electiveMax = Math.min(MAX_SUBJECT_CLASS_COUNT, maxClass + 1);
+    return {
+      set,
+      name,
+      units,
+      classCount: DEFAULT_SUBJECT_CLASS_COUNT,
+      classNo: parseClassNo(raw?.classNo, electiveMax),
+    };
+  }
+
+  return {
+    set,
+    name,
+    units,
+    classCount:
+      parsePositiveIntInRange(
+        raw?.classCount,
+        MIN_SUBJECT_CLASS_COUNT,
+        MAX_SUBJECT_CLASS_COUNT,
+      ) ?? DEFAULT_SUBJECT_CLASS_COUNT,
+  };
+}
+
 export function ensureGradeSubjects(
   value: Partial<Record<Grade | string, Subject[]>> | null | undefined,
+  classCounts?: GradeClassCounts,
 ): GradeSubjects {
   const next = {} as GradeSubjects;
   for (const grade of GRADES) {
     const list = value?.[grade] ?? value?.[String(grade)] ?? [];
-    next[grade] = (Array.isArray(list) ? list : []).map((s) => ({
-      set: parseSubjectSet((s as Subject | undefined)?.set),
-      name: typeof s?.name === "string" ? s.name : "",
-      units:
-        parsePositiveIntInRange(s?.units, MIN_SUBJECT_UNITS, MAX_SUBJECT_UNITS) ??
-        MIN_SUBJECT_UNITS,
-      classCount:
-        parsePositiveIntInRange(
-          s?.classCount,
-          MIN_SUBJECT_CLASS_COUNT,
-          MAX_SUBJECT_CLASS_COUNT,
-        ) ?? DEFAULT_SUBJECT_CLASS_COUNT,
-    }));
+    const maxClass = classCounts?.[grade] ?? MAX_SUBJECT_CLASS_COUNT;
+    next[grade] = (Array.isArray(list) ? list : []).map((s) =>
+      normalizeSubject(s, maxClass),
+    );
   }
   return next;
 }
@@ -150,7 +214,7 @@ export function parseGradeSubjects(value: unknown): GradeSubjects | null {
     if (Array.isArray(raw)) {
       for (const item of raw) {
         if (!item || typeof item !== "object") return null;
-        const { name, units, classCount, set } = item as Record<
+        const { name, units, classCount, set, classNo } = item as Record<
           string,
           unknown
         >;
@@ -172,8 +236,14 @@ export function parseGradeSubjects(value: unknown): GradeSubjects | null {
           return null;
         }
         if (set !== undefined && parseSubjectSet(set) !== set) {
-          // allow unknown sets to be coerced in ensure; only reject non-string non-undefined weird types
           if (typeof set !== "string") return null;
+        }
+        if (
+          classNo !== undefined &&
+          classNo !== null &&
+          parsePositiveIntInRange(classNo, 1, MAX_SUBJECT_CLASS_COUNT) === null
+        ) {
+          return null;
         }
       }
     }
@@ -182,19 +252,158 @@ export function parseGradeSubjects(value: unknown): GradeSubjects | null {
   return ensureGradeSubjects(value as GradeSubjects);
 }
 
-export function sanitizeGradeSubjects(subjects: GradeSubjects): GradeSubjects {
-  const ensured = ensureGradeSubjects(subjects);
+export function sanitizeGradeSubjects(
+  subjects: GradeSubjects,
+  classCounts?: GradeClassCounts,
+): GradeSubjects {
+  const ensured = ensureGradeSubjects(subjects, classCounts);
   const next = {} as GradeSubjects;
   for (const grade of GRADES) {
+    const maxClass = classCounts?.[grade] ?? MAX_SUBJECT_CLASS_COUNT;
     next[grade] = ensured[grade]
-      .map((s) => ({
-        set: parseSubjectSet(s.set),
-        name: s.name.trim(),
-        units: s.units,
-        classCount: s.classCount,
-      }))
+      .map((s) => normalizeSubject(s, maxClass))
+      .map((s) => {
+        if (!isElectiveSubjectSet(s.set)) {
+          return {
+            set: s.set,
+            name: s.name.trim(),
+            units: s.units,
+            classCount: s.classCount,
+          };
+        }
+        const electiveMax = Math.min(MAX_SUBJECT_CLASS_COUNT, maxClass + 1);
+        const classNo =
+          s.classNo !== undefined &&
+          s.classNo >= 1 &&
+          s.classNo <= electiveMax
+            ? s.classNo
+            : undefined;
+        return {
+          set: s.set,
+          name: s.name.trim(),
+          units: s.units,
+          classCount: DEFAULT_SUBJECT_CLASS_COUNT,
+          ...(classNo !== undefined ? { classNo } : {}),
+        };
+      })
       .filter((s) => s.name.length > 0)
       .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  }
+  return next;
+}
+
+export type SetClassKind = "whole" | "partial" | "overflow";
+
+export function setClassKind(
+  subjects: Subject[],
+  set: ElectiveSet,
+  gradeClassCount: number,
+): SetClassKind | null {
+  const count = subjects.filter((s) => s.set === set).length;
+  if (count === 0) return null;
+  if (count === gradeClassCount) return "whole";
+  if (count < gradeClassCount) return "partial";
+  return "overflow";
+}
+
+/** Classes already taken by other subjects in the same SET (excluding index). */
+export function usedClassNosInSet(
+  subjects: Subject[],
+  set: ElectiveSet,
+  excludeIndex?: number,
+): Set<number> {
+  const used = new Set<number>();
+  subjects.forEach((row, index) => {
+    if (excludeIndex !== undefined && index === excludeIndex) return;
+    if (row.set !== set) return;
+    if (typeof row.classNo === "number") used.add(row.classNo);
+  });
+  return used;
+}
+
+export function validateSetClassAssignments(
+  subjects: GradeSubjects,
+  classCounts: GradeClassCounts,
+): string | null {
+  for (const grade of GRADES) {
+    const rows = subjects[grade] ?? [];
+    const gradeClassCount = classCounts[grade];
+
+    for (const set of ELECTIVE_SETS) {
+      const kind = setClassKind(rows, set, gradeClassCount);
+      if (!kind) continue;
+
+      if (kind === "overflow") {
+        const count = rows.filter((s) => s.set === set).length;
+        return `${grade}학년 SET ${set} 과목 수(${count})가 학급 수(${gradeClassCount})보다 많습니다. 분반마다 한 줄로 맞추거나 학급 수를 확인해 주세요.`;
+      }
+
+      if (kind === "partial") {
+        const setRows = rows
+          .map((row, index) => ({ row, index }))
+          .filter(({ row }) => row.set === set);
+        const maxNo = alphaClassNo(gradeClassCount);
+        const seen = new Set<number>();
+        for (const { row } of setRows) {
+          if (row.classNo === undefined) {
+            return `${grade}학년 SET ${set}의 "${row.name}"에 학반(또는 +α)을 지정해 주세요.`;
+          }
+          if (row.classNo < 1 || row.classNo > maxNo) {
+            return `${grade}학년 SET ${set}의 "${row.name}" 학반 번호가 올바르지 않습니다.`;
+          }
+          if (seen.has(row.classNo)) {
+            const label = classNoLabel(row.classNo, gradeClassCount);
+            return `${grade}학년 SET ${set}에서 ${label}이(가) 중복 지정되었습니다.`;
+          }
+          seen.add(row.classNo);
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Drop classNo on whole-grade SET rows; keep only for partial SET.
+ * Call when grade class counts are known (step 2 save / next).
+ */
+export function alignSetClassNos(
+  subjects: GradeSubjects,
+  classCounts: GradeClassCounts,
+): GradeSubjects {
+  const next = {} as GradeSubjects;
+  for (const grade of GRADES) {
+    const gradeClassCount = classCounts[grade];
+    next[grade] = (subjects[grade] ?? []).map((row) => {
+      if (!isElectiveSubjectSet(row.set)) {
+        const { classNo: _drop, ...rest } = row;
+        void _drop;
+        return rest;
+      }
+      const kind = setClassKind(subjects[grade], row.set, gradeClassCount);
+      if (kind !== "partial") {
+        return {
+          set: row.set,
+          name: row.name,
+          units: row.units,
+          classCount: DEFAULT_SUBJECT_CLASS_COUNT,
+        };
+      }
+      const maxNo = alphaClassNo(gradeClassCount);
+      const classNo =
+        row.classNo !== undefined &&
+        row.classNo >= 1 &&
+        row.classNo <= maxNo
+          ? row.classNo
+          : undefined;
+      return {
+        set: row.set,
+        name: row.name,
+        units: row.units,
+        classCount: DEFAULT_SUBJECT_CLASS_COUNT,
+        ...(classNo !== undefined ? { classNo } : {}),
+      };
+    });
   }
   return next;
 }
@@ -208,7 +417,7 @@ const CLASS_COUNT_HEADERS = new Set([
   "class count",
 ]);
 
-/** Paste a single column of class counts onto existing subject rows (by order). */
+/** Paste a single column of class counts onto existing subject rows (by order). SET rows stay at 1. */
 export function applyClassCountsFromClipboard(
   subjects: Subject[],
   text: string,
@@ -238,7 +447,10 @@ export function applyClassCountsFromClipboard(
 
   if (values.length === 0) return null;
 
-  return subjects.map((row, index) =>
-    index < values.length ? { ...row, classCount: values[index] } : row,
-  );
+  return subjects.map((row, index) => {
+    if (isElectiveSubjectSet(row.set)) {
+      return { ...row, classCount: DEFAULT_SUBJECT_CLASS_COUNT };
+    }
+    return index < values.length ? { ...row, classCount: values[index] } : row;
+  });
 }

@@ -4,9 +4,12 @@ import { parseClassCounts, parseGradeDaySchedules } from "@/lib/day-schedule";
 import { getDb } from "@/lib/mongodb";
 import {
   catalogGradeSets,
+  countPartialPlaced,
   countPlaced,
   filterCellsToCatalog,
+  filterPartialCellsToCatalog,
   findGradeSet,
+  parsePartialSetBlockCells,
   parseSetBlockCells,
 } from "@/lib/set-blocks";
 import { ensureGradeSubjects, sanitizeGradeSubjects } from "@/lib/subjects";
@@ -66,6 +69,7 @@ export async function GET(_request: Request, context: RouteContext) {
         semester: term.semester,
       },
       cells: doc?.cells ?? [],
+      partialCells: doc?.partialCells ?? [],
     });
   } catch (error) {
     console.error("set-blocks GET failed:", error);
@@ -99,10 +103,34 @@ export async function PUT(request: Request, context: RouteContext) {
     );
   }
 
-  const parsed = parseSetBlockCells((body as { cells?: unknown }).cells);
-  if (!parsed) {
+  const payload = body as { cells?: unknown; partialCells?: unknown };
+  const hasCells = Object.prototype.hasOwnProperty.call(payload, "cells");
+  const hasPartial = Object.prototype.hasOwnProperty.call(
+    payload,
+    "partialCells",
+  );
+
+  if (!hasCells && !hasPartial) {
+    return NextResponse.json(
+      { error: "cells 또는 partialCells가 필요합니다." },
+      { status: 400 },
+    );
+  }
+
+  const parsedCells = hasCells ? parseSetBlockCells(payload.cells) : null;
+  if (hasCells && !parsedCells) {
     return NextResponse.json(
       { error: "SET 블록 데이터가 올바르지 않습니다." },
+      { status: 400 },
+    );
+  }
+
+  const parsedPartial = hasPartial
+    ? parsePartialSetBlockCells(payload.partialCells)
+    : null;
+  if (hasPartial && !parsedPartial) {
+    return NextResponse.json(
+      { error: "부분 SET 블록 데이터가 올바르지 않습니다." },
       { status: 400 },
     );
   }
@@ -118,9 +146,10 @@ export async function PUT(request: Request, context: RouteContext) {
     }
 
     const db = await getDb();
-    const [subjectsDoc, scheduleDoc] = await Promise.all([
+    const [subjectsDoc, scheduleDoc, existing] = await Promise.all([
       db.collection<SubjectsDocument>("subjects").findOne({ termId }),
       db.collection<DayScheduleDocument>("daySchedules").findOne({ termId }),
+      db.collection<SetBlocksDocument>("setBlocks").findOne({ termId }),
     ]);
 
     const subjects = sanitizeGradeSubjects(
@@ -132,40 +161,76 @@ export async function PUT(request: Request, context: RouteContext) {
     const classCounts =
       parseClassCounts(scheduleDoc?.classCounts) ?? createDefaultClassCounts();
     const catalog = catalogGradeSets(subjects, classCounts);
-    const cells = filterCellsToCatalog(parsed, schedules, catalog);
 
-    for (const cell of cells) {
-      const info = findGradeSet(catalog, cell.grade, cell.set);
-      if (!info || info.kind !== "whole" || info.units === null) {
-        return NextResponse.json(
-          { error: "전학년 SET만 저장할 수 있습니다." },
-          { status: 400 },
-        );
+    const $set: Record<string, unknown> = {
+      termId,
+      updatedAt: new Date(),
+    };
+
+    let cells = existing?.cells ?? [];
+    let partialCells = existing?.partialCells ?? [];
+
+    if (hasCells && parsedCells) {
+      cells = filterCellsToCatalog(parsedCells, schedules, catalog);
+      for (const cell of cells) {
+        const info = findGradeSet(catalog, cell.grade, cell.set);
+        if (!info || info.kind !== "whole" || info.units === null) {
+          return NextResponse.json(
+            { error: "전학년 SET만 저장할 수 있습니다." },
+            { status: 400 },
+          );
+        }
+        if (countPlaced(cells, cell.grade, cell.set) > info.units) {
+          return NextResponse.json(
+            {
+              error: `${cell.grade}학년 SET ${cell.set}는 ${info.units}교시를 넘을 수 없습니다.`,
+            },
+            { status: 400 },
+          );
+        }
       }
-      if (countPlaced(cells, cell.grade, cell.set) > info.units) {
-        return NextResponse.json(
-          {
-            error: `${cell.grade}학년 SET ${cell.set}는 ${info.units}교시를 넘을 수 없습니다.`,
-          },
-          { status: 400 },
-        );
-      }
+      $set.cells = cells;
     }
 
-    const updatedAt = new Date();
+    if (hasPartial && parsedPartial) {
+      partialCells = filterPartialCellsToCatalog(
+        parsedPartial,
+        schedules,
+        catalog,
+      );
+      for (const cell of partialCells) {
+        const info = findGradeSet(catalog, cell.grade, cell.set);
+        if (!info || info.kind !== "partial" || info.units === null) {
+          return NextResponse.json(
+            { error: "부분 SET만 저장할 수 있습니다." },
+            { status: 400 },
+          );
+        }
+        if (countPartialPlaced(partialCells, cell.grade, cell.set) > info.units) {
+          return NextResponse.json(
+            {
+              error: `${cell.grade}학년 SET ${cell.set}는 ${info.units}교시를 넘을 수 없습니다.`,
+            },
+            { status: 400 },
+          );
+        }
+      }
+      $set.partialCells = partialCells;
+    }
+
+    const updatedAt = $set.updatedAt as Date;
     await db.collection<SetBlocksDocument>("setBlocks").updateOne(
       { termId },
-      {
-        $set: {
-          termId,
-          cells,
-          updatedAt,
-        },
-      },
+      { $set },
       { upsert: true },
     );
 
-    return NextResponse.json({ termId, cells, updatedAt });
+    return NextResponse.json({
+      termId,
+      cells,
+      partialCells,
+      updatedAt,
+    });
   } catch (error) {
     console.error("set-blocks PUT failed:", error);
     return NextResponse.json(

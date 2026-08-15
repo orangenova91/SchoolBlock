@@ -6,11 +6,17 @@ import { ForbiddenPaintGrid } from "@/components/forbidden-paint-grid";
 import {
   filterForbiddenSlots,
   findForbiddenSetConflicts,
+  findForbiddenSubjectBlockConflicts,
   formatForbiddenConflict,
+  formatForbiddenSubjectBlockConflict,
   isForbidden,
   maxPeriodsByWeekday,
+  setBlockSlotKeysForTeacher,
+  stripForbiddenOverlappingLockedLessons,
+  subjectBlockSlotKeysForTeacher,
   toggleForbiddenSlot,
 } from "@/lib/teacher-constraints";
+import type { ForbiddenLockedLabel } from "@/components/forbidden-paint-grid";
 import { ensureTeachers, sanitizeTeachers } from "@/lib/teachers";
 import {
   createDefaultClassCounts,
@@ -22,11 +28,13 @@ import {
   type GradeSubjects,
   type Semester,
   type SetBlockCell,
+  type SubjectBlockCell,
   type Teacher,
   type TeacherForbiddenSlot,
   type Weekday,
 } from "@/lib/types";
 import { ensureGradeSubjects, sanitizeGradeSubjects } from "@/lib/subjects";
+import { filterSubjectBlocksToAssignments } from "@/lib/subject-blocks";
 
 type TermSummary = {
   id: string;
@@ -55,10 +63,12 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
   );
   const [wholeCells, setWholeCells] = useState<SetBlockCell[]>([]);
   const [partialCells, setPartialCells] = useState<SetBlockCell[]>([]);
+  const [subjectBlocks, setSubjectBlocks] = useState<SubjectBlockCell[]>([]);
   const [forbiddenSlots, setForbiddenSlots] = useState<TeacherForbiddenSlot[]>(
     [],
   );
   const [selectedTeacher, setSelectedTeacher] = useState("");
+  const [teacherQuery, setTeacherQuery] = useState("");
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<"idle" | "saving" | "success" | "error">(
     "idle",
@@ -72,14 +82,21 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
       setLoading(true);
       setMessage("");
       try {
-        const [constraintsRes, teachersRes, subjectsRes, scheduleRes, blocksRes] =
-          await Promise.all([
-            fetch(`/api/terms/${termId}/teacher-constraints`),
-            fetch(`/api/terms/${termId}/teachers`),
-            fetch(`/api/terms/${termId}/subjects`),
-            fetch(`/api/terms/${termId}/day-schedule`),
-            fetch(`/api/terms/${termId}/set-blocks`),
-          ]);
+        const [
+          constraintsRes,
+          teachersRes,
+          subjectsRes,
+          scheduleRes,
+          blocksRes,
+          subjectBlocksRes,
+        ] = await Promise.all([
+          fetch(`/api/terms/${termId}/teacher-constraints`),
+          fetch(`/api/terms/${termId}/teachers`),
+          fetch(`/api/terms/${termId}/subjects`),
+          fetch(`/api/terms/${termId}/day-schedule`),
+          fetch(`/api/terms/${termId}/set-blocks`),
+          fetch(`/api/terms/${termId}/subject-blocks`),
+        ]);
 
         const constraintsData = (await constraintsRes.json()) as {
           term?: TermSummary;
@@ -100,6 +117,9 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
           cells?: SetBlockCell[];
           partialCells?: SetBlockCell[];
         };
+        const subjectBlocksData = (await subjectBlocksRes.json()) as {
+          cells?: SubjectBlockCell[];
+        };
 
         if (!constraintsRes.ok) {
           if (!cancelled) {
@@ -117,27 +137,44 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
           );
           const nextSchedules =
             scheduleData.grades ?? createDefaultGradeDaySchedules();
-          const nextSlots = filterForbiddenSlots(
-            constraintsData.forbiddenSlots ?? [],
+          const nextClassCounts =
+            scheduleData.classCounts ?? createDefaultClassCounts();
+          const nextSubjects = sanitizeGradeSubjects(
+            ensureGradeSubjects(
+              subjectsData.subjects ?? createDefaultGradeSubjects(),
+            ),
+          );
+          const nextSubjectBlocks = filterSubjectBlocksToAssignments(
+            subjectBlocksData.cells ?? [],
             nextTeachers,
+            nextSubjects,
+            nextClassCounts,
             nextSchedules,
+          );
+          const nextWhole = blocksData.cells ?? [];
+          const nextPartial = blocksData.partialCells ?? [];
+          const nextSlots = stripForbiddenOverlappingLockedLessons(
+            filterForbiddenSlots(
+              constraintsData.forbiddenSlots ?? [],
+              nextTeachers,
+              nextSchedules,
+            ),
+            nextSubjectBlocks,
+            nextWhole,
+            nextPartial,
+            nextTeachers,
+            nextSubjects,
+            nextClassCounts,
           );
 
           setTerm(constraintsData.term ?? null);
           setTeachers(nextTeachers);
-          setSubjects(
-            sanitizeGradeSubjects(
-              ensureGradeSubjects(
-                subjectsData.subjects ?? createDefaultGradeSubjects(),
-              ),
-            ),
-          );
+          setSubjects(nextSubjects);
           setSchedules(nextSchedules);
-          setClassCounts(
-            scheduleData.classCounts ?? createDefaultClassCounts(),
-          );
-          setWholeCells(blocksData.cells ?? []);
-          setPartialCells(blocksData.partialCells ?? []);
+          setClassCounts(nextClassCounts);
+          setWholeCells(nextWhole);
+          setPartialCells(nextPartial);
+          setSubjectBlocks(nextSubjectBlocks);
           setForbiddenSlots(nextSlots);
 
           const named = nextTeachers.map((t) => t.name.trim()).filter(Boolean);
@@ -166,6 +203,28 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
     [teachers],
   );
 
+  const sortedTeacherNames = useMemo(() => {
+    const indexed = teacherNames.map((name, index) => ({
+      name,
+      index,
+      count: forbiddenSlots.filter((s) => s.teacherName === name).length,
+    }));
+    indexed.sort((a, b) => {
+      const aHas = a.count > 0 ? 1 : 0;
+      const bHas = b.count > 0 ? 1 : 0;
+      if (bHas !== aHas) return bHas - aHas;
+      if (b.count !== a.count) return b.count - a.count;
+      return a.index - b.index;
+    });
+    return indexed.map((item) => item.name);
+  }, [teacherNames, forbiddenSlots]);
+
+  const filteredTeacherNames = useMemo(() => {
+    const q = teacherQuery.trim().toLowerCase();
+    if (!q) return sortedTeacherNames;
+    return sortedTeacherNames.filter((name) => name.toLowerCase().includes(q));
+  }, [sortedTeacherNames, teacherQuery]);
+
   const maxByDay = useMemo(
     () => maxPeriodsByWeekday(schedules),
     [schedules],
@@ -182,7 +241,36 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
     return set;
   }, [forbiddenSlots, selectedTeacher]);
 
-  const conflicts = useMemo(
+  const lockedLabels = useMemo(() => {
+    const map = new Map<string, ForbiddenLockedLabel>();
+    for (const key of subjectBlockSlotKeysForTeacher(
+      subjectBlocks,
+      selectedTeacher,
+    )) {
+      map.set(key, "블록");
+    }
+    for (const key of setBlockSlotKeysForTeacher(
+      wholeCells,
+      partialCells,
+      teachers,
+      subjects,
+      classCounts,
+      selectedTeacher,
+    )) {
+      map.set(key, "SET");
+    }
+    return map;
+  }, [
+    subjectBlocks,
+    wholeCells,
+    partialCells,
+    teachers,
+    subjects,
+    classCounts,
+    selectedTeacher,
+  ]);
+
+  const setConflicts = useMemo(
     () =>
       findForbiddenSetConflicts(
         forbiddenSlots,
@@ -202,9 +290,22 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
     ],
   );
 
+  const subjectBlockConflicts = useMemo(
+    () => findForbiddenSubjectBlockConflicts(forbiddenSlots, subjectBlocks),
+    [forbiddenSlots, subjectBlocks],
+  );
+
+  const conflicts = useMemo(
+    () => [...setConflicts, ...subjectBlockConflicts],
+    [setConflicts, subjectBlockConflicts],
+  );
+
   const conflictMessages = useMemo(
-    () => conflicts.map(formatForbiddenConflict),
-    [conflicts],
+    () => [
+      ...setConflicts.map(formatForbiddenConflict),
+      ...subjectBlockConflicts.map(formatForbiddenSubjectBlockConflict),
+    ],
+    [setConflicts, subjectBlockConflicts],
   );
 
   const selectedCount = useMemo(() => {
@@ -219,6 +320,7 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
     mode: "paint" | "erase",
   ) {
     if (!selectedTeacher) return;
+    if (lockedLabels.has(`${day}|${period}`)) return;
     const currently = isForbidden(
       forbiddenSlots,
       selectedTeacher,
@@ -241,20 +343,29 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
     if (requireNoConflicts && conflicts.length > 0) {
       setStatus("error");
       setMessage(
-        "SET 블록과 겹치는 배정 불가가 있습니다. 불가 교시를 지우거나 SET을 수정해 주세요.",
+        "블록·SET과 겹치는 배정 불가가 있습니다. 불가 교시를 지워 주세요.",
       );
       return false;
     }
 
     setStatus("saving");
     setMessage("");
+    const slotsToSave = stripForbiddenOverlappingLockedLessons(
+      forbiddenSlots,
+      subjectBlocks,
+      wholeCells,
+      partialCells,
+      teachers,
+      subjects,
+      classCounts,
+    );
     try {
       const response = await fetch(
         `/api/terms/${termId}/teacher-constraints`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ forbiddenSlots }),
+          body: JSON.stringify({ forbiddenSlots: slotsToSave }),
         },
       );
       const data = (await response.json()) as {
@@ -270,10 +381,18 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
       }
 
       setForbiddenSlots(
-        filterForbiddenSlots(
-          data.forbiddenSlots ?? forbiddenSlots,
+        stripForbiddenOverlappingLockedLessons(
+          filterForbiddenSlots(
+            data.forbiddenSlots ?? slotsToSave,
+            teachers,
+            schedules,
+          ),
+          subjectBlocks,
+          wholeCells,
+          partialCells,
           teachers,
-          schedules,
+          subjects,
+          classCounts,
         ),
       );
       setStatus("success");
@@ -323,7 +442,8 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
           특정 교사가 수업할 수 없는 요일·교시를 칠하세요. 시간표 생성 시 해당
-          칸에는 배정되지 않습니다.
+          칸에는 배정되지 않습니다. 블록·SET으로 이미 배정된 시간은 선택할 수
+          없습니다.
         </p>
       </header>
 
@@ -340,7 +460,7 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
           role="alert"
         >
           <p className="font-medium">
-            SET 블록과 겹치는 배정 불가 ({conflictMessages.length})
+            블록·SET과 겹치는 배정 불가 ({conflictMessages.length})
           </p>
           <ul className="mt-2 max-h-36 list-inside list-disc overflow-auto text-xs">
             {conflictMessages.map((line) => (
@@ -361,37 +481,54 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
         <div className="grid gap-4 lg:grid-cols-[14rem_minmax(0,1fr)]">
           <aside className="rounded-2xl border border-zinc-200 bg-white p-3 shadow-sm">
             <p className="mb-2 text-xs font-medium text-zinc-500">교사</p>
+            <label className="mb-2 block">
+              <span className="sr-only">교사명 검색</span>
+              <input
+                type="search"
+                value={teacherQuery}
+                onChange={(event) => setTeacherQuery(event.target.value)}
+                placeholder="교사명 검색"
+                autoComplete="off"
+                className="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+              />
+            </label>
             <ul className="flex max-h-[28rem] flex-col gap-1 overflow-auto">
-              {teacherNames.map((name) => {
-                const count = forbiddenSlots.filter(
-                  (s) => s.teacherName === name,
-                ).length;
-                const selected = name === selectedTeacher;
-                return (
-                  <li key={name}>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedTeacher(name)}
-                      className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm transition ${
-                        selected
-                          ? "bg-zinc-900 text-white"
-                          : "text-zinc-800 hover:bg-zinc-50"
-                      }`}
-                    >
-                      <span className="truncate">{name}</span>
-                      {count > 0 ? (
-                        <span
-                          className={`ml-2 shrink-0 text-[10px] ${
-                            selected ? "text-zinc-300" : "text-rose-600"
-                          }`}
-                        >
-                          {count}
-                        </span>
-                      ) : null}
-                    </button>
-                  </li>
-                );
-              })}
+              {filteredTeacherNames.length === 0 ? (
+                <li className="px-2.5 py-4 text-center text-xs text-zinc-500">
+                  검색 결과가 없습니다.
+                </li>
+              ) : (
+                filteredTeacherNames.map((name) => {
+                  const count = forbiddenSlots.filter(
+                    (s) => s.teacherName === name,
+                  ).length;
+                  const selected = name === selectedTeacher;
+                  return (
+                    <li key={name}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedTeacher(name)}
+                        className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm transition ${
+                          selected
+                            ? "bg-zinc-900 text-white"
+                            : "text-zinc-800 hover:bg-zinc-50"
+                        }`}
+                      >
+                        <span className="truncate">{name}</span>
+                        {count > 0 ? (
+                          <span
+                            className={`ml-2 shrink-0 text-[10px] ${
+                              selected ? "text-zinc-300" : "text-rose-600"
+                            }`}
+                          >
+                            {count}
+                          </span>
+                        ) : null}
+                      </button>
+                    </li>
+                  );
+                })
+              )}
             </ul>
           </aside>
 
@@ -408,6 +545,7 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
               <ForbiddenPaintGrid
                 maxByDay={maxByDay}
                 forbiddenKeys={forbiddenKeys}
+                lockedLabels={lockedLabels}
                 onToggle={handleToggle}
               />
             ) : (
@@ -416,8 +554,8 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
               </p>
             )}
             <p className="mt-3 text-center text-xs text-zinc-500">
-              칸을 누르거나 끌어 칠하고, 다시 누르면 지워집니다. 흐린 칸은 모든
-              학년에 없는 교시입니다.
+              칸을 누르거나 끌어 칠하고, 다시 누르면 지워집니다. 「블록」·「SET」
+              칸은 이미 배정된 시간이라 배정 불가로 칠할 수 없습니다.
             </p>
           </section>
         </div>
@@ -426,7 +564,7 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
       <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
         <button
           type="button"
-          onClick={() => router.push(`/terms/${termId}/sets/partial`)}
+          onClick={() => router.push(`/terms/${termId}/blocks`)}
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
         >
           이전
@@ -444,7 +582,7 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
         <span
           title={
             conflicts.length > 0
-              ? "SET과 겹치는 배정 불가를 해소해 주세요."
+              ? "블록·SET과 겹치는 배정 불가를 해소해 주세요."
               : undefined
           }
         >

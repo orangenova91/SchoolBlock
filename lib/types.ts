@@ -253,3 +253,19 @@ export type TeacherConstraintsDocument = {
   forbiddenSlots: TeacherForbiddenSlot[];
   updatedAt: Date;
 };
+
+/** Pre-locked common lesson (교과 블록). */
+export type SubjectBlockCell = {
+  grade: Grade;
+  classNo: number;
+  subjectName: string;
+  teacherName: string;
+  day: Weekday;
+  period: number;
+};
+
+export type SubjectBlocksDocument = {
+  termId: string;
+  cells: SubjectBlockCell[];
+  updatedAt: Date;
+};

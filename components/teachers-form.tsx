@@ -24,10 +24,18 @@ import {
   ensureGradeSubjects,
   sanitizeGradeSubjects,
   subjectSetBadgeClass,
+  classNoLabel,
 } from "@/lib/subjects";
 import {
+  catalogGradeSets,
   classCommonHourBalances,
+  classTotalHourMismatches,
+  commonHoursByClass,
+  setAssignmentSummaries,
+  setHoursByClass,
+  totalHoursByClass,
   type ClassCommonHourBalance,
+  type SetAssignmentSummary,
 } from "@/lib/set-blocks";
 import { sumWeekdayPeriods } from "@/lib/day-schedule";
 import {
@@ -396,6 +404,204 @@ function DraggableSubjectBadge({
   );
 }
 
+function ClassTotalHoursSummary({
+  teachers,
+  subjects,
+  classCounts,
+  schedules,
+}: {
+  teachers: Teacher[];
+  subjects: GradeSubjects;
+  classCounts: GradeClassCounts;
+  schedules: GradeDaySchedules;
+}) {
+  const totals = useMemo(
+    () => totalHoursByClass(teachers, subjects, classCounts),
+    [teachers, subjects, classCounts],
+  );
+  const commonByGrade = useMemo(
+    () => commonHoursByClass(teachers, subjects, classCounts),
+    [teachers, subjects, classCounts],
+  );
+  const catalog = useMemo(
+    () => catalogGradeSets(subjects, classCounts),
+    [subjects, classCounts],
+  );
+  const setByClass = useMemo(
+    () => setHoursByClass(catalog, classCounts),
+    [catalog, classCounts],
+  );
+
+  const maxClasses = Math.max(0, ...GRADES.map((g) => classCounts[g] ?? 0));
+  const hasOver = GRADES.some((grade) => {
+    const week = sumWeekdayPeriods(schedules[grade]);
+    if (week <= 0) return false;
+    return (totals[grade] ?? []).some((hours) => hours > week);
+  });
+  const hasMismatch = GRADES.some((grade) => {
+    const week = sumWeekdayPeriods(schedules[grade]);
+    if (week <= 0) return false;
+    return (totals[grade] ?? []).some((hours) => hours !== week);
+  });
+  const warn = hasMismatch;
+
+  return (
+    <section
+      className={`rounded-2xl border px-4 py-3 shadow-sm ${
+        warn ? "border-amber-200 bg-amber-50" : "border-zinc-200 bg-white"
+      }`}
+      aria-label="학반별 총 시수 합계"
+    >
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h2
+          className={`text-sm font-semibold ${
+            warn ? "text-amber-950" : "text-zinc-900"
+          }`}
+        >
+          학반별 총 시수 합계
+        </h2>
+        <p
+          className={`text-xs ${warn ? "text-amber-800" : "text-zinc-500"}`}
+        >
+          공통+SET / 주간
+        </p>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[16rem] border-collapse text-center text-xs">
+          <thead>
+            <tr>
+              <th
+                scope="col"
+                className={`border-b px-1.5 py-1.5 text-left font-medium ${
+                  warn
+                    ? "border-amber-200 text-amber-900"
+                    : "border-zinc-200 text-zinc-500"
+                }`}
+              >
+                학년
+              </th>
+              {Array.from({ length: maxClasses }, (_, i) => (
+                <th
+                  key={i}
+                  scope="col"
+                  className={`border-b px-1.5 py-1.5 font-medium tabular-nums ${
+                    warn
+                      ? "border-amber-200 text-amber-900"
+                      : "border-zinc-200 text-zinc-500"
+                  }`}
+                >
+                  {i + 1}반
+                </th>
+              ))}
+              <th
+                scope="col"
+                className={`border-b px-1.5 py-1.5 font-medium ${
+                  warn
+                    ? "border-amber-200 text-amber-900"
+                    : "border-zinc-200 text-zinc-500"
+                }`}
+              >
+                주간
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {GRADES.map((grade) => {
+              const n = classCounts[grade] ?? 0;
+              const perClass = totals[grade] ?? [];
+              const week = sumWeekdayPeriods(schedules[grade]);
+              const common = commonByGrade[grade] ?? [];
+              const setHours = setByClass[grade] ?? [];
+
+              return (
+                <tr key={grade}>
+                  <th
+                    scope="row"
+                    className={`border-b px-1.5 py-1.5 text-left font-medium ${
+                      warn
+                        ? "border-amber-100 text-amber-950"
+                        : "border-zinc-100 text-zinc-700"
+                    }`}
+                  >
+                    {grade}학년
+                  </th>
+                  {Array.from({ length: maxClasses }, (_, index) => {
+                    if (index >= n) {
+                      return (
+                        <td
+                          key={index}
+                          className={`border-b px-1.5 py-1.5 ${
+                            warn ? "border-amber-100" : "border-zinc-100"
+                          }`}
+                        >
+                          <span className="text-zinc-300">—</span>
+                        </td>
+                      );
+                    }
+                    const hours = perClass[index] ?? 0;
+                    const over = week > 0 && hours > week;
+                    const under = week > 0 && hours < week;
+                    const matched = week > 0 && hours === week;
+                    const c = common[index] ?? 0;
+                    const s = setHours[index] ?? 0;
+                    return (
+                      <td
+                        key={index}
+                        className={`border-b px-1 py-1 ${
+                          warn ? "border-amber-100" : "border-zinc-100"
+                        }`}
+                      >
+                        <span
+                          className={`inline-block min-w-[2.75rem] rounded px-1 py-0.5 tabular-nums ${
+                            over
+                              ? "bg-red-100 font-semibold text-red-800"
+                              : under
+                                ? "bg-amber-200/80 font-semibold text-amber-950"
+                                : matched
+                                  ? "bg-emerald-50 font-medium text-emerald-800"
+                                  : "text-zinc-700"
+                          }`}
+                          title={`${grade}학년 ${index + 1}반: 공통 ${c} + SET ${s} = ${hours}${
+                            week > 0 ? ` · 주간 ${week}` : ""
+                          }`}
+                        >
+                          {week > 0 ? `${hours}/${week}` : hours}
+                        </span>
+                      </td>
+                    );
+                  })}
+                  <td
+                    className={`border-b px-1.5 py-1.5 tabular-nums ${
+                      warn
+                        ? "border-amber-100 text-amber-800"
+                        : "border-zinc-100 text-zinc-500"
+                    }`}
+                  >
+                    {week > 0 ? week : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {hasOver ? (
+        <p className="mt-2 text-xs text-amber-900" role="alert">
+          총 시수가 주간 교시를 넘는 학반이 있습니다. 아래 공통·SET 배정을
+          확인해 주세요.
+        </p>
+      ) : hasMismatch ? (
+        <p className="mt-2 text-xs text-amber-900" role="alert">
+          총 시수가 주간 교시와 다른 학반이 있습니다. 모든 학반이
+          주간 교시와 같아야 다음으로 진행할 수 있습니다.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function ClassCommonHoursSummary({
   balances,
   schedules,
@@ -493,6 +699,179 @@ function ClassCommonHoursSummary({
         <p className="mt-2 text-xs text-amber-900" role="alert">
           학반별 공통 시수가 다른 학년이 있습니다. 시수가 적은 반(강조)의
           학반 칸을 늘리거나, 많은 반을 줄여 맞춰 주세요.
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
+function setKindLabel(kind: SetAssignmentSummary["kind"]): string {
+  if (kind === "whole") return "전학년";
+  if (kind === "partial") return "부분";
+  return "단위 불일치";
+}
+
+function formatPartialRoomsLabel(
+  item: SetAssignmentSummary,
+  gradeClassCount: number,
+): string | null {
+  if (item.kind !== "partial") return null;
+  const parts = item.homeRooms.map((room) =>
+    classNoLabel(room, gradeClassCount),
+  );
+  if (item.hasAlpha) parts.push("+α");
+  if (parts.length === 0) return "학반 미지정";
+  return parts.join("·");
+}
+
+/** Teacher total hours → per-class SET units (÷ 수업 학반 수). */
+function perClassSetHours(total: number, classSum: number): number {
+  if (classSum <= 0) return total;
+  return total / classSum;
+}
+
+function formatPerClassSetHours(total: number, classSum: number): string {
+  const value = perClassSetHours(total, classSum);
+  return Number.isInteger(value)
+    ? String(value)
+    : (Math.round(value * 10) / 10).toString();
+}
+
+function SetHoursAssignmentSummary({
+  summaries,
+  classCounts,
+}: {
+  summaries: SetAssignmentSummary[];
+  classCounts: GradeClassCounts;
+}) {
+  const hasMismatch = summaries.some((s) => !s.matched);
+
+  if (summaries.length === 0) {
+    return (
+      <section
+        className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-sm"
+        aria-label="SET 시수 배정"
+      >
+        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-sm font-semibold text-zinc-900">SET 시수 배정</h2>
+          <p className="text-xs text-zinc-500">학년 · SET별 학급당 시수</p>
+        </div>
+        <p className="text-xs text-zinc-500">등록된 SET 교과가 없습니다.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section
+      className={`rounded-2xl border px-4 py-3 shadow-sm ${
+        hasMismatch
+          ? "border-amber-200 bg-amber-50"
+          : "border-zinc-200 bg-white"
+      }`}
+      aria-label="SET 시수 배정"
+    >
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h2
+          className={`text-sm font-semibold ${
+            hasMismatch ? "text-amber-950" : "text-zinc-900"
+          }`}
+        >
+          SET 시수 배정
+        </h2>
+        <p
+          className={`text-xs ${
+            hasMismatch ? "text-amber-800" : "text-zinc-500"
+          }`}
+        >
+          학급당 시수(총시수÷수업학반수) · 부분 SET는 지정 학반만 반영
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2.5">
+        {GRADES.map((grade) => {
+          const gradeSets = summaries.filter((s) => s.grade === grade);
+          if (gradeSets.length === 0) return null;
+
+          const n = classCounts[grade];
+
+          return (
+            <div
+              key={grade}
+              className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm"
+            >
+              <span
+                className={`w-12 shrink-0 font-medium ${
+                  gradeSets.every((s) => s.matched)
+                    ? "text-zinc-700"
+                    : "text-amber-900"
+                }`}
+              >
+                {grade}학년
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {gradeSets.map((item) => {
+                  const divisor = Math.max(1, item.classSum);
+                  const assignedPer = perClassSetHours(
+                    item.assignedHours,
+                    divisor,
+                  );
+                  const requiredPer = perClassSetHours(
+                    item.requiredHours,
+                    divisor,
+                  );
+                  const fill = assignmentFillClass(assignedPer, requiredPer);
+                  const roomsLabel = formatPartialRoomsLabel(item, n);
+                  const teacherHint =
+                    item.teachers.length > 0
+                      ? item.teachers.join(", ")
+                      : "배정 교사 없음";
+                  const subjectHint = item.subjects
+                    .map((s) => {
+                      const room =
+                        typeof s.classNo === "number"
+                          ? ` (${classNoLabel(s.classNo, n)})`
+                          : "";
+                      return `${s.name}${room} ${formatPerClassSetHours(s.assigned, s.classCount)}/${formatPerClassSetHours(s.required, s.classCount)}`;
+                    })
+                    .join(" · ");
+                  return (
+                    <span
+                      key={`${item.grade}-${item.set}`}
+                      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs ${subjectSetBadgeClass(item.set)} ${
+                        item.matched ? "" : "ring-1 ring-amber-400"
+                      }`}
+                      title={`${item.set}세트 · ${setKindLabel(item.kind)}${
+                        item.units !== null ? ` · 단위 ${item.units}` : ""
+                      } · 수업학반 ${divisor}${
+                        roomsLabel ? ` · ${roomsLabel}` : ""
+                      }\n${subjectHint}\n교사합계 ${item.assignedHours}/${item.requiredHours}\n${teacherHint}`}
+                    >
+                      <span className="font-medium">{item.set}</span>
+                      <span className={`tabular-nums ${fill}`}>
+                        {formatPerClassSetHours(item.assignedHours, divisor)}/
+                        {formatPerClassSetHours(item.requiredHours, divisor)}
+                      </span>
+                      <span className="opacity-70">
+                        {setKindLabel(item.kind)}
+                      </span>
+                      {roomsLabel ? (
+                        <span className="font-medium opacity-90">
+                          {roomsLabel}
+                        </span>
+                      ) : null}
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {hasMismatch ? (
+        <p className="mt-2 text-xs text-amber-900" role="alert">
+          SET 교과 배정 시수가 필요 시수와 다른 항목이 있습니다. 배지를
+          확인한 뒤 교사 시수를 맞춰 주세요.
         </p>
       ) : null}
     </section>
@@ -1027,16 +1406,17 @@ export function TeachersForm({ termId }: TeachersFormProps) {
       );
       return;
     }
-    const unbalanced = classCommonHourBalances(
+    const totalMismatches = classTotalHourMismatches(
       teachers,
       subjects,
       gradeClassCounts,
-    ).filter((b) => !b.balanced && b.perClass.length > 0);
-    if (unbalanced.length > 0) {
-      const first = unbalanced[0];
+      schedules,
+    );
+    if (totalMismatches.length > 0) {
+      const first = totalMismatches[0];
       setStatus("error");
       setMessage(
-        `${first.grade}학년 학반별 공통 시수가 다릅니다. (최소 ${first.min} · 최대 ${first.max}) 학반 칸을 맞춰 주세요.`,
+        `${first.grade}학년 ${first.classNo}반 총 시수(${first.total})가 주간 교시(${first.weekdaySum})와 다릅니다. 학반별 총 시수를 맞춰 주세요.`,
       );
       return;
     }
@@ -1053,12 +1433,21 @@ export function TeachersForm({ termId }: TeachersFormProps) {
     () => classCommonHourBalances(teachers, subjects, gradeClassCounts),
     [teachers, subjects, gradeClassCounts],
   );
-  const classHoursBalanced = useMemo(
-    () =>
-      classBalances.every((b) => b.balanced || b.perClass.length === 0),
-    [classBalances],
+  const setSummaries = useMemo(
+    () => setAssignmentSummaries(teachers, subjects, gradeClassCounts),
+    [teachers, subjects, gradeClassCounts],
   );
-  const canProceed = hoursComplete && classHoursBalanced;
+  const classTotalsMatched = useMemo(
+    () =>
+      classTotalHourMismatches(
+        teachers,
+        subjects,
+        gradeClassCounts,
+        schedules,
+      ).length === 0,
+    [teachers, subjects, gradeClassCounts, schedules],
+  );
+  const canProceed = hoursComplete && classTotalsMatched;
 
   if (loading) {
     return (
@@ -1107,6 +1496,11 @@ export function TeachersForm({ termId }: TeachersFormProps) {
       <ClassCommonHoursSummary
         balances={classBalances}
         schedules={schedules}
+      />
+
+      <SetHoursAssignmentSummary
+        summaries={setSummaries}
+        classCounts={gradeClassCounts}
       />
 
       <div className="grid w-full grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
@@ -1355,7 +1749,15 @@ export function TeachersForm({ termId }: TeachersFormProps) {
           </button>
         </section>
 
-        <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm xl:sticky xl:top-4 xl:self-start xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
+        <div className="flex flex-col gap-4 xl:sticky xl:top-4 xl:self-start">
+          <ClassTotalHoursSummary
+            teachers={teachers}
+            subjects={subjects}
+            classCounts={gradeClassCounts}
+            schedules={schedules}
+          />
+
+          <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
           <h2 className="mb-3 text-center text-base font-semibold text-zinc-900">
             교과 목록
           </h2>
@@ -1392,6 +1794,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
             })}
           </div>
         </section>
+        </div>
       </div>
 
       <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
@@ -1408,7 +1811,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
               ? undefined
               : !hoursComplete
                 ? "모든 교과의 배정 시수가 필요 시수와 같아야 합니다."
-                : "학년 내 학반별 공통 시수 합이 같아야 합니다."
+                : "학반별 총 시수가 주간 교시와 모두 같아야 합니다."
           }
         >
           <button
@@ -1426,10 +1829,10 @@ export function TeachersForm({ termId }: TeachersFormProps) {
           교과 목록의 배정 시수와 필요 시수가 모두 일치해야 다음으로 진행할 수
           있습니다.
         </p>
-      ) : !classHoursBalanced ? (
+      ) : !classTotalsMatched ? (
         <p className="text-center text-xs text-zinc-500">
-          같은 학년의 학반별 공통 시수 합이 모두 같아야 다음으로 진행할 수
-          있습니다. (SET 시수는 제외)
+          학반별 총 시수(공통+SET)가 주간 교시와 모두 같아야 다음으로 진행할 수
+          있습니다.
         </p>
       ) : null}
 

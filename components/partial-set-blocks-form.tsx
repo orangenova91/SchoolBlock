@@ -380,7 +380,10 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const ok = await savePartial("부분 SET 블록이 저장되었습니다.", true);
-    if (ok) router.push(`/terms/${termId}/constraints`);
+    // Full navigation so a stale client bundle cannot skip to /constraints.
+    if (ok) {
+      window.location.assign(`/terms/${termId}/blocks`);
+    }
   }
 
   if (loading) {
@@ -403,7 +406,7 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
     <form onSubmit={handleSubmit} className="flex w-full flex-col gap-6">
       <header className="text-center">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          부분 SET 블록 배치
+          SET 블록 배치(2/2)
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
           부분 SET를 요일·교시에 배치하세요. 전학년 SET 칸은 잠겨 있습니다.

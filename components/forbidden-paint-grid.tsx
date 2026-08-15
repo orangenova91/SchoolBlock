@@ -9,10 +9,17 @@ import {
 
 type PaintMode = "paint" | "erase";
 
+export type ForbiddenLockedLabel = "블록" | "SET";
+
 type ForbiddenPaintGridProps = {
   maxByDay: WeekdayPeriods;
   /** Set of `${day}|${period}` that are forbidden for the selected teacher. */
   forbiddenKeys: Set<string>;
+  /**
+   * Slots locked by 교과 블록 / SET for this teacher — cannot paint 배정 불가.
+   * Keys: `${day}|${period}` → display label.
+   */
+  lockedLabels?: Map<string, ForbiddenLockedLabel>;
   onToggle: (day: Weekday, period: number, mode: PaintMode) => void;
 };
 
@@ -24,9 +31,22 @@ function cellKey(day: Weekday, period: number) {
   return `${day}|${period}`;
 }
 
+function lockedTitle(label: ForbiddenLockedLabel): string {
+  return label === "SET"
+    ? "SET으로 이미 배정된 시간입니다."
+    : "블록 수업으로 이미 배정된 시간입니다.";
+}
+
+function lockedClassName(label: ForbiddenLockedLabel): string {
+  return label === "SET"
+    ? "cursor-not-allowed border-violet-200 bg-violet-50 text-violet-900"
+    : "cursor-not-allowed border-sky-200 bg-sky-50 text-sky-800";
+}
+
 export function ForbiddenPaintGrid({
   maxByDay,
   forbiddenKeys,
+  lockedLabels,
   onToggle,
 }: ForbiddenPaintGridProps) {
   const maxPeriod = Math.max(0, ...WEEKDAYS.map(({ key }) => maxByDay[key] ?? 0));
@@ -49,6 +69,7 @@ export function ForbiddenPaintGrid({
     if (!(el instanceof HTMLElement)) return;
     const cell = el.closest<HTMLElement>("[data-day][data-period]");
     if (!cell) return;
+    if (cell.dataset.locked === "1") return;
     const day = cell.dataset.day;
     const period = Number(cell.dataset.period);
     if (!day || !isWeekday(day) || !Number.isInteger(period)) return;
@@ -108,17 +129,23 @@ export function ForbiddenPaintGrid({
             </div>
             {WEEKDAYS.map(({ key }) => {
               const active = (maxByDay[key] ?? 0) >= period;
+              const lockedLabel = active
+                ? lockedLabels?.get(cellKey(key, period))
+                : undefined;
+              const locked = Boolean(lockedLabel);
               const forbidden =
-                active && forbiddenKeys.has(cellKey(key, period));
+                active && !locked && forbiddenKeys.has(cellKey(key, period));
               return (
                 <button
                   key={`${key}-${period}`}
                   type="button"
                   data-day={key}
                   data-period={period}
-                  disabled={!active}
+                  data-locked={locked ? "1" : undefined}
+                  disabled={!active || locked}
+                  title={lockedLabel ? lockedTitle(lockedLabel) : undefined}
                   onPointerDown={(event) => {
-                    if (!active) return;
+                    if (!active || locked) return;
                     event.preventDefault();
                     modeRef.current = forbidden ? "erase" : "paint";
                     draggingRef.current = true;
@@ -128,12 +155,20 @@ export function ForbiddenPaintGrid({
                   className={`min-h-10 rounded-md border text-[10px] font-medium transition ${
                     !active
                       ? "cursor-default border-zinc-100 bg-zinc-100"
-                      : forbidden
-                        ? "border-rose-400 bg-rose-100 text-rose-900"
-                        : "border-zinc-200 bg-white text-zinc-400 hover:border-zinc-300 hover:bg-zinc-50"
+                      : lockedLabel
+                        ? lockedClassName(lockedLabel)
+                        : forbidden
+                          ? "border-rose-400 bg-rose-100 text-rose-900"
+                          : "border-zinc-200 bg-white text-zinc-400 hover:border-zinc-300 hover:bg-zinc-50"
                   }`}
                 >
-                  {active ? (forbidden ? "불가" : "") : ""}
+                  {active
+                    ? lockedLabel
+                      ? lockedLabel
+                      : forbidden
+                        ? "불가"
+                        : ""
+                    : ""}
                 </button>
               );
             })}

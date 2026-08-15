@@ -340,7 +340,7 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
     <form onSubmit={handleSubmit} className="flex w-full flex-col gap-6">
       <header className="text-center">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          SET 블록 배치
+          SET 블록 배치(1/2)
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
           전학년 SET를 요일·교시에 배치하세요. 같은 칸에는 SET 하나만 들어갈 수

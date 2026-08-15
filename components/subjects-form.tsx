@@ -9,6 +9,7 @@ import {
   applyClassCountsFromClipboard,
   classNoLabel,
   ensureGradeSubjects,
+  isAlphaClassNo,
   isElectiveSubjectSet,
   partialClassNoOptions,
   sanitizeGradeSubjects,
@@ -75,11 +76,21 @@ function withEditRows(subjects: GradeSubjects): GradeSubjects {
   return next;
 }
 
-function gradeTotalHours(subjects: Subject[]): number {
-  return subjects.reduce(
-    (sum, row) => sum + row.units * row.classCount,
-    0,
-  );
+/** Home-room curriculum hours; excludes partial-SET +α (이동 분반). */
+function gradeTotalHours(
+  subjects: Subject[],
+  gradeClassCount: number,
+): number {
+  return subjects.reduce((sum, row) => {
+    if (
+      isElectiveSubjectSet(row.set) &&
+      typeof row.classNo === "number" &&
+      isAlphaClassNo(row.classNo, gradeClassCount)
+    ) {
+      return sum;
+    }
+    return sum + row.units * row.classCount;
+  }, 0);
 }
 
 function buildScheduleTotals(
@@ -132,9 +143,9 @@ function SubjectClassCountEditor({
       <div className="grid w-full grid-cols-1 gap-4 lg:grid-cols-3">
         {GRADES.map((grade) => {
           const rows = subjects[grade];
-          const totalHours = gradeTotalHours(rows);
+          const gradeClassCount = scheduleTotals?.[grade]?.classCount ?? 0;
+          const totalHours = gradeTotalHours(rows, gradeClassCount);
           const isSaving = savingGrade === grade;
-          const gradeClassCount = scheduleTotals?.[grade]?.classCount;
 
           return (
             <section
@@ -314,7 +325,7 @@ function SubjectClassCountEditor({
                       <span className="tabular-nums">{totalHours}</span>
                     </p>
                     <p className="mt-0.5 text-xs text-zinc-500">
-                      Σ(단위수 × 수업 학반 수)
+                      Σ(단위수 × 수업 학반 수) · 부분 SET +α 제외
                     </p>
                     <button
                       type="button"
@@ -335,7 +346,10 @@ function SubjectClassCountEditor({
       <div className="grid w-full grid-cols-1 gap-4 lg:grid-cols-3">
         {GRADES.map((grade) => {
           const schedule = scheduleTotals?.[grade];
-          const subjectTotal = gradeTotalHours(subjects[grade]);
+          const subjectTotal = gradeTotalHours(
+            subjects[grade],
+            schedule?.classCount ?? 0,
+          );
           const matched =
             schedule !== undefined ? subjectTotal === schedule.total : null;
 
@@ -670,7 +684,8 @@ export function SubjectsForm({
       !scheduleTotals ||
       !GRADES.every(
         (grade) =>
-          gradeTotalHours(subjects[grade]) === scheduleTotals[grade].total,
+          gradeTotalHours(subjects[grade], scheduleTotals[grade].classCount) ===
+          scheduleTotals[grade].total,
       )
     ) {
       setStatus("error");
@@ -710,7 +725,8 @@ export function SubjectsForm({
     scheduleTotals !== null &&
     GRADES.every(
       (grade) =>
-        gradeTotalHours(subjects[grade]) === scheduleTotals[grade].total,
+        gradeTotalHours(subjects[grade], scheduleTotals[grade].classCount) ===
+        scheduleTotals[grade].total,
     );
   const setAssignmentError = isStep2
     ? validateSetClassAssignments(subjects, gradeClassCounts)

@@ -5,6 +5,12 @@ import {
   teachersForGradeSet,
   type GradeSetInfo,
 } from "@/lib/set-blocks";
+import {
+  consumeLessonsForSubjectBlocks,
+  filterSubjectBlocksToAssignments,
+  markBusyFromSubjectBlocks,
+  subjectBlocksToTimetableCells,
+} from "@/lib/subject-blocks";
 import { isSetSubject } from "@/lib/teachers";
 import {
   GRADES,
@@ -14,6 +20,7 @@ import {
   type GradeDaySchedules,
   type GradeSubjects,
   type SetBlockCell,
+  type SubjectBlockCell,
   type Teacher,
   type TeacherForbiddenSlot,
   type TimetableCell,
@@ -749,6 +756,8 @@ export type GenerateTimetableInput = {
   schedules: GradeDaySchedules;
   wholeCells: SetBlockCell[];
   partialCells: SetBlockCell[];
+  /** Pre-locked common lessons (교과 블록). */
+  subjectBlocks?: SubjectBlockCell[];
   /** Slots where the teacher must not teach (weekday + period). */
   forbiddenSlots?: TeacherForbiddenSlot[];
   /** Wall-clock budget for search (ms). */
@@ -774,6 +783,7 @@ export function generateTimetable(
     schedules,
     wholeCells,
     partialCells,
+    subjectBlocks = [],
     forbiddenSlots = [],
     timeLimitMs = 10_000,
     restarts = 20,
@@ -789,6 +799,15 @@ export function generateTimetable(
     catalog,
   });
 
+  const lockedBlocks = filterSubjectBlocksToAssignments(
+    subjectBlocks,
+    teachers,
+    subjects,
+    classCounts,
+    schedules,
+  );
+  const blockCells = subjectBlocksToTimetableCells(lockedBlocks);
+
   const classBusySeed = new Set<string>();
   const teacherBusySeed = new Set<string>();
   markBusyFromSetCells(setCells, classBusySeed, teacherBusySeed);
@@ -799,9 +818,14 @@ export function generateTimetable(
     catalog,
     teacherBusySeed,
   );
+  markBusyFromSubjectBlocks(lockedBlocks, classBusySeed, teacherBusySeed);
   markTeacherBusyFromForbidden(forbiddenSlots, teacherBusySeed);
 
-  const lessons = expandCommonLessons(teachers, subjects, classCounts);
+  const allLessons = expandCommonLessons(teachers, subjects, classCounts);
+  const { remaining: lessons } = consumeLessonsForSubjectBlocks(
+    allLessons,
+    lockedBlocks,
+  );
 
   const capacityError = teacherCapacityIssues(
     lessons,
@@ -859,7 +883,7 @@ export function generateTimetable(
 
   if (unplacedCount === 0) {
     return {
-      cells: [...setCells, ...commonCells],
+      cells: [...setCells, ...blockCells, ...commonCells],
       unplaced: [],
       attemptsUsed: solved.attemptsUsed,
       status: "ready",
@@ -870,7 +894,7 @@ export function generateTimetable(
   const hint = capacityError ? ` ${capacityError}` : "";
 
   return {
-    cells: [...setCells, ...commonCells],
+    cells: [...setCells, ...blockCells, ...commonCells],
     unplaced,
     attemptsUsed: solved.attemptsUsed,
     status: "failed",
@@ -905,14 +929,17 @@ function prepareBusySeeds(input: {
   teachers: Teacher[];
   subjects: GradeSubjects;
   classCounts: GradeClassCounts;
+  schedules: GradeDaySchedules;
   wholeCells: SetBlockCell[];
   partialCells: SetBlockCell[];
+  subjectBlocks?: SubjectBlockCell[];
   forbiddenSlots?: TeacherForbiddenSlot[];
 }): {
   catalog: GradeSetInfo[];
   setCells: TimetableCell[];
   classBusySeed: Set<string>;
   teacherBusySeed: Set<string>;
+  lockedBlocks: SubjectBlockCell[];
 } {
   const catalog = catalogGradeSets(input.subjects, input.classCounts);
   const setCells = buildSetCells({
@@ -923,6 +950,13 @@ function prepareBusySeeds(input: {
     teachers: input.teachers,
     catalog,
   });
+  const lockedBlocks = filterSubjectBlocksToAssignments(
+    input.subjectBlocks ?? [],
+    input.teachers,
+    input.subjects,
+    input.classCounts,
+    input.schedules,
+  );
   const classBusySeed = new Set<string>();
   const teacherBusySeed = new Set<string>();
   markBusyFromSetCells(setCells, classBusySeed, teacherBusySeed);
@@ -933,8 +967,9 @@ function prepareBusySeeds(input: {
     catalog,
     teacherBusySeed,
   );
+  markBusyFromSubjectBlocks(lockedBlocks, classBusySeed, teacherBusySeed);
   markTeacherBusyFromForbidden(input.forbiddenSlots ?? [], teacherBusySeed);
-  return { catalog, setCells, classBusySeed, teacherBusySeed };
+  return { catalog, setCells, classBusySeed, teacherBusySeed, lockedBlocks };
 }
 
 export type TimetableSpaceUpperBound = {
@@ -958,11 +993,19 @@ export type TimetableSpaceUpperBound = {
 export function estimateIndependentUpperBound(
   input: Omit<GenerateTimetableInput, "timeLimitMs" | "restarts">,
 ): TimetableSpaceUpperBound {
-  const { classBusySeed, teacherBusySeed } = prepareBusySeeds(input);
-  const lessons = expandCommonLessons(
+  const { classBusySeed, teacherBusySeed, lockedBlocks } =
+    prepareBusySeeds({
+      ...input,
+      schedules: input.schedules,
+    });
+  const allLessons = expandCommonLessons(
     input.teachers,
     input.subjects,
     input.classCounts,
+  );
+  const { remaining: lessons } = consumeLessonsForSubjectBlocks(
+    allLessons,
+    lockedBlocks,
   );
 
   type Group = { count: number; domain: number };

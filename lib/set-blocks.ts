@@ -258,6 +258,87 @@ export function teachersForGradeSet(
   ];
 }
 
+export type SetAssignmentSubjectRow = {
+  name: string;
+  assigned: number;
+  required: number;
+  classCount: number;
+  classNo?: number;
+};
+
+export type SetAssignmentSummary = {
+  grade: Grade;
+  set: ElectiveSet;
+  kind: GradeSetKind;
+  units: number | null;
+  classSum: number;
+  requiredHours: number;
+  assignedHours: number;
+  matched: boolean;
+  teachers: string[];
+  /** Home rooms (1…N) for partial SET; empty for whole-grade. */
+  homeRooms: number[];
+  hasAlpha: boolean;
+  subjects: SetAssignmentSubjectRow[];
+};
+
+/** Per grade·SET teacher-hour totals vs subject requirements. */
+export function setAssignmentSummaries(
+  teachers: Teacher[],
+  subjects: GradeSubjects,
+  classCounts: GradeClassCounts,
+): SetAssignmentSummary[] {
+  const catalog = catalogGradeSets(subjects, classCounts);
+  const hoursBySubject = new Map<string, number>();
+
+  for (const teacher of teachers) {
+    for (const grade of GRADES) {
+      for (const item of teacher.assignments[grade] ?? []) {
+        const key = `${grade}:${item.name}`;
+        hoursBySubject.set(key, (hoursBySubject.get(key) ?? 0) + (item.hours ?? 0));
+      }
+    }
+  }
+
+  return catalog.map((info) => {
+    const n = classCounts[info.grade];
+    const subjectRows: SetAssignmentSubjectRow[] = info.subjects.map((s) => {
+      const classCount = Math.max(1, s.classCount);
+      const required = s.units * classCount;
+      const assigned = hoursBySubject.get(`${info.grade}:${s.name}`) ?? 0;
+      return {
+        name: s.name,
+        assigned,
+        required,
+        classCount,
+        ...(typeof s.classNo === "number" ? { classNo: s.classNo } : {}),
+      };
+    });
+    const requiredHours = subjectRows.reduce((sum, row) => sum + row.required, 0);
+    const assignedHours = subjectRows.reduce((sum, row) => sum + row.assigned, 0);
+    const shares = setTeacherShares(teachers, info);
+    const homeRooms =
+      info.kind === "partial" ? homeRoomsForPartialSet(info, n) : [];
+    const hasAlpha =
+      info.kind === "partial" ? partialSetHasAlpha(info, n) : false;
+
+    return {
+      grade: info.grade,
+      set: info.set,
+      kind: info.kind,
+      units: info.units,
+      classSum: info.classSum,
+      requiredHours,
+      assignedHours,
+      matched: subjectRows.every((row) => row.assigned === row.required),
+      teachers: [...new Set(shares.map((s) => s.teacherName))],
+      homeRooms,
+      hasAlpha,
+      subjects: subjectRows,
+    };
+  });
+}
+
 export function parseSetBlockCells(value: unknown): SetBlockCell[] | null {
   if (!Array.isArray(value)) return null;
 
@@ -877,6 +958,84 @@ export function partialSetHoursByClass(
     next[grade] = per;
   }
   return next;
+}
+
+/** Total SET hours per home room (whole-grade + partial; excludes +α). */
+export function setHoursByClass(
+  catalog: GradeSetInfo[],
+  classCounts: GradeClassCounts,
+): Record<Grade, number[]> {
+  const next = {} as Record<Grade, number[]>;
+  const partial = partialSetHoursByClass(catalog, classCounts);
+
+  for (const grade of GRADES) {
+    const n = classCounts[grade];
+    const whole = wholeGradeSetHours(catalog, grade);
+    const part = partial[grade] ?? [];
+    next[grade] = Array.from({ length: n }, (_, i) => whole + (part[i] ?? 0));
+  }
+
+  return next;
+}
+
+/** Common + SET hours per home room. */
+export function totalHoursByClass(
+  teachers: Teacher[],
+  subjects: GradeSubjects,
+  classCounts: GradeClassCounts,
+): Record<Grade, number[]> {
+  const common = commonHoursByClass(teachers, subjects, classCounts);
+  const catalog = catalogGradeSets(subjects, classCounts);
+  const setHours = setHoursByClass(catalog, classCounts);
+  const next = {} as Record<Grade, number[]>;
+
+  for (const grade of GRADES) {
+    const n = classCounts[grade];
+    const c = common[grade] ?? [];
+    const s = setHours[grade] ?? [];
+    next[grade] = Array.from(
+      { length: n },
+      (_, i) => (c[i] ?? 0) + (s[i] ?? 0),
+    );
+  }
+
+  return next;
+}
+
+export type ClassTotalHourMismatch = {
+  grade: Grade;
+  classNo: number;
+  total: number;
+  weekdaySum: number;
+};
+
+/** Classes whose common+SET total does not equal weekly periods. */
+export function classTotalHourMismatches(
+  teachers: Teacher[],
+  subjects: GradeSubjects,
+  classCounts: GradeClassCounts,
+  schedules: GradeDaySchedules,
+): ClassTotalHourMismatch[] {
+  const totals = totalHoursByClass(teachers, subjects, classCounts);
+  const issues: ClassTotalHourMismatch[] = [];
+
+  for (const grade of GRADES) {
+    const weekdaySum = sumWeekdayPeriods(schedules[grade]);
+    if (weekdaySum <= 0) continue;
+    const perClass = totals[grade] ?? [];
+    perClass.forEach((total, index) => {
+      if (total !== weekdaySum) {
+        issues.push({
+          grade,
+          classNo: index + 1,
+          total,
+          weekdaySum,
+        });
+      }
+    });
+  }
+
+  return issues;
 }
 
 export function partialClassCapacityIssues(

@@ -244,8 +244,8 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           시간표
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
-          SET 블록을 고정하고 교사 배정 불가 교시를 반영한 뒤 공통 수업을
-          자동 배치합니다. 나중에 교과 블록 조건을 추가할 수 있습니다.
+          SET 블록·교과 블록을 고정하고 교사 배정 불가 교시를 반영한 뒤 공통
+          수업을 자동 배치합니다.
         </p>
       </header>
 

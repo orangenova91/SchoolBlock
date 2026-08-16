@@ -415,7 +415,10 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
       "배정 불가 교시가 저장되었습니다.",
       true,
     );
-    if (ok) router.push(`/terms/${termId}/timetable`);
+    // Full navigation so a stale client bundle cannot skip to /timetable.
+    if (ok) {
+      window.location.assign(`/terms/${termId}/preferences`);
+    }
   }
 
   if (loading) {

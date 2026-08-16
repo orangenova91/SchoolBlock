@@ -36,6 +36,10 @@ export const WEEKDAYS: { key: Weekday; label: string }[] = [
   { key: "fri", label: "금" },
 ];
 
+export function dayLabel(day: Weekday): string {
+  return WEEKDAYS.find((d) => d.key === day)?.label ?? day;
+}
+
 export const GRADES: Grade[] = [1, 2, 3];
 
 export const DEFAULT_PERIODS = 7;
@@ -202,11 +206,30 @@ export type SetBlockCell = {
   period: number;
 };
 
+/**
+ * When a SET subject is shared by multiple teachers who rotate (e.g. 3
+ * teachers covering 1 period each of a 3-period subject), only one of them
+ * actually teaches — and is therefore "busy" — at any given occurrence.
+ * This records which specific teacher covers a specific placed slot for a
+ * specific subject, so busy-marking doesn't conservatively assume all of
+ * the subject's teachers are occupied at every occurrence.
+ */
+export type SetTeacherAssignment = {
+  grade: Grade;
+  set: ElectiveSet;
+  day: Weekday;
+  period: number;
+  subjectName: string;
+  teacherName: string;
+};
+
 export type SetBlocksDocument = {
   termId: string;
   cells: SetBlockCell[];
   /** Partial SET placements; multiple SETs may share a slot if home-rooms do not overlap. */
   partialCells?: SetBlockCell[];
+  /** Per-slot teacher resolution for multi-teacher rotating SET subjects. */
+  teacherAssignments?: SetTeacherAssignment[];
   updatedAt: Date;
 };
 
@@ -229,6 +252,45 @@ export type TimetableUnplaced = {
   classNo: number;
   subjectName: string;
   remaining: number;
+  /**
+   * Diagnostic classification of why this lesson stayed unplaced, computed
+   * against the final committed schedule:
+   * - "impossible": zero slots exist where both the class and teacher are
+   *   free — retrying/waiting longer will not help, the layout must change.
+   * - "contention": at least one free slot exists in isolation, but other
+   *   lessons ended up occupying it — a matching/ordering limitation.
+   */
+  reason?: "impossible" | "contention";
+};
+
+/** One instance of a soft-preference violation (lunch double or triple run). */
+export type SoftRunDetail = {
+  kind: "lunch" | "triple";
+  grade: Grade;
+  classNo: number;
+  day: Weekday;
+  subjectName: string;
+  teacherName: string;
+  /** Inclusive start/end period of the run. */
+  startPeriod: number;
+  endPeriod: number;
+};
+
+/** A (grade, subject) pair selected as "같은 날 중복 배치 금지" target. */
+export type SameDaySubjectBan = {
+  grade: Grade;
+  subjectName: string;
+};
+
+/** One instance of the same subject landing twice (or more) on the same day. */
+export type SameDaySubjectViolation = {
+  grade: Grade;
+  classNo: number;
+  day: Weekday;
+  subjectName: string;
+  teacherName: string;
+  /** Periods this subject occupies on this day (2+, ascending). */
+  periods: number[];
 };
 
 export type TimetableDocument = {
@@ -239,6 +301,38 @@ export type TimetableDocument = {
   generatedAt?: Date;
   updatedAt: Date;
   message?: string;
+  /**
+   * Lunch-double diagnostics for the committed `cells`, computed regardless
+   * of whether the 점심시간 연강 배제 preference was on — so users can check
+   * how many lunch doubles remain even when generating with it off.
+   */
+  lunchDoubleCount?: number;
+  lunchDoubles?: SoftRunDetail[];
+  /**
+   * Lunch-priority stage (테스트용 2단계 배치): lunch-adjacent lessons chosen
+   * ahead of the rest of the schedule. Stored in 교과 블록 cell format so they
+   * can be merged as fixed cells for the "남은 시간 시간표 배치" step.
+   */
+  lunchLockCells?: SubjectBlockCell[];
+  lunchStatus?: "idle" | "ready" | "failed";
+  lunchMessage?: string;
+  lunchGeneratedAt?: Date;
+  /**
+   * Same-day-subject diagnostics for the committed `cells`, computed
+   * regardless of whether 동일 교과 같은 날 배치 금지 was on.
+   */
+  sameDaySubjectViolationCount?: number;
+  sameDaySubjectViolations?: SameDaySubjectViolation[];
+  /**
+   * Same-day-subject priority stage (테스트용 우선 배치): banned-subject
+   * lessons spread across distinct days ahead of the rest of the schedule.
+   * Stored in 교과 블록 cell format so they can be merged as fixed cells for
+   * the "남은 시간 시간표 배치" step.
+   */
+  sameDaySubjectLockCells?: SubjectBlockCell[];
+  sameDaySubjectStatus?: "idle" | "ready" | "failed";
+  sameDaySubjectMessage?: string;
+  sameDaySubjectGeneratedAt?: Date;
 };
 
 /** Teacher cannot be assigned any lesson at this weekday + period. */
@@ -267,5 +361,27 @@ export type SubjectBlockCell = {
 export type SubjectBlocksDocument = {
   termId: string;
   cells: SubjectBlockCell[];
+  updatedAt: Date;
+};
+
+/**
+ * Soft preferences for timetable generation (not hard bans).
+ * Extensible for future weights (e.g. avoid 3-period runs).
+ */
+export type GenerationPreferences = {
+  /** Prefer not assigning the same teacher across lunch (N and N+1). */
+  avoidLunchDouble: boolean;
+  /** Period immediately before lunch (e.g. 4 → avoid teacher on 4 and 5). */
+  lunchAfterPeriod: number;
+  /** Prefer not placing same class+subject for 3 consecutive periods. */
+  avoidTriplePeriod: boolean;
+  /** Master switch: avoid placing the selected subjects twice on the same day. */
+  avoidSameDaySubject: boolean;
+  /** Per-grade subjects selected for the same-day-duplicate ban. */
+  sameDaySubjectBans: SameDaySubjectBan[];
+};
+
+export type GenerationPreferencesDocument = GenerationPreferences & {
+  termId: string;
   updatedAt: Date;
 };

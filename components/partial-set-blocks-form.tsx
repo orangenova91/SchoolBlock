@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { PartialSetBlockGrid } from "@/components/partial-set-block-grid";
 import {
+  assignedTeacherAt,
   blockedPartialSlotsForSet,
   catalogGradeSets,
   countPartialPlaced,
@@ -16,11 +17,15 @@ import {
   partialSetHasAlpha,
   partialSetsMissingClassNos,
   partialSetsPlacementComplete,
+  recommendSubjectRotations,
   removePartialCell,
   setTeacherShares,
   slotKey,
+  slotsForGradeSet,
+  subjectsNeedingRotation,
   tryPaintPartialCell,
   type GradeSetInfo,
+  type SetTeacherShare,
 } from "@/lib/set-blocks";
 import {
   classNoLabel,
@@ -31,6 +36,7 @@ import {
 import { ensureTeachers, sanitizeTeachers } from "@/lib/teachers";
 import {
   GRADES,
+  WEEKDAYS,
   createDefaultClassCounts,
   createDefaultGradeDaySchedules,
   createDefaultGradeSubjects,
@@ -42,6 +48,7 @@ import {
   type GradeSubjects,
   type Semester,
   type SetBlockCell,
+  type SetTeacherAssignment,
   type Teacher,
   type Weekday,
 } from "@/lib/types";
@@ -83,6 +90,9 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
   );
   const [wholeCells, setWholeCells] = useState<SetBlockCell[]>([]);
   const [partialCells, setPartialCells] = useState<SetBlockCell[]>([]);
+  const [teacherAssignments, setTeacherAssignments] = useState<
+    SetTeacherAssignment[]
+  >([]);
   const [selectedSet, setSelectedSet] = useState<ElectiveSet | null>(null);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<"idle" | "saving" | "success" | "error">(
@@ -110,6 +120,7 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
           term?: TermSummary;
           cells?: SetBlockCell[];
           partialCells?: SetBlockCell[];
+          teacherAssignments?: SetTeacherAssignment[];
           error?: string;
         };
         const teachersData = (await teachersRes.json()) as {
@@ -173,6 +184,11 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
               loadedSchedules,
               catalog,
             ),
+          );
+          setTeacherAssignments(
+            Array.isArray(blocksData.teacherAssignments)
+              ? blocksData.teacherAssignments
+              : [],
           );
           setStatus("idle");
         }
@@ -312,6 +328,37 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
     setMessage("");
   }
 
+  function applyRotation(entries: SetTeacherAssignment[]) {
+    if (entries.length === 0 || status === "saving") return;
+    setTeacherAssignments((prev) => {
+      const keep = prev.filter(
+        (a) =>
+          !entries.some(
+            (e) =>
+              e.grade === a.grade &&
+              e.set === a.set &&
+              e.day === a.day &&
+              e.period === a.period &&
+              e.subjectName === a.subjectName,
+          ),
+      );
+      return [...keep, ...entries];
+    });
+    setStatus("idle");
+    setMessage("담당 교사 조합을 적용했습니다. 저장을 눌러 반영해 주세요.");
+  }
+
+  function resetCells() {
+    if (status === "saving" || partialCells.length === 0) return;
+    const confirmed = window.confirm(
+      "배치한 부분 SET 블록을 모두 초기화할까요? 저장을 눌러야 적용됩니다.",
+    );
+    if (!confirmed) return;
+    setPartialCells([]);
+    setStatus("idle");
+    setMessage("부분 SET 블록을 초기화했습니다. 저장을 눌러 반영해 주세요.");
+  }
+
   async function savePartial(
     successMessage: string,
     requireComplete: boolean,
@@ -343,10 +390,14 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
       const response = await fetch(`/api/terms/${termId}/set-blocks`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ partialCells: nextCells }),
+        body: JSON.stringify({
+          partialCells: nextCells,
+          teacherAssignments,
+        }),
       });
       const data = (await response.json()) as {
         partialCells?: SetBlockCell[];
+        teacherAssignments?: SetTeacherAssignment[];
         error?: string;
       };
 
@@ -362,6 +413,11 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
           schedules,
           catalog,
         ),
+      );
+      setTeacherAssignments(
+        Array.isArray(data.teacherAssignments)
+          ? data.teacherAssignments
+          : teacherAssignments,
       );
       setStatus("success");
       setMessage(successMessage);
@@ -539,6 +595,12 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
                   <PartialShareList
                     teachers={teachers}
                     info={findGradeSet(catalog, grade, selectedSet)}
+                    catalog={catalog}
+                    wholeCells={wholeCells}
+                    partialCells={partialCells}
+                    assignments={teacherAssignments}
+                    onApplyRotation={applyRotation}
+                    disabled={status === "saving"}
                   />
                 ) : null}
               </section>
@@ -560,6 +622,14 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
         >
           이전
+        </button>
+        <button
+          type="button"
+          onClick={resetCells}
+          disabled={status === "saving" || partialCells.length === 0}
+          className="rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          초기화
         </button>
         <button
           type="button"
@@ -609,9 +679,21 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
 function PartialShareList({
   teachers,
   info,
+  catalog,
+  wholeCells,
+  partialCells,
+  assignments,
+  onApplyRotation,
+  disabled,
 }: {
   teachers: Teacher[];
   info: GradeSetInfo | undefined;
+  catalog: GradeSetInfo[];
+  wholeCells: SetBlockCell[];
+  partialCells: SetBlockCell[];
+  assignments: SetTeacherAssignment[];
+  onApplyRotation: (entries: SetTeacherAssignment[]) => void;
+  disabled: boolean;
 }) {
   if (!info) return null;
   const shares = setTeacherShares(teachers, info);
@@ -623,13 +705,167 @@ function PartialShareList({
     );
   }
 
+  const rotations = subjectsNeedingRotation(teachers, info);
+  const slots = slotsForGradeSet(wholeCells, partialCells, info.grade, info.set);
+  const placementComplete = info.units !== null && slots.length === info.units;
+
   return (
-    <ul className="mt-3 flex flex-wrap justify-center gap-x-3 gap-y-1 text-[11px] text-zinc-600">
-      {shares.map((share) => (
-        <li key={`${share.teacherName}-${share.subjectName}`}>
-          {share.subjectName} · {share.teacherName} {share.hours}
-        </li>
-      ))}
-    </ul>
+    <div className="mt-3 flex flex-col items-center gap-3">
+      <ul className="flex flex-wrap justify-center gap-x-3 gap-y-1 text-[11px] text-zinc-600">
+        {shares.map((share) => (
+          <li key={`${share.teacherName}-${share.subjectName}`}>
+            {share.subjectName} · {share.teacherName} {share.hours}
+          </li>
+        ))}
+      </ul>
+
+      {placementComplete
+        ? rotations.map((rotation) => (
+            <RotationRecommendation
+              key={rotation.subjectName}
+              teachers={teachers}
+              catalog={catalog}
+              wholeCells={wholeCells}
+              partialCells={partialCells}
+              assignments={assignments}
+              grade={info.grade}
+              set={info.set}
+              subjectName={rotation.subjectName}
+              shares={rotation.shares}
+              slots={slots}
+              onApply={onApplyRotation}
+              disabled={disabled}
+            />
+          ))
+        : rotations.length > 0
+          ? (
+              <p className="max-w-md text-center text-[11px] text-amber-700">
+                {info.set}세트를 {info.units}교시 모두 배치하면, 여러 교사가
+                나눠 담당하는 과목의 교시별 담당자를 추천받을 수 있습니다.
+              </p>
+            )
+          : null}
+    </div>
+  );
+}
+
+function RotationRecommendation({
+  teachers,
+  catalog,
+  wholeCells,
+  partialCells,
+  assignments,
+  grade,
+  set,
+  subjectName,
+  shares,
+  slots,
+  onApply,
+  disabled,
+}: {
+  teachers: Teacher[];
+  catalog: GradeSetInfo[];
+  wholeCells: SetBlockCell[];
+  partialCells: SetBlockCell[];
+  assignments: SetTeacherAssignment[];
+  grade: Grade;
+  set: ElectiveSet;
+  subjectName: string;
+  shares: SetTeacherShare[];
+  slots: { day: Weekday; period: number }[];
+  onApply: (entries: SetTeacherAssignment[]) => void;
+  disabled: boolean;
+}) {
+  const dayLabel = (day: Weekday) =>
+    WEEKDAYS.find((d) => d.key === day)?.label ?? day;
+  const slotLabel = (slot: { day: Weekday; period: number }) =>
+    `${dayLabel(slot.day)}${slot.period}`;
+
+  const current = slots.map((slot) =>
+    assignedTeacherAt(
+      assignments,
+      grade,
+      set,
+      slot.day,
+      slot.period,
+      subjectName,
+    ),
+  );
+  const resolvedCount = current.filter(Boolean).length;
+
+  const combos = useMemo(
+    () =>
+      recommendSubjectRotations({
+        teachers,
+        catalog,
+        wholeCells,
+        partialCells,
+        assignments,
+        grade,
+        set,
+        shares,
+        slots,
+        limit: 5,
+      }),
+    [teachers, catalog, wholeCells, partialCells, assignments, grade, set, shares, slots],
+  );
+
+  return (
+    <div className="w-full max-w-md rounded-xl border border-amber-200 bg-amber-50 p-3 text-left text-[11px] text-amber-900">
+      <p className="font-medium">
+        &quot;{subjectName}&quot;은 여러 교사가 나눠 담당합니다 (
+        {resolvedCount}/{slots.length}교시 지정됨)
+      </p>
+      <ul className="mt-1 space-y-0.5">
+        {slots.map((slot, i) => (
+          <li key={slotLabel(slot)}>
+            {slotLabel(slot)}교시: {current[i] ?? "미지정 (전원 배제로 처리)"}
+          </li>
+        ))}
+      </ul>
+
+      {combos.length > 0 ? (
+        <div className="mt-2">
+          <p className="font-medium">추천 조합 (겹칠 수 있는 여지가 큰 순)</p>
+          <ul className="mt-1 space-y-1">
+            {combos.map((combo, idx) => (
+              <li key={idx}>
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() =>
+                    onApply(
+                      slots.map((slot, i) => ({
+                        grade,
+                        set,
+                        day: slot.day,
+                        period: slot.period,
+                        subjectName,
+                        teacherName: combo.teacherNames[i],
+                      })),
+                    )
+                  }
+                  className="w-full rounded-lg border border-amber-300 bg-white px-2 py-1 text-left transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {slots
+                    .map(
+                      (slot, i) =>
+                        `${slotLabel(slot)}:${combo.teacherNames[i]}`,
+                    )
+                    .join(" · ")}
+                  <span className="ml-2 text-amber-600">
+                    점수 {combo.score}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : (
+        <p className="mt-2 text-amber-700">
+          현재 배치된 슬롯 조합에서는 추천할 조합이 없습니다.
+        </p>
+      )}
+    </div>
   );
 }

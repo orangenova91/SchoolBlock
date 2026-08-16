@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
 import { parseClassCounts, parseGradeDaySchedules } from "@/lib/day-schedule";
+import { normalizeGenerationPreferences } from "@/lib/generation-preferences";
 import { getDb } from "@/lib/mongodb";
 import {
   catalogGradeSets,
@@ -20,6 +21,7 @@ import {
   createDefaultGradeSubjects,
   createDefaultTeachers,
   type DayScheduleDocument,
+  type GenerationPreferencesDocument,
   type SetBlocksDocument,
   type SubjectBlocksDocument,
   type SubjectsDocument,
@@ -81,6 +83,7 @@ export async function POST(request: Request, context: RouteContext) {
       setBlocksDoc,
       subjectBlocksDoc,
       constraintsDoc,
+      preferencesDoc,
     ] = await Promise.all([
       db.collection<TeachersDocument>("teachers").findOne({ termId }),
       db.collection<SubjectsDocument>("subjects").findOne({ termId }),
@@ -91,6 +94,9 @@ export async function POST(request: Request, context: RouteContext) {
         .findOne({ termId }),
       db
         .collection<TeacherConstraintsDocument>("teacherConstraints")
+        .findOne({ termId }),
+      db
+        .collection<GenerationPreferencesDocument>("generationPreferences")
         .findOne({ termId }),
     ]);
 
@@ -129,6 +135,7 @@ export async function POST(request: Request, context: RouteContext) {
       teachers,
       schedules,
     );
+    const preferences = normalizeGenerationPreferences(preferencesDoc);
 
     if (!wholeSetsPlacementComplete(wholeCells, catalog)) {
       return NextResponse.json(
@@ -152,6 +159,7 @@ export async function POST(request: Request, context: RouteContext) {
       partialCells,
       subjectBlocks,
       forbiddenSlots,
+      preferences,
       samples,
       timeLimitMs: 10_000,
       restarts: 20,

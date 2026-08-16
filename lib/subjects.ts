@@ -101,6 +101,11 @@ export function partialClassNoOptions(gradeClassCount: number): number[] {
   return Array.from({ length: gradeClassCount + 1 }, (_, i) => i + 1);
 }
 
+/** Whole-grade SET dropdown values: 1…N only (no +α — every room is already covered). */
+export function wholeClassNoOptions(gradeClassCount: number): number[] {
+  return Array.from({ length: gradeClassCount }, (_, i) => i + 1);
+}
+
 /** Normalize one subject: SET → classCount 1; 공통 → no classNo. */
 export function normalizeSubject(
   raw: Partial<Subject> | null | undefined,
@@ -252,6 +257,25 @@ export function parseGradeSubjects(value: unknown): GradeSubjects | null {
   return ensureGradeSubjects(value as GradeSubjects);
 }
 
+/**
+ * Groups rows by `set` and orders the groups by the fixed SET sequence
+ * (공통, A, B, C, …) rather than by content, so SET order never shifts.
+ * Within each group, rows are ordered by name ascending.
+ */
+function sortSubjectsKeepingSetsTogether(subjects: Subject[]): Subject[] {
+  const groups = new Map<SubjectSet, Subject[]>();
+  for (const subject of subjects) {
+    if (!groups.has(subject.set)) groups.set(subject.set, []);
+    groups.get(subject.set)!.push(subject);
+  }
+
+  return SUBJECT_SETS.flatMap((set) => {
+    const rows = groups.get(set);
+    if (!rows) return [];
+    return [...rows].sort((a, b) => a.name.localeCompare(b.name, "ko"));
+  });
+}
+
 export function sanitizeGradeSubjects(
   subjects: GradeSubjects,
   classCounts?: GradeClassCounts,
@@ -260,7 +284,7 @@ export function sanitizeGradeSubjects(
   const next = {} as GradeSubjects;
   for (const grade of GRADES) {
     const maxClass = classCounts?.[grade] ?? MAX_SUBJECT_CLASS_COUNT;
-    next[grade] = ensured[grade]
+    const normalized = ensured[grade]
       .map((s) => normalizeSubject(s, maxClass))
       .map((s) => {
         if (!isElectiveSubjectSet(s.set)) {
@@ -286,8 +310,8 @@ export function sanitizeGradeSubjects(
           ...(classNo !== undefined ? { classNo } : {}),
         };
       })
-      .filter((s) => s.name.length > 0)
-      .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+      .filter((s) => s.name.length > 0);
+    next[grade] = sortSubjectsKeepingSetsTogether(normalized);
   }
   return next;
 }
@@ -338,14 +362,19 @@ export function validateSetClassAssignments(
         return `${grade}학년 SET ${set} 과목 수(${count})가 학급 수(${gradeClassCount})보다 많습니다. 분반마다 한 줄로 맞추거나 학급 수를 확인해 주세요.`;
       }
 
-      if (kind === "partial") {
+      if (kind === "partial" || kind === "whole") {
         const setRows = rows
           .map((row, index) => ({ row, index }))
           .filter(({ row }) => row.set === set);
-        const maxNo = alphaClassNo(gradeClassCount);
+        // Whole SET has no +α room — a row that does map must point at an
+        // actual home room. Unlike partial, whole SET rooms are already all
+        // covered by definition, so leaving classNo unset stays valid (the
+        // timetable falls back to a generic "SET X" label for that room).
+        const maxNo = kind === "whole" ? gradeClassCount : alphaClassNo(gradeClassCount);
         const seen = new Set<number>();
         for (const { row } of setRows) {
           if (row.classNo === undefined) {
+            if (kind === "whole") continue;
             return `${grade}학년 SET ${set}의 "${row.name}"에 학반(또는 +α)을 지정해 주세요.`;
           }
           if (row.classNo < 1 || row.classNo > maxNo) {
@@ -364,8 +393,10 @@ export function validateSetClassAssignments(
 }
 
 /**
- * Drop classNo on whole-grade SET rows; keep only for partial SET.
- * Call when grade class counts are known (step 2 save / next).
+ * Drop classNo on overflow/invalid SET rows; keep it for partial AND
+ * whole-grade SET (both need a home-room mapping — whole just happens to
+ * cover every room). Call when grade class counts are known (step 2 save /
+ * next).
  */
 export function alignSetClassNos(
   subjects: GradeSubjects,
@@ -381,7 +412,7 @@ export function alignSetClassNos(
         return rest;
       }
       const kind = setClassKind(subjects[grade], row.set, gradeClassCount);
-      if (kind !== "partial") {
+      if (kind !== "partial" && kind !== "whole") {
         return {
           set: row.set,
           name: row.name,
@@ -389,7 +420,9 @@ export function alignSetClassNos(
           classCount: DEFAULT_SUBJECT_CLASS_COUNT,
         };
       }
-      const maxNo = alphaClassNo(gradeClassCount);
+      // Whole SET has no +α room — every row must map to an actual home room.
+      const maxNo =
+        kind === "whole" ? gradeClassCount : alphaClassNo(gradeClassCount);
       const classNo =
         row.classNo !== undefined &&
         row.classNo >= 1 &&

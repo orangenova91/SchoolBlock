@@ -2,21 +2,41 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { TimetableAllTeachersView } from "@/components/timetable-all-teachers-view";
+import { TimetableGrid } from "@/components/timetable-grid";
+import { TimetableGradeView } from "@/components/timetable-grade-view";
+import { TimetableTeacherView } from "@/components/timetable-teacher-view";
 import { subjectSetBadgeClass } from "@/lib/subjects";
 import { cellsForClass, maxPeriods } from "@/lib/timetable";
 import {
   GRADES,
-  WEEKDAYS,
   createDefaultClassCounts,
   createDefaultGradeDaySchedules,
+  dayLabel,
   type Grade,
   type GradeClassCounts,
   type GradeDaySchedules,
+  type SameDaySubjectViolation,
   type Semester,
+  type SoftRunDetail,
+  type Teacher,
   type TimetableCell,
   type TimetableUnplaced,
   type Weekday,
 } from "@/lib/types";
+
+function formatLunchDouble(detail: SoftRunDetail): string {
+  const periods =
+    detail.startPeriod === detail.endPeriod
+      ? `${detail.startPeriod}교시`
+      : `${detail.startPeriod}–${detail.endPeriod}교시`;
+  return `${dayLabel(detail.day)}${periods} · ${detail.teacherName} · ${detail.subjectName}`;
+}
+
+function formatSameDaySubjectViolation(detail: SameDaySubjectViolation): string {
+  const periods = detail.periods.map((p) => `${p}교시`).join("·");
+  return `${dayLabel(detail.day)} ${detail.grade}학년 ${detail.classNo}반 · ${detail.subjectName}(${detail.teacherName}) · ${periods}`;
+}
 
 type TermSummary = {
   id: string;
@@ -57,14 +77,47 @@ export function TimetableForm({ termId }: TimetableFormProps) {
   );
   const [cells, setCells] = useState<TimetableCell[]>([]);
   const [unplaced, setUnplaced] = useState<TimetableUnplaced[]>([]);
+  const [lunchDoubleCount, setLunchDoubleCount] = useState(0);
+  const [lunchDoubles, setLunchDoubles] = useState<SoftRunDetail[]>([]);
+  const [sameDaySubjectViolationCount, setSameDaySubjectViolationCount] =
+    useState(0);
+  const [sameDaySubjectViolations, setSameDaySubjectViolations] = useState<
+    SameDaySubjectViolation[]
+  >([]);
   const [status, setStatus] = useState<"idle" | "ready" | "failed">("idle");
   const [message, setMessage] = useState("");
+  const [previewKind, setPreviewKind] = useState<
+    "lunch" | "sameDay" | "full" | null
+  >(null);
+  const [lunchStatus, setLunchStatus] = useState<"idle" | "ready" | "failed">(
+    "idle",
+  );
+  const [lunchMessage, setLunchMessage] = useState("");
+  const [lunchLockCount, setLunchLockCount] = useState(0);
+  const [avoidLunchDouble, setAvoidLunchDouble] = useState(true);
+  const [sameDaySubjectStatus, setSameDaySubjectStatus] = useState<
+    "idle" | "ready" | "failed"
+  >("idle");
+  const [sameDaySubjectMessage, setSameDaySubjectMessage] = useState("");
+  const [sameDaySubjectLockCount, setSameDaySubjectLockCount] = useState(0);
+  const [avoidSameDaySubject, setAvoidSameDaySubject] = useState(false);
+  const [sameSetTeacherConflictCount, setSameSetTeacherConflictCount] =
+    useState(0);
+  const [sameSetTeacherConflictMessages, setSameSetTeacherConflictMessages] =
+    useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [lunchGenerating, setLunchGenerating] = useState(false);
+  const [sameDayGenerating, setSameDayGenerating] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const [estimating, setEstimating] = useState(false);
   const [estimateText, setEstimateText] = useState("");
   const [viewGrade, setViewGrade] = useState<Grade>(1);
   const [viewClass, setViewClass] = useState(1);
+  const [viewMode, setViewMode] = useState<
+    "class" | "teacher" | "grade" | "allTeachers"
+  >("class");
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -74,10 +127,13 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       setLoading(true);
       setError("");
       try {
-        const [ttRes, scheduleRes] = await Promise.all([
-          fetch(`/api/terms/${termId}/timetable`),
-          fetch(`/api/terms/${termId}/day-schedule`),
-        ]);
+        const [ttRes, scheduleRes, preferencesRes, teachersRes] =
+          await Promise.all([
+            fetch(`/api/terms/${termId}/timetable`),
+            fetch(`/api/terms/${termId}/day-schedule`),
+            fetch(`/api/terms/${termId}/preferences`),
+            fetch(`/api/terms/${termId}/teachers`),
+          ]);
         const tt = (await ttRes.json()) as {
           term?: TermSummary;
           status?: "idle" | "ready" | "failed";
@@ -85,10 +141,31 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           unplaced?: TimetableUnplaced[];
           message?: string | null;
           error?: string;
+          lunchDoubleCount?: number;
+          lunchDoubles?: SoftRunDetail[];
+          lunchStatus?: "idle" | "ready" | "failed";
+          lunchMessage?: string | null;
+          lunchLockCount?: number;
+          sameDaySubjectViolationCount?: number;
+          sameDaySubjectViolations?: SameDaySubjectViolation[];
+          sameDaySubjectStatus?: "idle" | "ready" | "failed";
+          sameDaySubjectMessage?: string | null;
+          sameDaySubjectLockCount?: number;
+          sameSetTeacherConflictCount?: number;
+          sameSetTeacherConflictMessages?: string[];
         };
         const schedule = (await scheduleRes.json()) as {
           grades?: GradeDaySchedules;
           classCounts?: GradeClassCounts;
+        };
+        const preferencesData = (await preferencesRes.json()) as {
+          preferences?: {
+            avoidLunchDouble?: boolean;
+            avoidSameDaySubject?: boolean;
+          };
+        };
+        const teachersData = (await teachersRes.json()) as {
+          teachers?: Teacher[];
         };
 
         if (!ttRes.ok) {
@@ -104,10 +181,46 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           setCells(Array.isArray(tt.cells) ? tt.cells : []);
           setUnplaced(Array.isArray(tt.unplaced) ? tt.unplaced : []);
           setMessage(tt.message ?? "");
+          setLunchDoubleCount(tt.lunchDoubleCount ?? 0);
+          setLunchDoubles(Array.isArray(tt.lunchDoubles) ? tt.lunchDoubles : []);
+          setPreviewKind(
+            Array.isArray(tt.cells) && tt.cells.length > 0 ? "full" : null,
+          );
+          setLunchStatus(tt.lunchStatus ?? "idle");
+          setLunchMessage(tt.lunchMessage ?? "");
+          setLunchLockCount(tt.lunchLockCount ?? 0);
+          setSameDaySubjectViolationCount(tt.sameDaySubjectViolationCount ?? 0);
+          setSameDaySubjectViolations(
+            Array.isArray(tt.sameDaySubjectViolations)
+              ? tt.sameDaySubjectViolations
+              : [],
+          );
+          setSameDaySubjectStatus(tt.sameDaySubjectStatus ?? "idle");
+          setSameDaySubjectMessage(tt.sameDaySubjectMessage ?? "");
+          setSameDaySubjectLockCount(tt.sameDaySubjectLockCount ?? 0);
+          setSameSetTeacherConflictCount(tt.sameSetTeacherConflictCount ?? 0);
+          setSameSetTeacherConflictMessages(
+            Array.isArray(tt.sameSetTeacherConflictMessages)
+              ? tt.sameSetTeacherConflictMessages
+              : [],
+          );
+          if (preferencesRes.ok) {
+            setAvoidLunchDouble(
+              preferencesData.preferences?.avoidLunchDouble ?? true,
+            );
+            setAvoidSameDaySubject(
+              preferencesData.preferences?.avoidSameDaySubject ?? false,
+            );
+          }
           if (scheduleRes.ok) {
             setSchedules(schedule.grades ?? createDefaultGradeDaySchedules());
             setClassCounts(
               schedule.classCounts ?? createDefaultClassCounts(),
+            );
+          }
+          if (teachersRes.ok) {
+            setTeachers(
+              Array.isArray(teachersData.teachers) ? teachersData.teachers : [],
             );
           }
         }
@@ -153,6 +266,10 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         unplaced?: TimetableUnplaced[];
         message?: string;
         error?: string;
+        lunchDoubleCount?: number;
+        lunchDoubles?: SoftRunDetail[];
+        sameDaySubjectViolationCount?: number;
+        sameDaySubjectViolations?: SameDaySubjectViolation[];
       };
       if (!response.ok) {
         setError(data.error ?? "시간표 생성에 실패했습니다.");
@@ -162,10 +279,127 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       setCells(Array.isArray(data.cells) ? data.cells : []);
       setUnplaced(Array.isArray(data.unplaced) ? data.unplaced : []);
       setMessage(data.message ?? "");
+      setLunchDoubleCount(data.lunchDoubleCount ?? 0);
+      setLunchDoubles(Array.isArray(data.lunchDoubles) ? data.lunchDoubles : []);
+      setSameDaySubjectViolationCount(data.sameDaySubjectViolationCount ?? 0);
+      setSameDaySubjectViolations(
+        Array.isArray(data.sameDaySubjectViolations)
+          ? data.sameDaySubjectViolations
+          : [],
+      );
+      setPreviewKind("full");
     } catch {
       setError("서버에 연결할 수 없습니다.");
     } finally {
       setGenerating(false);
+    }
+  }
+
+  async function handleSameDaySubjectPriority() {
+    setSameDayGenerating(true);
+    setError("");
+    setSameDaySubjectMessage("");
+    try {
+      const response = await fetch(
+        `/api/terms/${termId}/timetable/same-day-subject-priority`,
+        { method: "POST" },
+      );
+      const data = (await response.json()) as {
+        sameDaySubjectStatus?: "ready" | "failed";
+        sameDaySubjectMessage?: string;
+        targetCount?: number;
+        filledCount?: number;
+        cells?: TimetableCell[];
+        error?: string;
+      };
+      if (!response.ok) {
+        setError(data.error ?? "동일 교과 우선 배치에 실패했습니다.");
+        return;
+      }
+      setSameDaySubjectStatus(data.sameDaySubjectStatus ?? "failed");
+      setSameDaySubjectMessage(data.sameDaySubjectMessage ?? "");
+      setSameDaySubjectLockCount(data.filledCount ?? 0);
+      setCells(Array.isArray(data.cells) ? data.cells : []);
+      setUnplaced([]);
+      setPreviewKind("sameDay");
+    } catch {
+      setError("서버에 연결할 수 없습니다.");
+    } finally {
+      setSameDayGenerating(false);
+    }
+  }
+
+  async function handleLunchPriority() {
+    setLunchGenerating(true);
+    setError("");
+    setLunchMessage("");
+    try {
+      const response = await fetch(
+        `/api/terms/${termId}/timetable/lunch-priority`,
+        { method: "POST" },
+      );
+      const data = (await response.json()) as {
+        lunchStatus?: "ready" | "failed";
+        lunchMessage?: string;
+        targetCount?: number;
+        filledCount?: number;
+        cells?: TimetableCell[];
+        error?: string;
+      };
+      if (!response.ok) {
+        setError(data.error ?? "점심시간 우선 배치에 실패했습니다.");
+        return;
+      }
+      setLunchStatus(data.lunchStatus ?? "failed");
+      setLunchMessage(data.lunchMessage ?? "");
+      setLunchLockCount(data.filledCount ?? 0);
+      setCells(Array.isArray(data.cells) ? data.cells : []);
+      setUnplaced([]);
+      setPreviewKind("lunch");
+    } catch {
+      setError("서버에 연결할 수 없습니다.");
+    } finally {
+      setLunchGenerating(false);
+    }
+  }
+
+  async function handleReset() {
+    const confirmed = window.confirm(
+      "저장된 최종 시간표와 점심시간·동일 교과 우선 배치 결과를 모두 초기화할까요? 이 작업은 되돌릴 수 없습니다.",
+    );
+    if (!confirmed) return;
+
+    setResetting(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/terms/${termId}/timetable`, {
+        method: "DELETE",
+      });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setError(data.error ?? "초기화에 실패했습니다.");
+        return;
+      }
+      setStatus("idle");
+      setCells([]);
+      setUnplaced([]);
+      setMessage("");
+      setLunchDoubleCount(0);
+      setLunchDoubles([]);
+      setLunchStatus("idle");
+      setLunchMessage("");
+      setLunchLockCount(0);
+      setSameDaySubjectViolationCount(0);
+      setSameDaySubjectViolations([]);
+      setSameDaySubjectStatus("idle");
+      setSameDaySubjectMessage("");
+      setSameDaySubjectLockCount(0);
+      setPreviewKind(null);
+      setEstimateText("");
+    } catch {
+      setError("서버에 연결할 수 없습니다.");
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -244,8 +478,17 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           시간표
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
-          SET 블록·교과 블록을 고정하고 교사 배정 불가 교시를 반영한 뒤 공통
-          수업을 자동 배치합니다.
+          SET 블록·교과 블록을 고정하고 교사 배정 불가·추가 조건(점심 연강 등)을
+          반영한 뒤 공통 수업을 자동 배치합니다.
+        </p>
+        <p className="mt-1 text-xs text-zinc-500">
+          {avoidSameDaySubject && avoidLunchDouble
+            ? "테스트 단계: 동일 교과 우선 배치 → 점심시간 우선 배치 → 남은 시간 시간표 배치 순서로 진행합니다. (둘 다 여러 번 가능)"
+            : avoidSameDaySubject
+              ? "테스트 단계: 동일 교과 우선 배치(여러 번 가능)로 먼저 선택한 교과를 배치한 뒤, 남은 시간 시간표 배치로 나머지를 채웁니다."
+              : avoidLunchDouble
+                ? "테스트 단계: 점심시간 우선 배치(여러 번 가능)로 먼저 점심 전후 교시를 확정한 뒤, 남은 시간 시간표 배치로 나머지를 채웁니다."
+                : "점심시간 연강 배제·동일 교과 배치 금지가 모두 꺼져 있어 시간표 배치 한 번으로 전체를 채웁니다."}
         </p>
       </header>
 
@@ -256,51 +499,131 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         </p>
       ) : null}
 
+      {sameSetTeacherConflictCount > 0 ? (
+        <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
+          <p className="font-medium">
+            같은 SET 내부 교사 겹침 {sameSetTeacherConflictCount}건 — 같은
+            시간에 한 교사가 서로 다른 반의 수업을 동시에 맡도록 되어 있어
+            배치가 불가능합니다. SET 블록 배치 또는 수업 배정에서 교사를
+            다시 확인해 주세요.
+          </p>
+          <ul className="mt-2 max-h-40 list-inside list-disc overflow-auto text-xs">
+            {sameSetTeacherConflictMessages.map((msg, i) => (
+              <li key={i}>{msg}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-center gap-2">
         <button
           type="button"
-          onClick={() => router.push(`/terms/${termId}/constraints`)}
+          onClick={() => router.push(`/terms/${termId}/preferences`)}
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
         >
           이전
         </button>
+        {avoidSameDaySubject ? (
+          <button
+            type="button"
+            onClick={() => {
+              void handleSameDaySubjectPriority();
+            }}
+            disabled={
+              generating || estimating || lunchGenerating || sameDayGenerating || resetting
+            }
+            className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {sameDayGenerating
+              ? "동일 교과 배치 중… (최대 약 15초)"
+              : "동일 교과 우선 배치"}
+          </button>
+        ) : null}
+        {avoidLunchDouble ? (
+          <button
+            type="button"
+            onClick={() => {
+              void handleLunchPriority();
+            }}
+            disabled={
+              generating || estimating || lunchGenerating || sameDayGenerating || resetting
+            }
+            className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {lunchGenerating
+              ? "점심시간 배치 중… (최대 약 15초)"
+              : "점심시간 우선 배치"}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => {
             void handleGenerate();
           }}
-          disabled={generating || estimating}
+          disabled={
+            generating || estimating || lunchGenerating || sameDayGenerating || resetting
+          }
           className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {generating
             ? "생성 중… (최대 약 15초)"
-            : status === "idle"
-              ? "시간표 생성"
-              : "다시 생성"}
+            : avoidSameDaySubject || avoidLunchDouble
+              ? "남은 시간 시간표 배치"
+              : "시간표 배치"}
         </button>
         <button
           type="button"
           onClick={() => {
             void handleEstimate();
           }}
-          disabled={generating || estimating}
+          disabled={
+            generating || estimating || lunchGenerating || sameDayGenerating || resetting
+          }
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {estimating
             ? "해공간 추정 중… (최대 약 1분)"
             : "해공간 추정"}
         </button>
+        <button
+          type="button"
+          onClick={() => {
+            void handleReset();
+          }}
+          disabled={
+            (status === "idle" &&
+              lunchLockCount === 0 &&
+              sameDaySubjectLockCount === 0) ||
+            generating ||
+            estimating ||
+            lunchGenerating ||
+            sameDayGenerating ||
+            resetting
+          }
+          className="rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {resetting ? "초기화 중…" : "초기화"}
+        </button>
       </div>
 
       {message ? (
-        <p
-          role="status"
-          className={`text-center text-sm ${
-            status === "failed" ? "text-amber-700" : "text-emerald-700"
-          }`}
-        >
-          {message}
-        </p>
+        <div>
+          <p className="mb-1 text-center text-xs font-medium text-zinc-500">
+            {avoidSameDaySubject || avoidLunchDouble
+              ? "남은 시간 시간표 배치 결과"
+              : "시간표 배치 결과"}
+          </p>
+          <pre
+            role="status"
+            className={`whitespace-pre-wrap rounded-xl border px-4 py-3 text-left text-sm leading-relaxed ${
+              status === "failed"
+                ? "border-amber-200 bg-amber-50 text-amber-900"
+                : "border-emerald-200 bg-emerald-50 text-emerald-900"
+            }`}
+          >
+            {message}
+          </pre>
+        </div>
       ) : null}
 
       {estimateText ? (
@@ -327,118 +650,284 @@ export function TimetableForm({ termId }: TimetableFormProps) {
                 key={`${u.teacherName}-${u.grade}-${u.classNo}-${u.subjectName}`}
               >
                 {u.grade}학년 {u.classNo}반 {u.subjectName} · {u.teacherName}{" "}
-                ({u.remaining}교시)
+                ({u.remaining}차시)
+                {u.reason === "impossible" ? (
+                  <span className="ml-1.5 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-700">
+                    배치 불가능 · 동시간 수업 존재
+                  </span>
+                ) : u.reason === "contention" ? (
+                  <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                    자리 경합 · 재시도 시 배치 가능
+                  </span>
+                ) : null}
               </li>
             ))}
           </ul>
         </div>
       ) : null}
 
-      <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-        <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
-          {GRADES.map((grade) => (
-            <button
-              key={grade}
-              type="button"
-              onClick={() => setViewGrade(grade)}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                viewGrade === grade
-                  ? "bg-zinc-900 text-white"
-                  : "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50"
-              }`}
-            >
-              {grade}학년
-            </button>
-          ))}
-        </div>
-        <div className="mb-4 flex flex-wrap items-center justify-center gap-1.5">
-          {Array.from(
-            { length: classCounts[viewGrade] ?? 0 },
-            (_, i) => i + 1,
-          ).map((classNo) => (
-            <button
-              key={classNo}
-              type="button"
-              onClick={() => setViewClass(classNo)}
-              className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
-                viewClass === classNo
-                  ? "bg-zinc-800 text-white"
-                  : "border border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100"
-              }`}
-            >
-              {classNo}반
-            </button>
-          ))}
-        </div>
+      {previewKind === "sameDay" ? (
+        <p className="text-center text-xs font-medium text-sky-700">
+          아래는 동일 교과 우선 배치 미리보기입니다. 저장된 최종 시간표가
+          아니며, 만족스러우면 다음 단계로 이어서 진행해 주세요.
+        </p>
+      ) : null}
 
-        {cells.length === 0 && status === "idle" ? (
-          <p className="py-10 text-center text-sm text-zinc-500">
-            시간표 생성을 누르면 결과가 표시됩니다.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <div
-              className="grid min-w-[28rem] gap-1"
-              style={{
-                gridTemplateColumns: `2rem repeat(${WEEKDAYS.length}, minmax(0, 1fr))`,
-              }}
-            >
-              <div />
-              {WEEKDAYS.map(({ key, label }) => (
-                <div
-                  key={key}
-                  className="pb-1 text-center text-xs font-medium text-zinc-600"
-                >
-                  {label}
-                </div>
-              ))}
-              {Array.from({ length: periodRows }, (_, i) => i + 1).map(
-                (period) => (
-                  <div key={period} className="contents">
-                    <div className="flex items-center justify-end pr-1 text-[11px] text-zinc-500">
-                      {period}
-                    </div>
-                    {WEEKDAYS.map(({ key }) => {
-                      const active = (schedules[viewGrade][key] ?? 0) >= period;
-                      const cell = active
-                        ? cellAt(classCells, viewGrade, viewClass, key, period)
-                        : undefined;
-                      return (
-                        <div
-                          key={`${key}-${period}`}
-                          className={`min-h-14 rounded-md border px-1 py-1 text-center ${
-                            !active
-                              ? "border-zinc-100 bg-zinc-100"
-                              : cell?.kind === "set"
-                                ? subjectSetBadgeClass(cell.set)
-                                : cell
-                                  ? "border-zinc-300 bg-zinc-50"
-                                  : "border-dashed border-zinc-200 bg-white"
-                          }`}
-                        >
-                          {active && cell ? (
-                            <>
-                              <p className="text-[11px] font-semibold leading-tight text-zinc-900">
-                                {cell.subjectName}
-                              </p>
-                              <p className="mt-0.5 text-[10px] leading-tight text-zinc-600">
-                                {cell.teacherName}
-                              </p>
-                            </>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                  </div>
-                ),
-              )}
-            </div>
-            <p className="mt-3 text-center text-xs text-zinc-500">
-              {viewGrade}학년 {viewClass}반 · 수업 {classCells.length}칸
-            </p>
+      {previewKind === "lunch" ? (
+        <p className="text-center text-xs font-medium text-sky-700">
+          아래는 점심시간 우선 배치 미리보기입니다. 저장된 최종 시간표가
+          아니며, 만족스러우면 &ldquo;남은 시간 시간표 배치&rdquo;로 마무리해
+          주세요.
+        </p>
+      ) : null}
+
+      <div className="flex flex-wrap items-center justify-center gap-2">
+        {(
+          [
+            { key: "class", label: "학반별" },
+            { key: "teacher", label: "교사별" },
+            { key: "grade", label: "학년 전체" },
+            { key: "allTeachers", label: "전체 교사" },
+          ] as const
+        ).map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => setViewMode(tab.key)}
+            className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+              viewMode === tab.key
+                ? "bg-zinc-900 text-white"
+                : "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {viewMode === "class" ? (
+        <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+          <div className="mb-4 flex flex-wrap items-center justify-center gap-2">
+            {GRADES.map((grade) => (
+              <button
+                key={grade}
+                type="button"
+                onClick={() => setViewGrade(grade)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
+                  viewGrade === grade
+                    ? "bg-zinc-900 text-white"
+                    : "border border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50"
+                }`}
+              >
+                {grade}학년
+              </button>
+            ))}
           </div>
-        )}
-      </section>
+          <div className="mb-4 flex flex-wrap items-center justify-center gap-1.5">
+            {Array.from(
+              { length: classCounts[viewGrade] ?? 0 },
+              (_, i) => i + 1,
+            ).map((classNo) => (
+              <button
+                key={classNo}
+                type="button"
+                onClick={() => setViewClass(classNo)}
+                className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                  viewClass === classNo
+                    ? "bg-zinc-800 text-white"
+                    : "border border-zinc-200 bg-zinc-50 text-zinc-700 hover:bg-zinc-100"
+                }`}
+              >
+                {classNo}반
+              </button>
+            ))}
+          </div>
+
+          {cells.length === 0 && status === "idle" ? (
+            <p className="py-10 text-center text-sm text-zinc-500">
+              시간표 생성을 누르면 결과가 표시됩니다.
+            </p>
+          ) : (
+            <>
+              <TimetableGrid
+                periodRows={periodRows}
+                isActive={(day, period) =>
+                  (schedules[viewGrade][day] ?? 0) >= period
+                }
+                renderCell={(day, period, active) => {
+                  const cell = active
+                    ? cellAt(classCells, viewGrade, viewClass, day, period)
+                    : undefined;
+                  return (
+                    <div
+                      key={`${day}-${period}`}
+                      className={`min-h-14 rounded-md border px-1 py-1 text-center ${
+                        !active
+                          ? "border-zinc-100 bg-zinc-100"
+                          : cell?.kind === "set"
+                            ? subjectSetBadgeClass(cell.set)
+                            : cell
+                              ? "border-zinc-300 bg-zinc-50"
+                              : "border-dashed border-zinc-200 bg-white"
+                      }`}
+                    >
+                      {active && cell ? (
+                        <>
+                          <p className="text-[11px] font-semibold leading-tight text-zinc-900">
+                            {cell.subjectName}
+                          </p>
+                          <p className="mt-0.5 text-[10px] leading-tight text-zinc-600">
+                            {cell.teacherName}
+                          </p>
+                        </>
+                      ) : null}
+                    </div>
+                  );
+                }}
+              />
+              <p className="mt-3 text-center text-xs text-zinc-500">
+                {viewGrade}학년 {viewClass}반 · 수업 {classCells.length}칸
+              </p>
+            </>
+          )}
+        </section>
+      ) : viewMode === "teacher" ? (
+        <TimetableTeacherView cells={cells} schedules={schedules} teachers={teachers} />
+      ) : viewMode === "grade" ? (
+        <TimetableGradeView
+          cells={cells}
+          schedules={schedules}
+          classCounts={classCounts}
+        />
+      ) : (
+        <TimetableAllTeachersView
+          cells={cells}
+          schedules={schedules}
+          teachers={teachers}
+        />
+      )}
+
+      {avoidSameDaySubject || avoidLunchDouble ? (
+        <div className="grid grid-cols-1 gap-1 text-center text-xs text-zinc-500 sm:grid-cols-2">
+          {avoidSameDaySubject ? (
+            <p>
+              저장된 동일 교과 우선 배치:{" "}
+              {sameDaySubjectLockCount > 0
+                ? `${sameDaySubjectLockCount}칸 (${
+                    sameDaySubjectStatus === "ready" ? "성공" : "일부 실패"
+                  })`
+                : "없음 (다음 단계는 잠금 없이 진행됩니다)"}
+            </p>
+          ) : (
+            <span />
+          )}
+          {avoidLunchDouble ? (
+            <p>
+              저장된 점심시간 배치:{" "}
+              {lunchLockCount > 0
+                ? `${lunchLockCount}칸 (${
+                    lunchStatus === "ready" ? "성공" : "일부 실패"
+                  })`
+                : "없음 (남은 시간 시간표 배치는 잠금 없이 진행됩니다)"}
+            </p>
+          ) : (
+            <span />
+          )}
+        </div>
+      ) : null}
+
+      {(avoidSameDaySubject && sameDaySubjectMessage) ||
+      (avoidLunchDouble && lunchMessage) ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {avoidSameDaySubject && sameDaySubjectMessage ? (
+            <div>
+              <p className="mb-1 text-center text-xs font-medium text-zinc-500">
+                동일 교과 우선 배치 결과
+              </p>
+              <pre
+                role="status"
+                className={`whitespace-pre-wrap rounded-xl border px-4 py-3 text-left text-sm leading-relaxed ${
+                  sameDaySubjectStatus === "failed"
+                    ? "border-amber-200 bg-amber-50 text-amber-900"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-900"
+                }`}
+              >
+                {sameDaySubjectMessage}
+              </pre>
+            </div>
+          ) : null}
+
+          {avoidLunchDouble && lunchMessage ? (
+            <div>
+              <p className="mb-1 text-center text-xs font-medium text-zinc-500">
+                점심시간 우선 배치 결과
+              </p>
+              <pre
+                role="status"
+                className={`whitespace-pre-wrap rounded-xl border px-4 py-3 text-left text-sm leading-relaxed ${
+                  lunchStatus === "failed"
+                    ? "border-amber-200 bg-amber-50 text-amber-900"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-900"
+                }`}
+              >
+                {lunchMessage}
+              </pre>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {previewKind === "full" && cells.length > 0 ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div
+            className={`rounded-xl border px-4 py-3 text-sm ${
+              sameDaySubjectViolationCount > 0
+                ? "border-amber-200 bg-amber-50 text-amber-900"
+                : "border-emerald-200 bg-emerald-50 text-emerald-900"
+            }`}
+          >
+            <p className="font-medium">
+              동일 교과 같은 날 중복 {sameDaySubjectViolationCount}건
+              {!avoidSameDaySubject && sameDaySubjectViolationCount > 0
+                ? " (동일 교과 배치 금지가 꺼져 있어 참고용으로만 표시됩니다)"
+                : null}
+            </p>
+            {sameDaySubjectViolationCount > 0 ? (
+              <ul className="mt-2 max-h-40 list-inside list-disc overflow-auto text-xs">
+                {sameDaySubjectViolations.map((v, i) => (
+                  <li key={`${v.teacherName}-${v.day}-${i}`}>
+                    {formatSameDaySubjectViolation(v)}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+
+          <div
+            className={`rounded-xl border px-4 py-3 text-sm ${
+              lunchDoubleCount > 0
+                ? "border-amber-200 bg-amber-50 text-amber-900"
+                : "border-emerald-200 bg-emerald-50 text-emerald-900"
+            }`}
+          >
+            <p className="font-medium">
+              점심시간 연강 {lunchDoubleCount}건
+              {!avoidLunchDouble && lunchDoubleCount > 0
+                ? " (점심시간 연강 배제가 꺼져 있어 참고용으로만 표시됩니다)"
+                : null}
+            </p>
+            {lunchDoubleCount > 0 ? (
+              <ul className="mt-2 max-h-40 list-inside list-disc overflow-auto text-xs">
+                {lunchDoubles.map((d, i) => (
+                  <li key={`${d.teacherName}-${d.day}-${i}`}>
+                    {formatLunchDouble(d)}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

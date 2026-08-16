@@ -11,6 +11,7 @@ import {
   type GradeDaySchedules,
   type GradeSubjects,
   type SetBlockCell,
+  type SetTeacherAssignment,
   type Teacher,
   type Weekday,
 } from "@/lib/types";
@@ -258,6 +259,105 @@ export function teachersForGradeSet(
   ];
 }
 
+export function assignedTeacherAt(
+  assignments: SetTeacherAssignment[],
+  grade: Grade,
+  set: ElectiveSet,
+  day: Weekday,
+  period: number,
+  subjectName: string,
+): string | undefined {
+  return assignments.find(
+    (a) =>
+      a.grade === grade &&
+      a.set === set &&
+      a.day === day &&
+      a.period === period &&
+      a.subjectName === subjectName,
+  )?.teacherName;
+}
+
+/** Subjects within a SET that are shared by more than one teacher, meaning
+ * which specific teacher covers a given occurrence is ambiguous unless
+ * resolved via `SetTeacherAssignment`. */
+export function subjectsNeedingRotation(
+  teachers: Teacher[],
+  catalogItem: GradeSetInfo,
+): { subjectName: string; shares: SetTeacherShare[] }[] {
+  const shares = setTeacherShares(teachers, catalogItem);
+  const bySubject = new Map<string, SetTeacherShare[]>();
+  for (const share of shares) {
+    const list = bySubject.get(share.subjectName) ?? [];
+    list.push(share);
+    bySubject.set(share.subjectName, list);
+  }
+  return [...bySubject.entries()]
+    .filter(([, list]) => list.length > 1)
+    .map(([subjectName, list]) => ({ subjectName, shares: list }));
+}
+
+/**
+ * Teachers actually occupied by one subject within a SET at one specific
+ * (day, period) occurrence. A subject taught by a single teacher always
+ * keeps that teacher busy. A subject rotated between several teachers
+ * (e.g. 3 teachers covering 1 period each of a 3-period subject) only
+ * keeps the teacher resolved via `assignments` busy for that occurrence —
+ * falling back to the full (conservative) roster when no assignment has
+ * been made yet, so behavior for terms without rotation data is unchanged.
+ */
+export function resolveSubjectTeachersAtSlot(
+  teachers: Teacher[],
+  catalogItem: GradeSetInfo,
+  subjectName: string,
+  day: Weekday,
+  period: number,
+  assignments: SetTeacherAssignment[] = [],
+): string[] {
+  const shares = setTeacherShares(teachers, catalogItem).filter(
+    (s) => s.subjectName === subjectName,
+  );
+  if (shares.length <= 1) return shares.map((s) => s.teacherName);
+
+  const assigned = assignedTeacherAt(
+    assignments,
+    catalogItem.grade,
+    catalogItem.set,
+    day,
+    period,
+    subjectName,
+  );
+  return assigned ? [assigned] : shares.map((s) => s.teacherName);
+}
+
+/**
+ * Teachers actually occupied by `catalogItem` (across all of its subjects)
+ * at one specific (day, period) occurrence. See `resolveSubjectTeachersAtSlot`
+ * for the per-subject resolution rule this builds on.
+ */
+export function teachersBusyForGradeSetAtSlot(
+  teachers: Teacher[],
+  catalogItem: GradeSetInfo,
+  day: Weekday,
+  period: number,
+  assignments: SetTeacherAssignment[] = [],
+): string[] {
+  const subjectNames = new Set(catalogItem.subjects.map((s) => s.name));
+  const busy = new Set<string>();
+  for (const subjectName of subjectNames) {
+    for (const name of resolveSubjectTeachersAtSlot(
+      teachers,
+      catalogItem,
+      subjectName,
+      day,
+      period,
+      assignments,
+    )) {
+      busy.add(name);
+    }
+  }
+  return [...busy];
+}
+
 export type SetAssignmentSubjectRow = {
   name: string;
   assigned: number;
@@ -376,6 +476,79 @@ export function parseSetBlockCells(value: unknown): SetBlockCell[] | null {
   return cells;
 }
 
+export function parseSetTeacherAssignments(
+  value: unknown,
+): SetTeacherAssignment[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) return null;
+
+  const list: SetTeacherAssignment[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") return null;
+    const { grade, set, day, period, subjectName, teacherName } =
+      item as Record<string, unknown>;
+
+    if (grade !== 1 && grade !== 2 && grade !== 3) return null;
+    if (!isElectiveSet(set)) return null;
+    if (typeof day !== "string" || !WEEKDAY_KEYS.has(day)) return null;
+    if (
+      typeof period !== "number" ||
+      !Number.isInteger(period) ||
+      period < 1 ||
+      period > MAX_PERIODS
+    ) {
+      return null;
+    }
+    if (typeof subjectName !== "string" || subjectName.trim().length === 0) {
+      return null;
+    }
+    if (typeof teacherName !== "string" || teacherName.trim().length === 0) {
+      return null;
+    }
+
+    list.push({
+      grade,
+      set,
+      day: day as Weekday,
+      period,
+      subjectName,
+      teacherName,
+    });
+  }
+
+  return list;
+}
+
+/** Drops assignments that no longer correspond to a placed cell or a still-
+ * ambiguous (multi-teacher) subject, so stale rotation choices don't linger
+ * after cells or teacher assignments change. */
+export function filterAssignmentsToPlacement(
+  assignments: SetTeacherAssignment[],
+  wholeCells: SetBlockCell[],
+  partialCells: SetBlockCell[],
+  catalog: GradeSetInfo[],
+  teachers: Teacher[],
+): SetTeacherAssignment[] {
+  const placedKeys = new Set(
+    [...wholeCells, ...partialCells].map(
+      (c) => `${c.grade}:${c.set}:${c.day}:${c.period}`,
+    ),
+  );
+
+  return assignments.filter((a) => {
+    if (!placedKeys.has(`${a.grade}:${a.set}:${a.day}:${a.period}`)) {
+      return false;
+    }
+    const info = findGradeSet(catalog, a.grade, a.set);
+    if (!info) return false;
+    const shares = setTeacherShares(teachers, info).filter(
+      (s) => s.subjectName === a.subjectName,
+    );
+    if (shares.length <= 1) return false;
+    return shares.some((s) => s.teacherName === a.teacherName);
+  });
+}
+
 export function filterCellsToCatalog(
   cells: SetBlockCell[],
   schedules: GradeDaySchedules,
@@ -425,30 +598,59 @@ export function removeCell(
 }
 
 export function teacherConflictAt(
-  cells: SetBlockCell[],
+  wholeCells: SetBlockCell[],
+  partialCells: SetBlockCell[],
   teachers: Teacher[],
   catalog: GradeSetInfo[],
   grade: Grade,
   set: ElectiveSet,
   day: Weekday,
   period: number,
+  assignments: SetTeacherAssignment[] = [],
 ): string[] {
   const target = findGradeSet(catalog, grade, set);
   if (!target || target.kind !== "whole") return [];
 
-  const busy = new Set(teachersForGradeSet(teachers, target));
+  const busy = new Set(
+    teachersBusyForGradeSetAtSlot(teachers, target, day, period, assignments),
+  );
   if (busy.size === 0) return [];
 
   const conflicts = new Set<string>();
 
+  // Other grades: whole SETs at this slot
   for (const other of GRADES) {
     if (other === grade) continue;
-    const otherSet = setAtCell(cells, other, day, period);
+    const otherSet = setAtCell(wholeCells, other, day, period);
     if (!otherSet) continue;
     const otherInfo = findGradeSet(catalog, other, otherSet);
     if (!otherInfo || otherInfo.kind !== "whole") continue;
-    for (const name of teachersForGradeSet(teachers, otherInfo)) {
+    for (const name of teachersBusyForGradeSetAtSlot(
+      teachers,
+      otherInfo,
+      day,
+      period,
+      assignments,
+    )) {
       if (busy.has(name)) conflicts.add(name);
+    }
+  }
+
+  // Other grades: partial SETs at this slot
+  for (const other of GRADES) {
+    if (other === grade) continue;
+    for (const otherSet of partialSetsAtSlot(partialCells, other, day, period)) {
+      const otherInfo = findGradeSet(catalog, other, otherSet);
+      if (!otherInfo) continue;
+      for (const name of teachersBusyForGradeSetAtSlot(
+        teachers,
+        otherInfo,
+        day,
+        period,
+        assignments,
+      )) {
+        if (busy.has(name)) conflicts.add(name);
+      }
     }
   }
 
@@ -456,12 +658,14 @@ export function teacherConflictAt(
 }
 
 export function blockedSlotsForSet(
-  cells: SetBlockCell[],
+  wholeCells: SetBlockCell[],
+  partialCells: SetBlockCell[],
   teachers: Teacher[],
   catalog: GradeSetInfo[],
   schedules: GradeDaySchedules,
   grade: Grade,
   set: ElectiveSet,
+  assignments: SetTeacherAssignment[] = [],
 ): Map<string, string[]> {
   const blocked = new Map<string, string[]>();
   const periods = schedules[grade];
@@ -470,15 +674,21 @@ export function blockedSlotsForSet(
   for (const { key: day } of WEEKDAYS) {
     const count = periods[day];
     for (let period = 1; period <= count; period++) {
-      if (setAtCell(cells, grade, day, period)) continue;
+      if (setAtCell(wholeCells, grade, day, period)) continue;
+      // Already locked by a same-grade partial SET; not a teacher conflict.
+      if (partialSetsAtSlot(partialCells, grade, day, period).length > 0) {
+        continue;
+      }
       const names = teacherConflictAt(
-        cells,
+        wholeCells,
+        partialCells,
         teachers,
         catalog,
         grade,
         set,
         day,
         period,
+        assignments,
       );
       if (names.length > 0) blocked.set(slotKey(day, period), names);
     }
@@ -487,8 +697,30 @@ export function blockedSlotsForSet(
   return blocked;
 }
 
+/** Slots within a grade already occupied by partial SET(s); used to lock the whole-SET grid the same way `wholeLocked` locks the partial-SET grid. */
+export function partialLockedSlots(
+  partialCells: SetBlockCell[],
+  schedules: GradeDaySchedules,
+  grade: Grade,
+): Map<string, ElectiveSet[]> {
+  const locked = new Map<string, ElectiveSet[]>();
+  const periods = schedules[grade];
+  if (!periods) return locked;
+
+  for (const { key: day } of WEEKDAYS) {
+    const count = periods[day];
+    for (let period = 1; period <= count; period++) {
+      const sets = partialSetsAtSlot(partialCells, grade, day, period);
+      if (sets.length > 0) locked.set(slotKey(day, period), sets);
+    }
+  }
+
+  return locked;
+}
+
 export function tryPaintCell({
   cells,
+  partialCells,
   catalog,
   teachers,
   schedules,
@@ -496,8 +728,10 @@ export function tryPaintCell({
   set,
   day,
   period,
+  assignments = [],
 }: {
   cells: SetBlockCell[];
+  partialCells: SetBlockCell[];
   catalog: GradeSetInfo[];
   teachers: Teacher[];
   schedules: GradeDaySchedules;
@@ -505,6 +739,7 @@ export function tryPaintCell({
   set: ElectiveSet;
   day: Weekday;
   period: number;
+  assignments?: SetTeacherAssignment[];
 }): { cells: SetBlockCell[]; error?: string } {
   const info = findGradeSet(catalog, grade, set);
   if (!info || info.kind !== "whole" || info.units === null) {
@@ -522,6 +757,17 @@ export function tryPaintCell({
     return { cells, error: "다른 SET가 있는 칸입니다." };
   }
 
+  // A whole-grade SET needs every student in the grade, so it can never
+  // share a slot with a partial SET already placed for the same grade —
+  // regardless of whether teachers conflict.
+  const partialHere = partialSetsAtSlot(partialCells, grade, day, period);
+  if (partialHere.length > 0) {
+    return {
+      cells,
+      error: `이미 부분 SET가 배치된 칸입니다: ${partialHere.join(", ")}`,
+    };
+  }
+
   if (countPlaced(cells, grade, set) >= info.units) {
     return {
       cells,
@@ -531,12 +777,14 @@ export function tryPaintCell({
 
   const conflicts = teacherConflictAt(
     cells,
+    partialCells,
     teachers,
     catalog,
     grade,
     set,
     day,
     period,
+    assignments,
   );
   if (conflicts.length > 0) {
     return {
@@ -735,11 +983,14 @@ export function partialTeacherConflictAt(
   set: ElectiveSet,
   day: Weekday,
   period: number,
+  assignments: SetTeacherAssignment[] = [],
 ): string[] {
   const target = findGradeSet(catalog, grade, set);
   if (!target || target.kind !== "partial") return [];
 
-  const busy = new Set(teachersForGradeSet(teachers, target));
+  const busy = new Set(
+    teachersBusyForGradeSetAtSlot(teachers, target, day, period, assignments),
+  );
   if (busy.size === 0) return [];
 
   const conflicts = new Set<string>();
@@ -749,7 +1000,13 @@ export function partialTeacherConflictAt(
     if (otherSet === set) continue;
     const other = findGradeSet(catalog, grade, otherSet);
     if (!other) continue;
-    for (const name of teachersForGradeSet(teachers, other)) {
+    for (const name of teachersBusyForGradeSetAtSlot(
+      teachers,
+      other,
+      day,
+      period,
+      assignments,
+    )) {
       if (busy.has(name)) conflicts.add(name);
     }
   }
@@ -760,7 +1017,13 @@ export function partialTeacherConflictAt(
     if (!wholeSet) continue;
     const other = findGradeSet(catalog, otherGrade, wholeSet);
     if (!other) continue;
-    for (const name of teachersForGradeSet(teachers, other)) {
+    for (const name of teachersBusyForGradeSetAtSlot(
+      teachers,
+      other,
+      day,
+      period,
+      assignments,
+    )) {
       if (busy.has(name)) conflicts.add(name);
     }
   }
@@ -776,7 +1039,13 @@ export function partialTeacherConflictAt(
     )) {
       const other = findGradeSet(catalog, otherGrade, otherSet);
       if (!other) continue;
-      for (const name of teachersForGradeSet(teachers, other)) {
+      for (const name of teachersBusyForGradeSetAtSlot(
+        teachers,
+        other,
+        day,
+        period,
+        assignments,
+      )) {
         if (busy.has(name)) conflicts.add(name);
       }
     }
@@ -794,6 +1063,7 @@ export function blockedPartialSlotsForSet(
   schedules: GradeDaySchedules,
   grade: Grade,
   set: ElectiveSet,
+  assignments: SetTeacherAssignment[] = [],
 ): Map<string, string> {
   const blocked = new Map<string, string>();
   const periods = schedules[grade];
@@ -832,6 +1102,7 @@ export function blockedPartialSlotsForSet(
         set,
         day,
         period,
+        assignments,
       );
       if (teachersConflict.length > 0) {
         blocked.set(key, `교사: ${teachersConflict.join(", ")}`);
@@ -853,6 +1124,7 @@ export function tryPaintPartialCell({
   set,
   day,
   period,
+  assignments = [],
 }: {
   wholeCells: SetBlockCell[];
   partialCells: SetBlockCell[];
@@ -864,6 +1136,7 @@ export function tryPaintPartialCell({
   set: ElectiveSet;
   day: Weekday;
   period: number;
+  assignments?: SetTeacherAssignment[];
 }): { cells: SetBlockCell[]; error?: string } {
   const info = findGradeSet(catalog, grade, set);
   if (!info || info.kind !== "partial" || info.units === null) {
@@ -915,6 +1188,7 @@ export function tryPaintPartialCell({
     set,
     day,
     period,
+    assignments,
   );
   if (teacherConflicts.length > 0) {
     return {
@@ -926,6 +1200,247 @@ export function tryPaintPartialCell({
   return {
     cells: [...partialCells, { grade, set, day, period }],
   };
+}
+
+export type WholePartialSameSlotConflict = {
+  grade: Grade;
+  day: Weekday;
+  period: number;
+  wholeSet: ElectiveSet;
+  partialSets: ElectiveSet[];
+};
+
+/**
+ * A whole-grade SET needs every student in the grade, so it can never share
+ * a slot with a partial SET already placed in the same grade — regardless of
+ * teacher overlap. This is a stronger, unconditional check on top of
+ * `crossSetTeacherConflicts`.
+ */
+export function wholePartialSameSlotConflicts(
+  wholeCells: SetBlockCell[],
+  partialCells: SetBlockCell[],
+): WholePartialSameSlotConflict[] {
+  const conflicts: WholePartialSameSlotConflict[] = [];
+
+  for (const cell of wholeCells) {
+    const partialSets = partialSetsAtSlot(
+      partialCells,
+      cell.grade,
+      cell.day,
+      cell.period,
+    );
+    if (partialSets.length > 0) {
+      conflicts.push({
+        grade: cell.grade,
+        day: cell.day,
+        period: cell.period,
+        wholeSet: cell.set,
+        partialSets,
+      });
+    }
+  }
+
+  return conflicts;
+}
+
+export function formatWholePartialSameSlotConflict(
+  c: WholePartialSameSlotConflict,
+): string {
+  const dayLabel = WEEKDAYS.find((d) => d.key === c.day)?.label ?? c.day;
+  return `${c.grade}학년 ${dayLabel}${c.period}교시: 전학년 SET ${c.wholeSet} ↔ 부분 SET ${c.partialSets.join(", ")}`;
+}
+
+export type CrossSetTeacherConflict = {
+  teacherName: string;
+  day: Weekday;
+  period: number;
+  grade: Grade;
+  set: ElectiveSet;
+  otherGrade: Grade;
+  otherSet: ElectiveSet;
+};
+
+/**
+ * Teacher conflicts between two independent SET-cell arrays (e.g. whole vs
+ * partial), regardless of which side was just edited. Used as a
+ * belt-and-suspenders server-side check since the paint-time UI can only
+ * warn about the array it currently has loaded.
+ */
+export function crossSetTeacherConflicts(
+  cellsA: SetBlockCell[],
+  cellsB: SetBlockCell[],
+  teachers: Teacher[],
+  catalog: GradeSetInfo[],
+  assignments: SetTeacherAssignment[] = [],
+): CrossSetTeacherConflict[] {
+  const conflicts: CrossSetTeacherConflict[] = [];
+
+  for (const a of cellsA) {
+    const infoA = findGradeSet(catalog, a.grade, a.set);
+    if (!infoA) continue;
+    const teachersA = teachersBusyForGradeSetAtSlot(
+      teachers,
+      infoA,
+      a.day,
+      a.period,
+      assignments,
+    );
+    if (teachersA.length === 0) continue;
+    const busyA = new Set(teachersA);
+
+    for (const b of cellsB) {
+      if (b.day !== a.day || b.period !== a.period) continue;
+      if (b.grade === a.grade && b.set === a.set) continue;
+      const infoB = findGradeSet(catalog, b.grade, b.set);
+      if (!infoB) continue;
+      for (const name of teachersBusyForGradeSetAtSlot(
+        teachers,
+        infoB,
+        b.day,
+        b.period,
+        assignments,
+      )) {
+        if (!busyA.has(name)) continue;
+        conflicts.push({
+          teacherName: name,
+          day: a.day,
+          period: a.period,
+          grade: a.grade,
+          set: a.set,
+          otherGrade: b.grade,
+          otherSet: b.set,
+        });
+      }
+    }
+  }
+
+  return conflicts;
+}
+
+export function formatCrossSetTeacherConflict(
+  c: CrossSetTeacherConflict,
+): string {
+  const dayLabel = WEEKDAYS.find((d) => d.key === c.day)?.label ?? c.day;
+  return `${c.teacherName}: ${dayLabel}${c.period}교시 · ${c.grade}학년 SET ${c.set} ↔ ${c.otherGrade}학년 SET ${c.otherSet}`;
+}
+
+export type SameSetInternalTeacherConflict = {
+  teacherName: string;
+  day: Weekday;
+  period: number;
+  grade: Grade;
+  set: ElectiveSet;
+  /** The 2+ distinct subjects within this SET this teacher is required for
+   * at the same occurrence — physically impossible since every subject in a
+   * whole/partial SET shares the exact same slots (one per home room). */
+  subjectNames: string[];
+};
+
+/**
+ * The teacher *certain* to cover `subjectName` at one occurrence — i.e.
+ * unambiguous, either because only one teacher is assigned to it at all, or
+ * because rotation has already been resolved via `SetTeacherAssignment` for
+ * this exact slot. Returns undefined when it's still ambiguous (multiple
+ * teachers share the subject and no rotation choice has been made yet), so
+ * callers don't mistake "not yet decided" for "definitely busy".
+ */
+function certainSubjectTeacherAtSlot(
+  teachers: Teacher[],
+  catalogItem: GradeSetInfo,
+  subjectName: string,
+  day: Weekday,
+  period: number,
+  assignments: SetTeacherAssignment[],
+): string | undefined {
+  const shares = setTeacherShares(teachers, catalogItem).filter(
+    (s) => s.subjectName === subjectName,
+  );
+  if (shares.length === 0) return undefined;
+  if (shares.length === 1) return shares[0].teacherName;
+  return assignedTeacherAt(
+    assignments,
+    catalogItem.grade,
+    catalogItem.set,
+    day,
+    period,
+    subjectName,
+  );
+}
+
+/**
+ * Teacher conflicts *inside* a single (grade, SET): two different subjects
+ * of the same SET (taught in different home rooms) sharing a teacher who
+ * would have to be in two rooms at once. Every subject in a whole/partial
+ * SET occupies the identical occurrence slots, so this is never resolvable
+ * by rotation — unlike `crossSetTeacherConflicts`, which only compares
+ * *different* (grade, SET) pairs and skips this case entirely.
+ *
+ * Only counts *certain* overlaps (see `certainSubjectTeacherAtSlot`): a
+ * subject that still shares an unresolved multi-teacher pool with another
+ * subject is a normal, resolvable mid-setup state (the rotation step is
+ * exactly what disambiguates it), not a reportable conflict. Reporting that
+ * conservatively would also create a deadlock on save — the rotation UI
+ * needs the cells saved first to offer choices.
+ */
+export function sameSetInternalTeacherConflicts(
+  wholeCells: SetBlockCell[],
+  partialCells: SetBlockCell[],
+  teachers: Teacher[],
+  catalog: GradeSetInfo[],
+  assignments: SetTeacherAssignment[] = [],
+): SameSetInternalTeacherConflict[] {
+  const conflicts: SameSetInternalTeacherConflict[] = [];
+  const seen = new Set<string>();
+
+  for (const cell of [...wholeCells, ...partialCells]) {
+    const groupKey = `${cell.grade}_${cell.set}`;
+    if (seen.has(groupKey)) continue;
+    seen.add(groupKey);
+
+    const info = findGradeSet(catalog, cell.grade, cell.set);
+    if (!info) continue;
+    const subjectNames = [...new Set(info.subjects.map((s) => s.name))];
+    if (subjectNames.length < 2) continue;
+
+    const slots = slotsForGradeSet(wholeCells, partialCells, cell.grade, cell.set);
+    for (const slot of slots) {
+      const bySubject = new Map<string, Set<string>>();
+      for (const subjectName of subjectNames) {
+        const teacherName = certainSubjectTeacherAtSlot(
+          teachers,
+          info,
+          subjectName,
+          slot.day,
+          slot.period,
+          assignments,
+        );
+        if (!teacherName) continue;
+        if (!bySubject.has(teacherName)) bySubject.set(teacherName, new Set());
+        bySubject.get(teacherName)!.add(subjectName);
+      }
+      for (const [teacherName, subjects] of bySubject) {
+        if (subjects.size > 1) {
+          conflicts.push({
+            teacherName,
+            day: slot.day,
+            period: slot.period,
+            grade: cell.grade,
+            set: cell.set,
+            subjectNames: [...subjects],
+          });
+        }
+      }
+    }
+  }
+
+  return conflicts;
+}
+
+export function formatSameSetInternalTeacherConflict(
+  c: SameSetInternalTeacherConflict,
+): string {
+  const dayLabel = WEEKDAYS.find((d) => d.key === c.day)?.label ?? c.day;
+  return `${c.teacherName}: ${dayLabel}${c.period}교시 · ${c.grade}학년 SET ${c.set} 안에서 "${c.subjectNames.join('", "')}" 과목에 동시에 필요합니다`;
 }
 
 export function partialSetsPlacementComplete(
@@ -1087,4 +1602,164 @@ export function partialSetsMissingClassNos(
     }
   }
   return null;
+}
+
+/** All (day, period) occurrences currently placed for a grade·SET, across
+ * whichever of the whole/partial arrays it belongs to. Every subject inside
+ * the SET shares this same set of occurrences (SET catalog entries only
+ * form a valid "whole"/"partial" group when all of their subjects share the
+ * same weekly unit count). */
+export function slotsForGradeSet(
+  wholeCells: SetBlockCell[],
+  partialCells: SetBlockCell[],
+  grade: Grade,
+  set: ElectiveSet,
+): { day: Weekday; period: number }[] {
+  const source = wholeCells.some(
+    (c) => c.grade === grade && c.set === set,
+  )
+    ? wholeCells
+    : partialCells;
+  return source
+    .filter((c) => c.grade === grade && c.set === set)
+    .map((c) => ({ day: c.day, period: c.period }));
+}
+
+/**
+ * Every distinct way of assigning specific teachers to specific slot
+ * occurrences that respects each teacher's weekly hour share (e.g. teacher
+ * A × 2 hours + teacher B × 1 hour over 3 slots ⇒ 3 permutations). Returns
+ * an empty array if the shares' hours don't add up to `slotCount`. Capped
+ * at `maxResults` distinct permutations, which is generous for realistic
+ * school data (a handful of teachers sharing a handful of periods).
+ */
+export function enumerateTeacherSlotCombinations(
+  shares: { teacherName: string; hours: number }[],
+  slotCount: number,
+  maxResults = 500,
+): string[][] {
+  const totalHours = shares.reduce((sum, s) => sum + s.hours, 0);
+  if (slotCount <= 0 || totalHours !== slotCount) return [];
+
+  const pool: string[] = [];
+  for (const share of shares) {
+    for (let i = 0; i < share.hours; i++) pool.push(share.teacherName);
+  }
+
+  const results: string[][] = [];
+  const used = Array.from({ length: pool.length }, () => false);
+  const current: string[] = [];
+
+  function backtrack() {
+    if (results.length >= maxResults) return;
+    if (current.length === slotCount) {
+      results.push([...current]);
+      return;
+    }
+    const triedAtThisLevel = new Set<string>();
+    for (let i = 0; i < pool.length; i++) {
+      if (used[i] || triedAtThisLevel.has(pool[i])) continue;
+      triedAtThisLevel.add(pool[i]);
+      used[i] = true;
+      current.push(pool[i]);
+      backtrack();
+      current.pop();
+      used[i] = false;
+      if (results.length >= maxResults) return;
+    }
+  }
+
+  backtrack();
+  return results;
+}
+
+export type RotationCombination = {
+  /** Teacher assigned to each slot, in the same order as the `slots` input. */
+  teacherNames: string[];
+  /**
+   * How many "genuinely freed" opportunities this combination creates:
+   * for each slot, every teacher in the rotation group who is *not* chosen
+   * there and has no other already-placed SET obligation at that exact
+   * (day, period) becomes free to teach elsewhere at that time instead of
+   * being conservatively marked busy. Higher is better.
+   */
+  score: number;
+};
+
+/**
+ * Ranks the feasible teacher-per-slot combinations for a rotating SET
+ * subject by how much real scheduling flexibility each one frees up for
+ * the *other* teachers in the rotation, based on which slots are already
+ * claimed elsewhere by other placed SETs.
+ */
+export function recommendSubjectRotations({
+  teachers,
+  catalog,
+  wholeCells,
+  partialCells,
+  assignments = [],
+  grade,
+  set,
+  shares,
+  slots,
+  limit = 8,
+}: {
+  teachers: Teacher[];
+  catalog: GradeSetInfo[];
+  wholeCells: SetBlockCell[];
+  partialCells: SetBlockCell[];
+  assignments?: SetTeacherAssignment[];
+  grade: Grade;
+  set: ElectiveSet;
+  shares: SetTeacherShare[];
+  slots: { day: Weekday; period: number }[];
+  limit?: number;
+}): RotationCombination[] {
+  const combos = enumerateTeacherSlotCombinations(
+    shares.map((s) => ({ teacherName: s.teacherName, hours: s.hours })),
+    slots.length,
+  );
+  if (combos.length === 0) return [];
+
+  const groupNames = new Set(shares.map((s) => s.teacherName));
+
+  function busyElsewhereAt(
+    day: Weekday,
+    period: number,
+    teacherName: string,
+  ): boolean {
+    for (const cell of [...wholeCells, ...partialCells]) {
+      if (cell.grade === grade && cell.set === set) continue;
+      if (cell.day !== day || cell.period !== period) continue;
+      const info = findGradeSet(catalog, cell.grade, cell.set);
+      if (!info) continue;
+      if (
+        teachersBusyForGradeSetAtSlot(
+          teachers,
+          info,
+          day,
+          period,
+          assignments,
+        ).includes(teacherName)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  const scored: RotationCombination[] = combos.map((teacherNames) => {
+    let score = 0;
+    slots.forEach((slot, index) => {
+      const chosen = teacherNames[index];
+      for (const name of groupNames) {
+        if (name === chosen) continue;
+        if (!busyElsewhereAt(slot.day, slot.period, name)) score += 1;
+      }
+    });
+    return { teacherNames, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, limit);
 }

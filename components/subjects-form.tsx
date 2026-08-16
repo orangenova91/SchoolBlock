@@ -17,6 +17,7 @@ import {
   subjectSetBadgeClass,
   usedClassNosInSet,
   validateSetClassAssignments,
+  wholeClassNoOptions,
 } from "@/lib/subjects";
 import {
   DEFAULT_SUBJECT_CLASS_COUNT,
@@ -191,7 +192,12 @@ function SubjectClassCountEditor({
                                   gradeClassCount,
                                 )
                               : null;
-                          const showClassDropdown = kind === "partial";
+                          const showClassDropdown =
+                            kind === "partial" || kind === "whole";
+                          const classNoOptions =
+                            kind === "whole"
+                              ? wholeClassNoOptions(gradeClassCount)
+                              : partialClassNoOptions(gradeClassCount);
                           const used =
                             showClassDropdown && elective
                               ? usedClassNosInSet(
@@ -255,9 +261,7 @@ function SubjectClassCountEditor({
                                       className="w-[3rem] shrink-0 rounded-md border border-zinc-300 bg-white px-0.5 py-1 text-xs text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
                                     >
                                       <option value="">학반</option>
-                                      {partialClassNoOptions(
-                                        gradeClassCount,
-                                      ).map((n) => (
+                                      {classNoOptions.map((n) => (
                                         <option
                                           key={n}
                                           value={n}

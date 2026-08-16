@@ -17,6 +17,8 @@ type SetBlockGridProps = {
   grade: Grade;
   periods: WeekdayPeriods;
   placed: Map<string, ElectiveSet>;
+  /** Slots already occupied by partial SET(s); locked, cannot paint here. */
+  partialLocked: Map<string, ElectiveSet[]>;
   selectedSet: ElectiveSet | null;
   blocked: Map<string, string[]>;
   disabled?: boolean;
@@ -33,6 +35,7 @@ export function SetBlockGrid({
   grade,
   periods,
   placed,
+  partialLocked,
   selectedSet,
   blocked,
   disabled,
@@ -42,6 +45,7 @@ export function SetBlockGrid({
 }: SetBlockGridProps) {
   const periodsRef = useRef(periods);
   const placedRef = useRef(placed);
+  const partialLockedRef = useRef(partialLocked);
   const selectedRef = useRef(selectedSet);
   const blockedRef = useRef(blocked);
   const disabledRef = useRef(disabled);
@@ -59,6 +63,10 @@ export function SetBlockGrid({
   useEffect(() => {
     placedRef.current = placed;
   }, [placed]);
+
+  useEffect(() => {
+    partialLockedRef.current = partialLocked;
+  }, [partialLocked]);
 
   useEffect(() => {
     selectedRef.current = selectedSet;
@@ -90,6 +98,7 @@ export function SetBlockGrid({
     if (period < 1 || period > allowed) return;
 
     const key = slotKey(day, period);
+    if (partialLockedRef.current.has(key)) return;
     const existing = placedRef.current.get(key);
     const selected = selectedRef.current;
 
@@ -154,6 +163,7 @@ export function SetBlockGrid({
     event.preventDefault();
 
     const key = slotKey(day, period);
+    if (partialLocked.has(key)) return;
     const existing = placed.get(key);
 
     if (existing && existing !== selectedSet) {
@@ -199,9 +209,13 @@ export function SetBlockGrid({
               const active = periods[key] >= period;
               const keyName = slotKey(key, period);
               const placedSet = placed.get(keyName);
+              const partialHere = partialLocked.get(keyName);
               const conflictTeachers = blocked.get(keyName);
               const isConflict = Boolean(
-                selectedSet && !placedSet && conflictTeachers?.length,
+                selectedSet &&
+                  !placedSet &&
+                  !partialHere &&
+                  conflictTeachers?.length,
               );
               const isSelectedFill = placedSet === selectedSet;
 
@@ -211,15 +225,17 @@ export function SetBlockGrid({
                   type="button"
                   data-day={key}
                   data-period={period}
-                  disabled={disabled || !active}
+                  disabled={disabled || !active || Boolean(partialHere)}
                   aria-label={`${grade}학년 ${label}요일 ${period}교시${
                     placedSet
                       ? ` SET ${placedSet}`
-                      : isConflict
-                        ? " 교사 충돌"
-                        : active
-                          ? " 비어 있음"
-                          : " 수업 없음"
+                      : partialHere
+                        ? ` 부분 SET ${partialHere.join(",")}로 잠김`
+                        : isConflict
+                          ? " 교사 충돌"
+                          : active
+                            ? " 비어 있음"
+                            : " 수업 없음"
                   }`}
                   className={`h-8 rounded-sm border text-xs font-semibold transition-colors touch-none disabled:cursor-not-allowed ${
                     !active
@@ -228,26 +244,36 @@ export function SetBlockGrid({
                         ? `${subjectSetBadgeClass(placedSet)} ${
                             isSelectedFill ? "ring-2 ring-zinc-700" : ""
                           }`
-                        : isConflict
-                          ? "border-red-200 bg-red-50 text-red-400"
-                          : "border-zinc-200 bg-white text-transparent hover:border-zinc-300 hover:bg-zinc-50"
+                        : partialHere
+                          ? `${subjectSetBadgeClass(partialHere[0])} opacity-50 cursor-not-allowed`
+                          : isConflict
+                            ? "border-red-200 bg-red-50 text-red-400"
+                            : "border-zinc-200 bg-white text-transparent hover:border-zinc-300 hover:bg-zinc-50"
                   }`}
                   title={
                     !active
                       ? "수업 없음"
-                      : isConflict
-                        ? `교사 충돌: ${conflictTeachers?.join(", ")}`
-                        : placedSet
-                          ? `SET ${placedSet}`
-                          : selectedSet
-                            ? `SET ${selectedSet} 배치`
-                            : "SET를 선택한 뒤 칸을 누르세요"
+                      : partialHere
+                        ? `부분 SET ${partialHere.join(", ")}가 배치되어 있습니다.`
+                        : isConflict
+                          ? `교사 충돌: ${conflictTeachers?.join(", ")}`
+                          : placedSet
+                            ? `SET ${placedSet}`
+                            : selectedSet
+                              ? `SET ${selectedSet} 배치`
+                              : "SET를 선택한 뒤 칸을 누르세요"
                   }
                   onPointerDown={(event) =>
                     handlePointerDown(event, key, period)
                   }
                 >
-                  {active && placedSet ? placedSet : isConflict ? "!" : ""}
+                  {active && placedSet
+                    ? placedSet
+                    : active && partialHere
+                      ? partialHere.join("/")
+                      : isConflict
+                        ? "!"
+                        : ""}
                 </button>
               );
             })}

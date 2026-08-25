@@ -14,8 +14,10 @@ import {
 } from "@/lib/set-blocks";
 import { filterSubjectBlocksToAssignments } from "@/lib/subject-blocks";
 import { ensureGradeSubjects, sanitizeGradeSubjects } from "@/lib/subjects";
+import { getAccountId } from "@/lib/session";
 import { filterForbiddenSlots } from "@/lib/teacher-constraints";
 import { ensureTeachers, sanitizeTeachers } from "@/lib/teachers";
+import { findOwnedTerm } from "@/lib/term-access";
 import { generateTimetable } from "@/lib/timetable";
 import {
   createDefaultClassCounts,
@@ -29,7 +31,6 @@ import {
   type SubjectsDocument,
   type TeacherConstraintsDocument,
   type TeachersDocument,
-  type TermDocument,
   type TimetableDocument,
 } from "@/lib/types";
 
@@ -44,19 +45,18 @@ function invalidTermIdResponse() {
   );
 }
 
-async function findTerm(termId: string) {
-  if (!ObjectId.isValid(termId)) return null;
-  const db = await getDb();
-  return db.collection<TermDocument>("terms").findOne({
-    _id: new ObjectId(termId),
-  });
+function unauthorizedResponse() {
+  return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
 }
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
+  const accountId = await getAccountId(request);
+  if (!accountId) return unauthorizedResponse();
+
   const { termId } = await context.params;
 
   try {
-    const term = await findTerm(termId);
+    const term = await findOwnedTerm(termId, accountId);
     if (!term) {
       if (!ObjectId.isValid(termId)) return invalidTermIdResponse();
       return NextResponse.json(
@@ -152,11 +152,14 @@ export async function GET(_request: Request, context: RouteContext) {
   }
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
+  const accountId = await getAccountId(request);
+  if (!accountId) return unauthorizedResponse();
+
   const { termId } = await context.params;
 
   try {
-    const term = await findTerm(termId);
+    const term = await findOwnedTerm(termId, accountId);
     if (!term) {
       if (!ObjectId.isValid(termId)) return invalidTermIdResponse();
       return NextResponse.json(
@@ -183,11 +186,14 @@ export async function DELETE(_request: Request, context: RouteContext) {
   }
 }
 
-export async function POST(_request: Request, context: RouteContext) {
+export async function POST(request: Request, context: RouteContext) {
+  const accountId = await getAccountId(request);
+  if (!accountId) return unauthorizedResponse();
+
   const { termId } = await context.params;
 
   try {
-    const term = await findTerm(termId);
+    const term = await findOwnedTerm(termId, accountId);
     if (!term) {
       if (!ObjectId.isValid(termId)) return invalidTermIdResponse();
       return NextResponse.json(

@@ -58,6 +58,7 @@ export function HomeDashboard() {
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const [editError, setEditError] = useState("");
   const [listMessage, setListMessage] = useState("");
 
@@ -144,6 +145,42 @@ export function HomeDashboard() {
       setListMessage("서버에 연결할 수 없습니다.");
     } finally {
       setDeletingId(null);
+    }
+  }
+
+  async function duplicateTerm(term: TermListItem) {
+    setDuplicatingId(term.id);
+    setListMessage("");
+    setError("");
+
+    try {
+      const response = await fetch(`/api/terms/${term.id}/duplicate`, {
+        method: "POST",
+      });
+      const data = (await response.json()) as Partial<TermListItem> & {
+        error?: string;
+      };
+
+      if (!response.ok || !data.id) {
+        setListMessage(data.error ?? "복제에 실패했습니다.");
+        return;
+      }
+
+      const created: TermListItem = {
+        id: data.id,
+        timetableName: data.timetableName ?? null,
+        school: data.school ?? term.school,
+        academicYear: data.academicYear ?? term.academicYear,
+        semester: data.semester ?? term.semester,
+        createdAt: data.createdAt ?? new Date().toISOString(),
+      };
+
+      setTerms((prev) => [created, ...prev]);
+      setListMessage(`"${created.timetableName}" 이름으로 복제되었습니다.`);
+    } catch {
+      setListMessage("서버에 연결할 수 없습니다.");
+    } finally {
+      setDuplicatingId(null);
     }
   }
 
@@ -269,7 +306,8 @@ export function HomeDashboard() {
         {listMessage ? (
           <p
             className={`mb-3 text-sm ${
-              listMessage.includes("삭제되었습니다")
+              listMessage.includes("삭제되었습니다") ||
+              listMessage.includes("복제되었습니다")
                 ? "text-emerald-700"
                 : "text-red-600"
             }`}
@@ -323,18 +361,13 @@ export function HomeDashboard() {
                         <div className="mt-1 flex flex-wrap items-baseline gap-x-1 gap-y-0.5 text-sm text-zinc-600">
                           <input
                             type="text"
-                            required
-                            aria-label="학교"
+                            readOnly
+                            disabled
+                            aria-label="학교 (계정 아이디로 고정됨)"
+                            title="계정 아이디로 자동 설정되며 수정할 수 없습니다."
                             value={draft.school}
                             size={Math.max(draft.school.length, 4)}
-                            onChange={(e) =>
-                              setDraft((prev) =>
-                                prev
-                                  ? { ...prev, school: e.target.value }
-                                  : prev,
-                              )
-                            }
-                            className={`min-w-[3ch] ${metaInputClassName}`}
+                            className={`min-w-[3ch] cursor-not-allowed text-zinc-400 ${metaInputClassName}`}
                           />
                           <span aria-hidden>·</span>
                           <input
@@ -435,7 +468,7 @@ export function HomeDashboard() {
                         <button
                           type="button"
                           onClick={() => startEdit(term)}
-                          disabled={deletingId === term.id}
+                          disabled={deletingId === term.id || duplicatingId === term.id}
                           className="shrink-0 rounded-md px-2 py-1 text-base leading-none text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-50"
                           aria-label={`${term.timetableName || "시간표"} 수정`}
                           title="수정"
@@ -444,8 +477,18 @@ export function HomeDashboard() {
                         </button>
                         <button
                           type="button"
+                          onClick={() => void duplicateTerm(term)}
+                          disabled={deletingId === term.id || duplicatingId === term.id}
+                          className="shrink-0 rounded-md px-2 py-1 text-base leading-none text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-50"
+                          aria-label={`${term.timetableName || "시간표"} 복제`}
+                          title="복제 (설정값만, 시간표 생성 결과는 복제되지 않음)"
+                        >
+                          {duplicatingId === term.id ? "…" : "📋"}
+                        </button>
+                        <button
+                          type="button"
                           onClick={() => void deleteTerm(term)}
-                          disabled={deletingId === term.id}
+                          disabled={deletingId === term.id || duplicatingId === term.id}
                           className="shrink-0 rounded-md px-2 py-1 text-base leading-none text-zinc-500 transition hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
                           aria-label={`${term.timetableName || "시간표"} 삭제`}
                           title="삭제"

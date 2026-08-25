@@ -1253,7 +1253,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
   }
 
   function handleDownloadCsv() {
-    const csv = teachersToCsv(teachers, subjects);
+    const csv = teachersToCsv(teachers, subjects, gradeClassCounts);
     const blob = new Blob(["\uFEFF" + csv], {
       type: "text/csv;charset=utf-8;",
     });
@@ -1262,7 +1262,9 @@ export function TeachersForm({ termId }: TeachersFormProps) {
     const stamp = new Date().toISOString().slice(0, 10);
     anchor.href = url;
     anchor.download = `교사배정_${stamp}.csv`;
+    document.body.appendChild(anchor);
     anchor.click();
+    document.body.removeChild(anchor);
     URL.revokeObjectURL(url);
   }
 

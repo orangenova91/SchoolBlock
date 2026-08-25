@@ -1,15 +1,16 @@
 import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
+import { getAccountId } from "@/lib/session";
 import {
   ensureGradeSubjects,
   parseGradeSubjects,
   sanitizeGradeSubjects,
 } from "@/lib/subjects";
+import { findOwnedTerm } from "@/lib/term-access";
 import {
   createDefaultGradeSubjects,
   type SubjectsDocument,
-  type TermDocument,
 } from "@/lib/types";
 
 type RouteContext = {
@@ -23,19 +24,18 @@ function invalidTermIdResponse() {
   );
 }
 
-async function findTerm(termId: string) {
-  if (!ObjectId.isValid(termId)) return null;
-  const db = await getDb();
-  return db.collection<TermDocument>("terms").findOne({
-    _id: new ObjectId(termId),
-  });
+function unauthorizedResponse() {
+  return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
 }
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
+  const accountId = await getAccountId(request);
+  if (!accountId) return unauthorizedResponse();
+
   const { termId } = await context.params;
 
   try {
-    const term = await findTerm(termId);
+    const term = await findOwnedTerm(termId, accountId);
     if (!term) {
       if (!ObjectId.isValid(termId)) return invalidTermIdResponse();
       return NextResponse.json(
@@ -74,6 +74,9 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function PUT(request: Request, context: RouteContext) {
+  const accountId = await getAccountId(request);
+  if (!accountId) return unauthorizedResponse();
+
   const { termId } = await context.params;
 
   let body: unknown;
@@ -107,7 +110,7 @@ export async function PUT(request: Request, context: RouteContext) {
   const subjects = sanitizeGradeSubjects(parsed);
 
   try {
-    const term = await findTerm(termId);
+    const term = await findOwnedTerm(termId, accountId);
     if (!term) {
       if (!ObjectId.isValid(termId)) return invalidTermIdResponse();
       return NextResponse.json(

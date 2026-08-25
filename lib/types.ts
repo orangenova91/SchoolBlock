@@ -8,6 +8,14 @@ export type TermInput = {
 };
 
 export type TermDocument = TermInput & {
+  /** 소유 계정의 accounts._id (문자열). 서버가 세션에서 채우며 클라이언트가 보내지 않는다. */
+  ownerId: string;
+  createdAt: Date;
+};
+
+export type AccountDocument = {
+  username: string;
+  passwordHash: string;
   createdAt: Date;
 };
 

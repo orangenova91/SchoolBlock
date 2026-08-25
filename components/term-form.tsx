@@ -6,10 +6,9 @@ import type { Semester } from "@/lib/types";
 
 const currentYear = new Date().getFullYear();
 
-export function TermForm() {
+export function TermForm({ school }: { school: string }) {
   const router = useRouter();
   const [timetableName, setTimetableName] = useState("");
-  const [school, setSchool] = useState("");
   const [academicYear, setAcademicYear] = useState(String(currentYear));
   const [semester, setSemester] = useState<Semester>(1);
   const [status, setStatus] = useState<"idle" | "loading" | "error">("idle");
@@ -21,18 +20,11 @@ export function TermForm() {
     setMessage("");
 
     const trimmedName = timetableName.trim().replace(/\s+/g, " ");
-    const trimmedSchool = school.trim();
     const year = Number(academicYear);
 
     if (!trimmedName) {
       setStatus("error");
       setMessage("시간표명을 입력해 주세요.");
-      return;
-    }
-
-    if (!trimmedSchool) {
-      setStatus("error");
-      setMessage("학교를 입력해 주세요.");
       return;
     }
 
@@ -48,7 +40,6 @@ export function TermForm() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           timetableName: trimmedName,
-          school: trimmedSchool,
           academicYear: year,
           semester,
         }),
@@ -101,12 +92,12 @@ export function TermForm() {
           id="school"
           name="school"
           type="text"
-          required
+          readOnly
+          disabled
           value={school}
-          onChange={(e) => setSchool(e.target.value)}
-          placeholder="예: ○○고등학교"
-          className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
+          className="cursor-not-allowed rounded-lg border border-zinc-200 bg-zinc-100 px-3 py-2 text-zinc-500 outline-none"
         />
+        <p className="text-xs text-zinc-500">계정 아이디로 자동 설정되며 수정할 수 없습니다.</p>
       </div>
 
       <div className="flex flex-col gap-1.5">

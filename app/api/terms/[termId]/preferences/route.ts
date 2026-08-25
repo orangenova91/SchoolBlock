@@ -5,9 +5,10 @@ import {
   parseGenerationPreferences,
 } from "@/lib/generation-preferences";
 import { getDb } from "@/lib/mongodb";
+import { getAccountId } from "@/lib/session";
+import { findOwnedTerm } from "@/lib/term-access";
 import type {
   GenerationPreferencesDocument,
-  TermDocument,
   TimetableDocument,
 } from "@/lib/types";
 
@@ -22,19 +23,18 @@ function invalidTermIdResponse() {
   );
 }
 
-async function findTerm(termId: string) {
-  if (!ObjectId.isValid(termId)) return null;
-  const db = await getDb();
-  return db.collection<TermDocument>("terms").findOne({
-    _id: new ObjectId(termId),
-  });
+function unauthorizedResponse() {
+  return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
 }
 
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
+  const accountId = await getAccountId(request);
+  if (!accountId) return unauthorizedResponse();
+
   const { termId } = await context.params;
 
   try {
-    const term = await findTerm(termId);
+    const term = await findOwnedTerm(termId, accountId);
     if (!term) {
       if (!ObjectId.isValid(termId)) return invalidTermIdResponse();
       return NextResponse.json(
@@ -73,10 +73,13 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 export async function PUT(request: Request, context: RouteContext) {
+  const accountId = await getAccountId(request);
+  if (!accountId) return unauthorizedResponse();
+
   const { termId } = await context.params;
 
   try {
-    const term = await findTerm(termId);
+    const term = await findOwnedTerm(termId, accountId);
     if (!term) {
       if (!ObjectId.isValid(termId)) return invalidTermIdResponse();
       return NextResponse.json(

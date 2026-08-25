@@ -6,6 +6,7 @@ import {
   MAX_CELL_HOURS,
   MIN_ASSIGNMENT_HOURS,
   MIN_CELL_HOURS,
+  createDefaultClassCounts,
   createDefaultTeachers,
   createEmptyTeacher,
   createEmptyTeacherAssignments,
@@ -210,7 +211,7 @@ export function ensureTeachers(
 
 export function parseTeachersFromClipboard(text: string): Teacher[] {
   const lines = text
-    .replace(/^\uFEFF/, "")
+    .replace(/^﻿/, "")
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .split("\n")
@@ -326,22 +327,28 @@ export function withEditTeacherRows(teachers: Teacher[]): Teacher[] {
     : [createEmptyTeacher()];
 }
 
-const CSV_HEADERS = {
-  name: "교사명",
-  1: "1학년",
-  2: "2학년",
-  3: "3학년",
-} as const;
-
 const NAME_HEADER_ALIASES = new Set(
   [...HEADER_NAMES].map((h) => h.toLowerCase()),
 );
 
-const GRADE_HEADER_ALIASES: Record<Grade, Set<string>> = {
-  1: new Set(["1학년", "1", "학년1", "grade1", "g1"]),
-  2: new Set(["2학년", "2", "학년2", "grade2", "g2"]),
-  3: new Set(["3학년", "3", "학년3", "grade3", "g3"]),
-};
+const GRADE_COLUMN_ALIASES = new Set(["학년", "grade"]);
+
+const SUBJECT_COLUMN_ALIASES = new Set([
+  "교과명",
+  "과목명",
+  "과목",
+  "교과",
+  "수업명",
+  "subject",
+]);
+
+const SET_HOURS_ALIASES = new Set([
+  "set시수",
+  "set 시수",
+  "set",
+  "이동수업시수",
+  "선택시수",
+]);
 
 export type TeachersCsvError = {
   row: number;
@@ -361,7 +368,7 @@ function escapeCsvField(value: string): string {
 }
 
 function parseCsvRows(text: string): string[][] {
-  const normalized = text.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const normalized = text.replace(/^﻿/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";
@@ -410,124 +417,86 @@ function parseCsvRows(text: string): string[][] {
   return rows;
 }
 
-function splitAssignmentItems(
-  cell: string,
-  subjects: GradeSubjects,
-  grade: Grade,
-  gradeClassCounts?: GradeClassCounts,
-): AssignmentItem[] {
-  const seen = new Set<string>();
-  const items: AssignmentItem[] = [];
-  for (const part of cell.split(/[,;]/)) {
-    const raw = part.trim();
-    if (!raw) continue;
+function maxClassColumnCount(gradeClassCounts?: GradeClassCounts): number {
+  const counts = gradeClassCounts ?? createDefaultClassCounts();
+  return Math.max(1, counts[1] ?? 0, counts[2] ?? 0, counts[3] ?? 0);
+}
 
-    let name = raw;
-    let hours: number | undefined;
-    const colon = raw.lastIndexOf(":");
-    if (colon > 0) {
-      const maybeHours = Number(raw.slice(colon + 1).trim());
-      if (Number.isFinite(maybeHours)) {
-        name = raw.slice(0, colon).trim();
-        hours = maybeHours;
-      }
-    }
+function classColumnHeader(classNo: number): string {
+  return `${classNo}반`;
+}
 
-    if (!name || seen.has(name)) continue;
-    seen.add(name);
-    const subject = subjects[grade]?.find((s) => s.name === name);
-    const base = createAssignmentForSubject(
-      subjects,
-      grade,
-      name,
-      gradeClassCounts,
-    );
-    if (hours !== undefined) {
-      if (isSetSubject(subject) || base.classHours.length === 1) {
-        items.push(syncAssignmentItem(name, [clampCellHours(hours)]));
-      } else {
-        const cells = [...base.classHours];
-        cells[0] = clampCellHours(hours);
-        items.push(syncAssignmentItem(name, cells));
-      }
-    } else {
-      items.push(base);
-    }
+/** Match a header cell to a 학반 column number: "1반", "반1", "class1", "c1". */
+function matchClassColumn(headerCell: string): number | null {
+  const trimmed = headerCell.trim();
+  const patterns = [/^(\d+)\s*반$/, /^반\s*(\d+)$/, /^class\s*(\d+)$/i, /^c(\d+)$/i];
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+    if (match) return Number(match[1]);
   }
-  return items;
+  return null;
 }
 
-function formatSubjectsCell(items: AssignmentItem[]): string {
-  return items.map((item) => `${item.name}:${item.hours}`).join(",");
+function addAssignment(
+  byTeacher: Map<string, Teacher>,
+  name: string,
+  grade: Grade,
+  item: AssignmentItem,
+): void {
+  let teacher = byTeacher.get(name);
+  if (!teacher) {
+    teacher = { name, assignments: createEmptyTeacherAssignments() };
+    byTeacher.set(name, teacher);
+  }
+  teacher.assignments[grade].push(item);
 }
 
-/** Build UTF-8 CSV (with BOM when downloaded) for teacher assignments. */
+/**
+ * Build UTF-8 CSV (with BOM when downloaded) for teacher assignments.
+ * One row per (교사, 학년, 교과) 배정. 공통 과목은 학반별 열(1반, 2반, …)에
+ * 시수를, SET(이동수업/선택) 과목은 특정 반에 속하지 않으므로 "SET시수" 한
+ * 칸에만 값을 채운다.
+ */
 export function teachersToCsv(
   teachers: Teacher[],
-  subjects?: GradeSubjects,
+  subjects: GradeSubjects,
+  gradeClassCounts?: GradeClassCounts,
 ): string {
-  const refNames: Record<Grade, string[]> = {
-    1: [],
-    2: [],
-    3: [],
-  };
-  if (subjects) {
-    for (const grade of GRADES) {
-      refNames[grade] = subjects[grade]
-        .map((s) => s.name.trim())
-        .filter((n) => n.length > 0);
-    }
-  }
+  const maxClassCount = maxClassColumnCount(gradeClassCounts);
 
-  const hasRefs = GRADES.some((g) => refNames[g].length > 0);
-  const headerCols: string[] = [
-    CSV_HEADERS.name,
-    CSV_HEADERS[1],
-    CSV_HEADERS[2],
-    CSV_HEADERS[3],
+  const headerCols = [
+    "교사명",
+    "학년",
+    "교과명",
+    ...Array.from({ length: maxClassCount }, (_, i) => classColumnHeader(i + 1)),
+    "SET시수",
   ];
-  if (hasRefs) {
-    headerCols.push("", "참고1학년", "참고2학년", "참고3학년");
-  }
-
-  const teacherRows = sanitizeTeachers(teachers).map((t) => {
-    const assignments = ensureAssignments(t.assignments);
-    return [
-      t.name,
-      formatSubjectsCell(assignments[1]),
-      formatSubjectsCell(assignments[2]),
-      formatSubjectsCell(assignments[3]),
-    ];
-  });
-
-  const refRowCount = hasRefs
-    ? Math.max(refNames[1].length, refNames[2].length, refNames[3].length, 0)
-    : 0;
-  const rowCount = Math.max(teacherRows.length, refRowCount);
 
   const lines: string[] = [headerCols.map(escapeCsvField).join(",")];
 
-  for (let i = 0; i < rowCount; i++) {
-    const teacherCols = teacherRows[i] ?? ["", "", "", ""];
-    const cols = [...teacherCols];
-    if (hasRefs) {
-      cols.push(
-        "",
-        refNames[1][i] ?? "",
-        refNames[2][i] ?? "",
-        refNames[3][i] ?? "",
-      );
+  for (const teacher of sanitizeTeachers(teachers)) {
+    const assignments = ensureAssignments(teacher.assignments);
+    for (const grade of GRADES) {
+      for (const item of assignments[grade]) {
+        const subject = subjects[grade]?.find((s) => s.name === item.name);
+        const set = isSetSubject(subject);
+        const classCols = Array.from({ length: maxClassCount }, (_, i) =>
+          !set && i < item.classHours.length ? String(item.classHours[i]) : "",
+        );
+        const row = [teacher.name, String(grade), item.name, ...classCols, set ? String(item.hours) : ""];
+        lines.push(row.map(escapeCsvField).join(","));
+      }
     }
-    lines.push(cols.map(escapeCsvField).join(","));
   }
 
   return lines.join("\n");
 }
 
 /**
- * Parse teacher-assignment CSV.
- * Expected columns: 교사명, 1학년, 2학년, 3학년 (aliases accepted).
- * Subject cells: comma/semicolon-separated names; must match subjects exactly.
+ * Parse teacher-assignment CSV produced by `teachersToCsv` (or edited by hand).
+ * Required header columns: 교사명, 학년, 교과명 (별칭 허용). 학반 열은 "N반"
+ * 형태로 인식하고, 공통이 아닌(SET) 과목은 "SET시수" 열 값을 사용한다.
+ * 오류가 하나라도 있으면 호출부에서 결과를 반영하지 않아야 한다(전체 거부).
  */
 export function parseTeachersFromCsv(
   text: string,
@@ -552,97 +521,152 @@ export function parseTeachersFromCsv(
   const headerCells = rows[0].map((c) => c.trim());
   const headerLower = headerCells.map((c) => c.toLowerCase());
 
-  let nameIdx = headerLower.findIndex((h) => NAME_HEADER_ALIASES.has(h));
-  const gradeIdx: Partial<Record<Grade, number>> = {};
-  for (const grade of GRADES) {
-    const idx = headerLower.findIndex((h) =>
-      GRADE_HEADER_ALIASES[grade].has(h),
-    );
-    if (idx >= 0) gradeIdx[grade] = idx;
+  const nameIdx = headerLower.findIndex((h) => NAME_HEADER_ALIASES.has(h));
+  const gradeIdx = headerLower.findIndex((h) => GRADE_COLUMN_ALIASES.has(h));
+  const subjectIdx = headerLower.findIndex((h) => SUBJECT_COLUMN_ALIASES.has(h));
+  const setHoursIdx = headerLower.findIndex((h) => SET_HOURS_ALIASES.has(h));
+
+  if (nameIdx < 0 || gradeIdx < 0 || subjectIdx < 0) {
+    return {
+      teachers: [],
+      errors: [
+        {
+          row: 1,
+          message: '헤더에 "교사명", "학년", "교과명" 열이 모두 있어야 합니다.',
+        },
+      ],
+    };
   }
 
-  const hasHeader =
-    nameIdx >= 0 || GRADES.some((g) => gradeIdx[g] !== undefined);
+  const classColIdx = new Map<number, number>();
+  headerCells.forEach((cell, idx) => {
+    const classNo = matchClassColumn(cell);
+    if (classNo !== null) classColIdx.set(classNo, idx);
+  });
 
-  let dataStart = 0;
-  if (hasHeader) {
-    dataStart = 1;
-    if (nameIdx < 0) nameIdx = 0;
-  } else {
-    nameIdx = 0;
-    gradeIdx[1] = 1;
-    gradeIdx[2] = 2;
-    gradeIdx[3] = 3;
-  }
-
-  if (GRADES.every((g) => gradeIdx[g] === undefined)) {
-    gradeIdx[1] = nameIdx + 1;
-    gradeIdx[2] = nameIdx + 2;
-    gradeIdx[3] = nameIdx + 3;
-  }
-
-  const allowed: Record<Grade, Set<string>> = {
-    1: new Set(subjects[1].map((s) => s.name)),
-    2: new Set(subjects[2].map((s) => s.name)),
-    3: new Set(subjects[3].map((s) => s.name)),
+  const counts: GradeClassCounts = gradeClassCounts ?? createDefaultClassCounts();
+  const allowed: Record<Grade, Map<string, Subject>> = {
+    1: new Map(subjects[1].map((s) => [s.name, s])),
+    2: new Map(subjects[2].map((s) => [s.name, s])),
+    3: new Map(subjects[3].map((s) => [s.name, s])),
   };
 
-  const teachers: Teacher[] = [];
-  const seenNames = new Set<string>();
+  const byTeacher = new Map<string, Teacher>();
+  const seenAssignment = new Set<string>();
 
-  for (let i = dataStart; i < rows.length; i++) {
+  for (let i = 1; i < rows.length; i++) {
     const cols = rows[i];
     const rowNumber = i + 1;
+
     const name = (cols[nameIdx] ?? "").trim();
+    const gradeRaw = (cols[gradeIdx] ?? "").trim();
+    const subjectName = (cols[subjectIdx] ?? "").trim();
 
-    const assignmentCells = GRADES.map((grade) => {
-      const idx = gradeIdx[grade];
-      return idx !== undefined ? (cols[idx] ?? "").trim() : "";
-    });
-    const hasAssignmentText = assignmentCells.some((c) => c.length > 0);
-
-    // Reference-subject padding rows (right-side columns only)
-    if (!name && !hasAssignmentText) continue;
+    if (!name && !gradeRaw && !subjectName) continue; // 완전히 빈 행
 
     if (!name) {
       errors.push({ row: rowNumber, message: "교사명이 비어 있습니다." });
       continue;
     }
-    if (seenNames.has(name)) {
+
+    const gradeNum = Number(gradeRaw);
+    if (!GRADES.includes(gradeNum as Grade)) {
       errors.push({
         row: rowNumber,
-        message: `교사명 "${name}"이(가) 중복됩니다.`,
+        message: `학년 값이 올바르지 않습니다: "${gradeRaw}" (1, 2, 3 중 하나)`,
       });
       continue;
     }
-    seenNames.add(name);
+    const grade = gradeNum as Grade;
 
-    const assignments = createEmptyTeacherAssignments();
-    for (const grade of GRADES) {
-      const idx = gradeIdx[grade];
-      const cell = idx !== undefined ? (cols[idx] ?? "") : "";
-      const items = splitAssignmentItems(
-        cell,
-        subjects,
-        grade,
-        gradeClassCounts,
-      );
-      for (const item of items) {
-        if (!allowed[grade].has(item.name)) {
-          errors.push({
-            row: rowNumber,
-            message: `${grade}학년에 없는 과목 "${item.name}" (${name})`,
-          });
-          continue;
+    if (!subjectName) {
+      errors.push({ row: rowNumber, message: "교과명이 비어 있습니다." });
+      continue;
+    }
+
+    const subject = allowed[grade].get(subjectName);
+    if (!subject) {
+      errors.push({
+        row: rowNumber,
+        message: `${grade}학년에 없는 과목 "${subjectName}" (${name})`,
+      });
+      continue;
+    }
+
+    const key = `${name} ${grade} ${subjectName}`;
+    if (seenAssignment.has(key)) {
+      errors.push({
+        row: rowNumber,
+        message: `"${name}"의 ${grade}학년 "${subjectName}" 배정이 중복됩니다.`,
+      });
+      continue;
+    }
+    seenAssignment.add(key);
+
+    const set = isSetSubject(subject);
+    const setRaw = setHoursIdx >= 0 ? (cols[setHoursIdx] ?? "").trim() : "";
+    const classRaw = new Map<number, string>();
+    for (const [classNo, colIdx] of classColIdx) {
+      const raw = (cols[colIdx] ?? "").trim();
+      if (raw) classRaw.set(classNo, raw);
+    }
+
+    let rowHasError = false;
+    const fail = (message: string) => {
+      errors.push({ row: rowNumber, message });
+      rowHasError = true;
+    };
+
+    if (set) {
+      if (classRaw.size > 0) {
+        fail(`"${subjectName}"은(는) SET 과목이라 반별 칸이 아니라 "SET시수" 칸에 입력해야 합니다.`);
+      }
+      if (!setRaw) {
+        fail(`"${subjectName}"의 SET시수가 비어 있습니다.`);
+      } else {
+        const n = Number(setRaw);
+        if (!Number.isFinite(n) || n < MIN_CELL_HOURS || n > MAX_CELL_HOURS) {
+          fail(`SET시수 값이 올바르지 않습니다: "${setRaw}" (${MIN_CELL_HOURS}~${MAX_CELL_HOURS})`);
         }
-        if (!assignments[grade].some((a) => a.name === item.name)) {
-          assignments[grade].push(item);
-        }
+      }
+      if (rowHasError) continue;
+
+      addAssignment(byTeacher, name, grade, syncAssignmentItem(subjectName, [clampCellHours(Number(setRaw))]));
+      continue;
+    }
+
+    // 공통 과목
+    if (setRaw) {
+      fail(`"${subjectName}"은(는) 공통 과목이라 "SET시수" 칸에는 값을 넣을 수 없습니다.`);
+    }
+
+    const gradeClassCount = counts[grade] ?? 0;
+    for (const classNo of classRaw.keys()) {
+      if (classNo > gradeClassCount) {
+        fail(`${grade}학년은 ${gradeClassCount}개 반까지만 있는데 "${classNo}반" 칸에 값이 있습니다.`);
       }
     }
 
-    teachers.push({ name, assignments });
+    const classHours: number[] = [];
+    for (let classNo = 1; classNo <= gradeClassCount; classNo++) {
+      const raw = classRaw.get(classNo);
+      if (raw === undefined) {
+        classHours.push(0);
+        continue;
+      }
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < MIN_CELL_HOURS || n > MAX_CELL_HOURS) {
+        fail(`"${classNo}반" 시수 값이 올바르지 않습니다: "${raw}" (${MIN_CELL_HOURS}~${MAX_CELL_HOURS})`);
+        classHours.push(0);
+        continue;
+      }
+      classHours.push(n);
+    }
+
+    if (rowHasError) continue;
+
+    addAssignment(byTeacher, name, grade, syncAssignmentItem(subjectName, classHours));
   }
 
-  return { teachers, errors };
+  return { teachers: Array.from(byTeacher.values()), errors };
 }

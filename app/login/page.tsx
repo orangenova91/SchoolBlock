@@ -22,6 +22,24 @@ export default function LoginPage() {
           비밀번호 <strong className="font-semibold text-zinc-700">abcd1234!@</strong> 를
           입력해보세요. 예시 데이터로 바로 체험할 수 있습니다.
         </p>
+        <div className="flex items-center gap-4">
+          <a
+            href="https://docs.google.com/forms/d/e/1FAIpQLSe1RpqiMHh4k9M6V9epCU94zxEWmeKGZdpCqzBIbEEnXakAxQ/viewform?usp=dialog"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium text-zinc-600 underline underline-offset-2 transition hover:text-zinc-900"
+          >
+            프로그램 계정 신청하기
+          </a>
+          <a
+            href="https://open.kakao.com/o/ghpSxzIh"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm font-medium text-zinc-600 underline underline-offset-2 transition hover:text-zinc-900"
+          >
+            문의하기
+          </a>
+        </div>
       </main>
     </div>
   );

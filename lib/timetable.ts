@@ -313,51 +313,6 @@ function availableSlotsForLesson(
   return slots;
 }
 
-function classSubjectSlotKey(
-  grade: Grade,
-  classNo: number,
-  day: Weekday,
-  period: number,
-): string {
-  return `${grade}|${classNo}|${day}|${period}`;
-}
-
-/** Fixed subjects from SET + 교과 블록 (not mutated during search). */
-function buildLockedSubjectMap(cells: TimetableCell[]): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const cell of cells) {
-    map.set(
-      classSubjectSlotKey(cell.grade, cell.classNo, cell.day, cell.period),
-      cell.subjectName,
-    );
-  }
-  return map;
-}
-
-function subjectAtClassSlot(
-  lockedSubjects: Map<string, string>,
-  placed: TimetableCell[],
-  grade: Grade,
-  classNo: number,
-  day: Weekday,
-  period: number,
-): string | undefined {
-  const key = classSubjectSlotKey(grade, classNo, day, period);
-  const locked = lockedSubjects.get(key);
-  if (locked !== undefined) return locked;
-  for (const cell of placed) {
-    if (
-      cell.grade === grade &&
-      cell.classNo === classNo &&
-      cell.day === day &&
-      cell.period === period
-    ) {
-      return cell.subjectName;
-    }
-  }
-  return undefined;
-}
-
 function teacherNamesOnCell(cell: TimetableCell): string[] {
   return cell.teacherName
     .split("·")
@@ -407,35 +362,25 @@ function lunchDoublePenaltyForSlot(
     : 0;
 }
 
+/** Same teacher would end up with 3 consecutive taught periods (any class/subject). */
 function triplePeriodPenaltyForSlot(
   lesson: CommonLesson,
   slot: Slot,
-  lockedSubjects: Map<string, string>,
+  fixedCells: TimetableCell[],
   placed: TimetableCell[],
   lunchAfterPeriod: number,
 ): number {
-  const subjectAt = (period: number) => {
-    if (period === slot.period) return lesson.subjectName;
-    return subjectAtClassSlot(
-      lockedSubjects,
-      placed,
-      lesson.grade,
-      lesson.classNo,
-      slot.day,
-      period,
-    );
-  };
+  const teacherHasPeriod = (period: number) =>
+    period === slot.period ||
+    teacherHasLessonAt(lesson.teacherName, slot.day, period, fixedCells, placed);
 
   for (let start = slot.period - 2; start <= slot.period; start++) {
     if (start < 1) continue;
     if (!isTripleRunWindow(start, lunchAfterPeriod)) continue;
-    const s0 = subjectAt(start);
-    const s1 = subjectAt(start + 1);
-    const s2 = subjectAt(start + 2);
     if (
-      s0 === lesson.subjectName &&
-      s1 === lesson.subjectName &&
-      s2 === lesson.subjectName
+      teacherHasPeriod(start) &&
+      teacherHasPeriod(start + 1) &&
+      teacherHasPeriod(start + 2)
     ) {
       return 1;
     }
@@ -446,7 +391,6 @@ function triplePeriodPenaltyForSlot(
 function softSlotPenalty(
   lesson: CommonLesson,
   slot: Slot,
-  lockedSubjects: Map<string, string>,
   fixedCells: TimetableCell[],
   placed: TimetableCell[],
   preferences: GenerationPreferences,
@@ -466,7 +410,7 @@ function softSlotPenalty(
     penalty += triplePeriodPenaltyForSlot(
       lesson,
       slot,
-      lockedSubjects,
+      fixedCells,
       placed,
       preferences.lunchAfterPeriod,
     );
@@ -478,7 +422,6 @@ function softSlotPenalty(
 function orderSlotsForLesson(
   lesson: CommonLesson,
   slots: Slot[],
-  lockedSubjects: Map<string, string>,
   fixedCells: TimetableCell[],
   placed: TimetableCell[],
   preferences: GenerationPreferences,
@@ -488,14 +431,7 @@ function orderSlotsForLesson(
   }
   const scored = slots.map((slot) => ({
     slot,
-    penalty: softSlotPenalty(
-      lesson,
-      slot,
-      lockedSubjects,
-      fixedCells,
-      placed,
-      preferences,
-    ),
+    penalty: softSlotPenalty(lesson, slot, fixedCells, placed, preferences),
     rand: Math.random(),
   }));
   scored.sort((a, b) => a.penalty - b.penalty || a.rand - b.rand);
@@ -535,20 +471,6 @@ function slotsForLessonSearch(
       placed,
     );
   });
-}
-
-function dayLabel(day: Weekday): string {
-  return WEEKDAYS.find((d) => d.key === day)?.label ?? day;
-}
-
-function cellAtSlot(
-  bySlot: Map<string, TimetableCell>,
-  grade: Grade,
-  classNo: number,
-  day: Weekday,
-  period: number,
-): TimetableCell | undefined {
-  return bySlot.get(classSubjectSlotKey(grade, classNo, day, period));
 }
 
 function formatLessonBrief(cell: TimetableCell): string {
@@ -847,107 +769,64 @@ export function improveLunchTeacherDoubles(args: {
  * Same class+subject 3-period runs (lunch boundary breaks the run).
  * Overlapping windows each count (e.g. 4-in-a-row → 2).
  */
-export function listSameSubjectTriples(
+/**
+ * Same teacher teaching 3+ consecutive periods, any class/subject (lunch
+ * boundary breaks the run). Overlapping windows each count (4-in-a-row → 2),
+ * one entry per teacher+day+window.
+ */
+export function listTeacherTripleRuns(
   cells: TimetableCell[],
   lunchAfterPeriod: number,
 ): SoftRunDetail[] {
-  const bySlot = new Map<string, TimetableCell>();
+  const byTeacherDay = new Map<string, Map<number, TimetableCell>>();
   for (const cell of cells) {
-    bySlot.set(
-      classSubjectSlotKey(cell.grade, cell.classNo, cell.day, cell.period),
-      cell,
-    );
-  }
-  const out: SoftRunDetail[] = [];
-  const seen = new Set<string>();
-  for (const cell of cells) {
-    const start = cell.period;
-    if (!isTripleRunWindow(start, lunchAfterPeriod)) continue;
-    const mid = cellAtSlot(
-      bySlot,
-      cell.grade,
-      cell.classNo,
-      cell.day,
-      start + 1,
-    );
-    const end = cellAtSlot(
-      bySlot,
-      cell.grade,
-      cell.classNo,
-      cell.day,
-      start + 2,
-    );
-    if (
-      !mid ||
-      !end ||
-      mid.subjectName !== cell.subjectName ||
-      end.subjectName !== cell.subjectName
-    ) {
-      continue;
+    for (const name of teacherNamesOnCell(cell)) {
+      const key = `${name}|${cell.day}`;
+      if (!byTeacherDay.has(key)) byTeacherDay.set(key, new Map());
+      byTeacherDay.get(key)!.set(cell.period, cell);
     }
-    const id = `${cell.grade}|${cell.classNo}|${cell.day}|${cell.subjectName}|${start}`;
-    if (seen.has(id)) continue;
-    seen.add(id);
-    out.push({
-      kind: "triple",
-      grade: cell.grade,
-      classNo: cell.classNo,
-      day: cell.day,
-      subjectName: cell.subjectName,
-      teacherName: [
-        ...new Set([
-          ...teacherNamesOnCell(cell),
-          ...teacherNamesOnCell(mid),
-          ...teacherNamesOnCell(end),
-        ]),
-      ].join("·") || "(교사 미상)",
-      startPeriod: start,
-      endPeriod: start + 2,
-    });
   }
+
+  const out: SoftRunDetail[] = [];
+  for (const [key, byPeriod] of byTeacherDay) {
+    const sep = key.indexOf("|");
+    const teacherName = key.slice(0, sep);
+    const day = key.slice(sep + 1) as Weekday;
+    for (const start of byPeriod.keys()) {
+      if (!isTripleRunWindow(start, lunchAfterPeriod)) continue;
+      const c0 = byPeriod.get(start);
+      const c1 = byPeriod.get(start + 1);
+      const c2 = byPeriod.get(start + 2);
+      if (!c0 || !c1 || !c2) continue;
+      out.push({
+        kind: "triple",
+        grade: c0.grade,
+        classNo: c0.classNo,
+        day,
+        subjectName: [c0, c1, c2].map(formatLessonBrief).join(" / "),
+        teacherName,
+        startPeriod: start,
+        endPeriod: start + 2,
+      });
+    }
+  }
+  out.sort((a, b) => {
+    if (a.day !== b.day) return a.day.localeCompare(b.day);
+    if (a.startPeriod !== b.startPeriod) return a.startPeriod - b.startPeriod;
+    return a.teacherName.localeCompare(b.teacherName, "ko");
+  });
   return out;
 }
 
 /**
- * Count same class+subject 3-period runs (lunch boundary breaks the run).
- * Overlapping windows each count (e.g. 4-in-a-row → 2).
+ * Count same-teacher 3+ consecutive-period runs (lunch boundary breaks the
+ * run). Overlapping windows each count (e.g. 4-in-a-row → 2).
  */
-export function countSameSubjectTriples(
+export function countTeacherTripleRuns(
   cells: TimetableCell[],
   lunchAfterPeriod: number,
 ): number {
-  return listSameSubjectTriples(cells, lunchAfterPeriod).length;
-}
-
-function formatSoftRunDetail(detail: SoftRunDetail): string {
-  const periods =
-    detail.startPeriod === detail.endPeriod
-      ? `${detail.startPeriod}교시`
-      : `${detail.startPeriod}–${detail.endPeriod}교시`;
-  if (detail.kind === "lunch") {
-    return `${dayLabel(detail.day)}${periods} · ${detail.teacherName} · ${detail.subjectName}`;
-  }
-  return `${dayLabel(detail.day)}${periods} · ${detail.grade}학년 ${detail.classNo}반 ${detail.subjectName} · ${detail.teacherName}`;
-}
-
-function formatSoftPreferenceReport(
-  cells: TimetableCell[],
-  preferences: GenerationPreferences,
-): string {
-  const sections: string[] = [];
-  // 점심 연강 수치는 별도 진단 패널(항상 표시)에 나오므로 메시지에서는 뺀다.
-  if (preferences.avoidTriplePeriod) {
-    const triples = listSameSubjectTriples(cells, preferences.lunchAfterPeriod);
-    if (triples.length === 0) {
-      sections.push("3연강 0건");
-    } else {
-      sections.push(
-        `3연강 ${triples.length}건`,
-        ...triples.map((d) => `· ${formatSoftRunDetail(d)}`),
-      );
-    }
-  }
-  return sections.join("\n");
+  return listTeacherTripleRuns(cells, lunchAfterPeriod).length;
 }
 
 function softPreferenceScore(
@@ -961,7 +840,7 @@ function softPreferenceScore(
       lunchDoubleWeight(preferences);
   }
   if (preferences.avoidTriplePeriod) {
-    score += countSameSubjectTriples(cells, preferences.lunchAfterPeriod);
+    score += countTeacherTripleRuns(cells, preferences.lunchAfterPeriod);
   }
   return score;
 }
@@ -1099,7 +978,6 @@ function solveBacktracking(
   schedules: GradeDaySchedules,
   classBusySeed: Set<string>,
   teacherBusySeed: Set<string>,
-  lockedSubjects: Map<string, string>,
   fixedCells: TimetableCell[],
   preferences: GenerationPreferences,
   options: {
@@ -1212,7 +1090,6 @@ function solveBacktracking(
       const ordered = orderSlotsForLesson(
         lesson,
         bestSlots,
-        lockedSubjects,
         fixedCells,
         state.cells,
         preferences,
@@ -1588,6 +1465,13 @@ export type GenerateTimetableResult = {
   lunchDoubleCount: number;
   lunchDoubles: SoftRunDetail[];
   /**
+   * Same-teacher 3+ consecutive-period diagnostics for `cells`, always
+   * computed regardless of the 3연강 완화 preference so users can check the
+   * data even when generating with it off.
+   */
+  tripleRunCount: number;
+  tripleRuns: SoftRunDetail[];
+  /**
    * Same-day-subject diagnostics for `cells`, always computed against
    * `preferences.sameDaySubjectBans` regardless of the 동일 교과 같은 날
    * 배치 금지 master switch, so users can check the data even when off.
@@ -1637,7 +1521,6 @@ export function generateTimetable(
   );
   const blockCells = subjectBlocksToTimetableCells(lockedBlocks);
   const fixedCells = [...setCells, ...blockCells];
-  const lockedSubjects = buildLockedSubjectMap(fixedCells);
 
   const classBusySeed = new Set<string>();
   const teacherBusySeed = new Set<string>();
@@ -1684,7 +1567,6 @@ export function generateTimetable(
       schedules,
       classBusySeed,
       teacherBusySeed,
-      lockedSubjects,
       fixedCells,
       preferences,
       {
@@ -1711,7 +1593,6 @@ export function generateTimetable(
         schedules,
         classBusySeed,
         teacherBusySeed,
-        lockedSubjects,
         fixedCells,
         preferences,
         {
@@ -1728,7 +1609,6 @@ export function generateTimetable(
       schedules,
       classBusySeed,
       teacherBusySeed,
-      lockedSubjects,
       fixedCells,
       preferences,
       {
@@ -1790,11 +1670,13 @@ export function generateTimetable(
     }
 
     const allCells = [...setCells, ...blockCells, ...finalCommon];
-    const softReport = formatSoftPreferenceReport(allCells, preferences);
-    const softNote = softReport ? `\n${softReport}` : "";
-    // Always computed (regardless of the preference) so the lunch-double
-    // data can be checked even when generating with avoidance turned off.
+    // Always computed (regardless of the preference) so the diagnostic
+    // panels can be checked even when generating with avoidance turned off.
     const lunchDoubles = listLunchTeacherDoubles(
+      allCells,
+      preferences.lunchAfterPeriod,
+    );
+    const tripleRuns = listTeacherTripleRuns(
       allCells,
       preferences.lunchAfterPeriod,
     );
@@ -1807,9 +1689,11 @@ export function generateTimetable(
       unplaced: [],
       attemptsUsed: solved.attemptsUsed,
       status: "ready",
-      message: `공통 수업 배치를 완료했습니다. (재시작 ${solved.attemptsUsed}회)${softNote}`,
+      message: `공통 수업 배치를 완료했습니다. (재시작 ${solved.attemptsUsed}회)`,
       lunchDoubleCount: lunchDoubles.length,
       lunchDoubles,
+      tripleRunCount: tripleRuns.length,
+      tripleRuns,
       sameDaySubjectViolationCount: sameDaySubjectViolations.length,
       sameDaySubjectViolations,
     };
@@ -1840,6 +1724,10 @@ export function generateTimetable(
     failedCells,
     preferences.lunchAfterPeriod,
   );
+  const failedTripleRuns = listTeacherTripleRuns(
+    failedCells,
+    preferences.lunchAfterPeriod,
+  );
   const failedSameDaySubjectViolations = listSameDaySubjectViolations(
     failedCells,
     preferences.sameDaySubjectBans,
@@ -1853,6 +1741,8 @@ export function generateTimetable(
     message: `일부 공통 수업을 배치하지 못했습니다. (미배치 ${unplacedCount}교시)${reasonHint}${hint}`,
     lunchDoubleCount: failedLunchDoubles.length,
     lunchDoubles: failedLunchDoubles,
+    tripleRunCount: failedTripleRuns.length,
+    tripleRuns: failedTripleRuns,
     sameDaySubjectViolationCount: failedSameDaySubjectViolations.length,
     sameDaySubjectViolations: failedSameDaySubjectViolations,
   };
@@ -2354,13 +2244,23 @@ export function solveLunchPriority(
   );
 
   if (filledCount === targetCount) {
+    // This stage guarantees it never *adds* a double, but cells it inherited
+    // as already-fixed (e.g. from 동일 교과 우선 배치, which has its own lunch
+    // avoidance but can still be forced into one) may already contain one —
+    // check the actual result rather than assuming, so the message never
+    // promises more than it delivers.
+    const remainingDoubles = listLunchTeacherDoubles(allCells, lunchAfterPeriod);
+    const guaranteeNote =
+      remainingDoubles.length === 0
+        ? ` 이 결과를 기준으로 "남은 시간 시간표 배치"를 실행하면 점심 연강 0건이 보장됩니다.`
+        : ` 다만 이미 고정된 배치에 점심 연강 ${remainingDoubles.length}건이 남아 있어 이번 단계로는 완전히 없앨 수 없습니다.`;
     return {
       lunchCells,
       cells: allCells,
       targetCount,
       filledCount,
       status: "ready",
-      message: `점심 전후 교시 ${targetCount}칸을 모두 배치했습니다. (재시도 ${attemptsUsed}회) 이 결과를 기준으로 "남은 시간 시간표 배치"를 실행하면 점심 연강 0건이 보장됩니다.`,
+      message: `점심 전후 교시 ${targetCount}칸을 모두 배치했습니다. (재시도 ${attemptsUsed}회)${guaranteeNote}`,
     };
   }
 
@@ -2497,6 +2397,13 @@ export function listSameDaySubjectViolations(
  * lesson's *only* option — i.e. the same-day rule is a hard constraint until
  * it would make placement impossible, at which point it degrades to "best
  * effort" for that one lesson.
+ *
+ * Also avoids creating a same-teacher lunch double (this teacher already
+ * has a lesson — any class — on the other side of lunch that day), same
+ * priority as the day-spread rule: preferred but not at the cost of leaving
+ * the lesson unplaced. Without this, a later "점심시간 우선 배치" pass can only
+ * work around whatever this stage already fixed, so a double created here
+ * survives even when that pass reports "점심 연강 0건이 보장됩니다".
  */
 function candidateSlotsForBannedLesson(
   lesson: CommonLesson,
@@ -2505,8 +2412,28 @@ function candidateSlotsForBannedLesson(
   teacherBusy: Set<string>,
   fixedCells: TimetableCell[],
   placed: TimetableCell[],
+  avoidLunchDouble: boolean,
+  lunchAfterPeriod: number,
 ): Slot[] {
   const raw = availableSlotsForLesson(lesson, schedules, classBusy, teacherBusy);
+
+  let pool = raw;
+  if (avoidLunchDouble) {
+    const [before, after] = lunchPairPeriods(lunchAfterPeriod);
+    const noLunchDouble = pool.filter((slot) => {
+      if (slot.period !== before && slot.period !== after) return true;
+      const partner = slot.period === before ? after : before;
+      return !teacherHasLessonAt(
+        lesson.teacherName,
+        slot.day,
+        partner,
+        fixedCells,
+        placed,
+      );
+    });
+    if (noLunchDouble.length > 0) pool = noLunchDouble;
+  }
+
   const usedDays = new Set<Weekday>();
   for (const c of fixedCells) {
     if (c.grade === lesson.grade && c.classNo === lesson.classNo && c.subjectName === lesson.subjectName) {
@@ -2518,8 +2445,8 @@ function candidateSlotsForBannedLesson(
       usedDays.add(c.day);
     }
   }
-  const fresh = raw.filter((slot) => !usedDays.has(slot.day));
-  return fresh.length > 0 ? fresh : raw;
+  const fresh = pool.filter((slot) => !usedDays.has(slot.day));
+  return fresh.length > 0 ? fresh : pool;
 }
 
 /**
@@ -2535,6 +2462,8 @@ function solveSameDaySubjectSlots(
   fixedCells: TimetableCell[],
   timeLimitMs: number,
   restarts: number,
+  avoidLunchDouble: boolean,
+  lunchAfterPeriod: number,
 ): { cells: TimetableCell[]; attemptsUsed: number } {
   const globalDeadline = Date.now() + Math.max(0, timeLimitMs);
   const sliceMs = Math.max(
@@ -2582,6 +2511,8 @@ function solveSameDaySubjectSlots(
           teacherBusy,
           fixedCells,
           placed,
+          avoidLunchDouble,
+          lunchAfterPeriod,
         );
         if (slots.length < bestCount) {
           bestCount = slots.length;
@@ -2663,6 +2594,9 @@ export type SameDaySubjectPriorityInput = {
   forbiddenSlots?: TeacherForbiddenSlot[];
   /** Per-grade subjects selected for the same-day-duplicate ban. */
   sameDaySubjectBans: SameDaySubjectBan[];
+  /** Avoid placing a lesson that would create a same-teacher lunch double. */
+  avoidLunchDouble?: boolean;
+  lunchAfterPeriod?: number;
   timeLimitMs?: number;
   restarts?: number;
 };
@@ -2706,6 +2640,8 @@ export function solveSameDaySubjectPriority(
     subjectBlocks = [],
     forbiddenSlots = [],
     sameDaySubjectBans,
+    avoidLunchDouble = false,
+    lunchAfterPeriod = DEFAULT_LUNCH_AFTER_PERIOD,
     timeLimitMs = 8_000,
     restarts = 15,
   } = input;
@@ -2771,6 +2707,8 @@ export function solveSameDaySubjectPriority(
     fixedCells,
     timeLimitMs,
     restarts,
+    avoidLunchDouble,
+    lunchAfterPeriod,
   );
 
   const lockCells: SubjectBlockCell[] = placedCells.map((c) => ({
@@ -2900,168 +2838,5 @@ function prepareBusySeeds(input: {
   markBusyFromSubjectBlocks(lockedBlocks, classBusySeed, teacherBusySeed);
   markTeacherBusyFromForbidden(input.forbiddenSlots ?? [], teacherBusySeed);
   return { catalog, setCells, classBusySeed, teacherBusySeed, lockedBlocks };
-}
-
-export type TimetableSpaceUpperBound = {
-  /** Common lesson instances to place. */
-  lessonCount: number;
-  /**
-   * log10 of an independent-domain upper bound (identical lessons use P(n,k)).
-   * Null if some lesson already has zero free slots under SET locks.
-   */
-  log10UpperBound: number | null;
-  /** Human-readable ceiling, e.g. "약 10^412.3" or "0 (불가능)". */
-  upperBoundLabel: string;
-  zeroDomainGroups: number;
-  note: string;
-};
-
-/**
- * Upper bound ignoring conflicts between different lesson groups.
- * Same teacher/grade/class/subject hours share a domain and use P(n,k).
- */
-export function estimateIndependentUpperBound(
-  input: Omit<GenerateTimetableInput, "timeLimitMs" | "restarts">,
-): TimetableSpaceUpperBound {
-  const { classBusySeed, teacherBusySeed, lockedBlocks } =
-    prepareBusySeeds({
-      ...input,
-      schedules: input.schedules,
-    });
-  const allLessons = expandCommonLessons(
-    input.teachers,
-    input.subjects,
-    input.classCounts,
-  );
-  const { remaining: lessons } = consumeLessonsForSubjectBlocks(
-    allLessons,
-    lockedBlocks,
-  );
-
-  type Group = { count: number; domain: number };
-  const groups = new Map<string, Group>();
-
-  for (const lesson of lessons) {
-    const key = unplacedKey(lesson);
-    const existing = groups.get(key);
-    if (existing) {
-      existing.count += 1;
-      continue;
-    }
-    const domain = availableSlotsForLesson(
-      lesson,
-      input.schedules,
-      classBusySeed,
-      teacherBusySeed,
-    ).length;
-    groups.set(key, { count: 1, domain });
-  }
-
-  let zeroDomainGroups = 0;
-  let log10 = 0;
-  for (const g of groups.values()) {
-    if (g.domain <= 0 || g.count > g.domain) {
-      zeroDomainGroups += 1;
-      continue;
-    }
-    for (let i = 0; i < g.count; i++) {
-      log10 += Math.log10(g.domain - i);
-    }
-  }
-
-  if (zeroDomainGroups > 0) {
-    return {
-      lessonCount: lessons.length,
-      log10UpperBound: null,
-      upperBoundLabel: "0 (SET 잠금만으로도 후보 교시가 없는 수업 있음)",
-      zeroDomainGroups,
-      note: "서로 다른 수업 그룹 간 충돌은 무시하므로, 실제 해 개수보다 훨씬 큰 상한입니다.",
-    };
-  }
-
-  return {
-    lessonCount: lessons.length,
-    log10UpperBound: log10,
-    upperBoundLabel: `약 10^${log10.toFixed(1)}`,
-    zeroDomainGroups: 0,
-    note: "동일 (교사·학년·반·과목) 시수는 P(n,k)로, 서로 다른 그룹 간 충돌은 무시합니다. 실제 해보다 과대평가됩니다.",
-  };
-}
-
-/** Stable fingerprint of common-cell placement (SET cells ignored). */
-export function hashCommonPlacement(cells: TimetableCell[]): string {
-  const lines = cells
-    .filter((c) => c.kind === "common")
-    .map(
-      (c) =>
-        `${c.grade}|${c.classNo}|${c.day}|${c.period}|${c.subjectName}|${c.teacherName}`,
-    )
-    .sort();
-  // FNV-1a 32-bit over joined string (no Node crypto dependency at call sites)
-  let hash = 0x811c9dc5;
-  const text = lines.join("\n");
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return (hash >>> 0).toString(16).padStart(8, "0");
-}
-
-export type TimetableSpaceEstimate = {
-  upperBound: TimetableSpaceUpperBound;
-  samplesRequested: number;
-  samplesRun: number;
-  completeCount: number;
-  /** Lower bound from distinct complete samples. */
-  distinctComplete: number;
-  distinctHashes: string[];
-  failedCount: number;
-  elapsedMs: number;
-  summary: string;
-};
-
-export function estimateTimetableSpace(
-  input: GenerateTimetableInput & { samples?: number },
-): TimetableSpaceEstimate {
-  const samples = Math.min(10, Math.max(1, input.samples ?? 5));
-  const upperBound = estimateIndependentUpperBound(input);
-  const t0 = Date.now();
-  const hashes = new Set<string>();
-  let completeCount = 0;
-  let failedCount = 0;
-
-  for (let i = 0; i < samples; i++) {
-    const result = generateTimetable({
-      ...input,
-      timeLimitMs: input.timeLimitMs ?? 10_000,
-      restarts: input.restarts ?? 20,
-    });
-    if (result.status === "ready") {
-      completeCount += 1;
-      hashes.add(hashCommonPlacement(result.cells));
-    } else {
-      failedCount += 1;
-    }
-  }
-
-  const distinctComplete = hashes.size;
-  const elapsedMs = Date.now() - t0;
-  const summary = [
-    `상한 ${upperBound.upperBoundLabel}`,
-    `샘플 ${samples}회 중 완전해 ${completeCount}회`,
-    `서로 다른 완전해 최소 ${distinctComplete}개`,
-  ].join(" · ");
-
-  return {
-    upperBound,
-    samplesRequested: samples,
-    samplesRun: samples,
-    completeCount,
-    distinctComplete,
-    distinctHashes: [...hashes],
-    failedCount,
-    elapsedMs,
-    summary,
-  };
 }
 

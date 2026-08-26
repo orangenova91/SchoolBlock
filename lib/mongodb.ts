@@ -14,14 +14,13 @@ function getClientPromise(): Promise<MongoClient> {
     );
   }
 
-  if (process.env.NODE_ENV === "development") {
-    if (!global._mongoClientPromise) {
-      global._mongoClientPromise = new MongoClient(uri).connect();
-    }
-    return global._mongoClientPromise;
+  // 환경에 상관없이 항상 커넥션을 캐싱한다 — 매 요청마다 새 MongoClient를
+  // 만들면(그리고 아무도 close()하지 않으면) 클라우드 DB의 동시 연결 수
+  // 제한을 금방 소진할 수 있다.
+  if (!global._mongoClientPromise) {
+    global._mongoClientPromise = new MongoClient(uri).connect();
   }
-
-  return new MongoClient(uri).connect();
+  return global._mongoClientPromise;
 }
 
 export async function getDb(): Promise<Db> {

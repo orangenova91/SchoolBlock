@@ -423,9 +423,9 @@ export function GenerationPreferencesForm({
               3연강 완화
             </h2>
             <p className="mt-1 text-sm text-zinc-600">
-              같은 학반·같은 교과가 같은 날 3교시 연속되지 않도록 우선합니다.
-              점심 전후 교시 사이는 연속으로 보지 않습니다. 해가 없으면 3연강이
-              남을 수 있습니다.
+              같은 교사가 3교시 연속으로 수업하지 않도록 우선합니다(학반·교과는
+              달라도 해당). 점심 전후 교시 사이는 연속으로 보지 않습니다. 해가
+              없으면 3연강이 남을 수 있습니다.
             </p>
           </div>
           <label className="flex shrink-0 cursor-pointer items-center gap-2">

@@ -17,6 +17,8 @@ export type AccountDocument = {
   username: string;
   passwordHash: string;
   createdAt: Date;
+  /** "체험해보기" 클릭마다 새로 만들어지는 격리된 데모 계정 표시. */
+  isDemo?: boolean;
 };
 
 export type Weekday = "mon" | "tue" | "wed" | "thu" | "fri";
@@ -316,6 +318,12 @@ export type TimetableDocument = {
    */
   lunchDoubleCount?: number;
   lunchDoubles?: SoftRunDetail[];
+  /**
+   * Same-teacher 3+ consecutive-period diagnostics for the committed `cells`,
+   * computed regardless of whether the 3연강 완화 preference was on.
+   */
+  tripleRunCount?: number;
+  tripleRuns?: SoftRunDetail[];
   /**
    * Lunch-priority stage (테스트용 2단계 배치): lunch-adjacent lessons chosen
    * ahead of the rest of the schedule. Stored in 교과 블록 cell format so they

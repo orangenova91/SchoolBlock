@@ -18,7 +18,7 @@ export function AccountHeader({ username }: { username: string }) {
   }
 
   return (
-    <header className="flex items-center justify-between border-b border-zinc-200 bg-white px-4 py-2.5">
+    <header className="sticky top-0 z-50 flex items-center justify-between border-b border-zinc-200 bg-white px-4 py-2.5">
       <span className="text-sm font-medium text-zinc-700">{username}</span>
       <button
         type="button"

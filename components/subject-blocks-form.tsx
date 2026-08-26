@@ -146,7 +146,7 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
 
         if (!blocksRes.ok) {
           setStatus("error");
-          setMessage(blocksData.error ?? "블록 수업을 불러오지 못했습니다.");
+          setMessage(blocksData.error ?? "선 수업 배치 내용을 불러오지 못했습니다.");
           setLoading(false);
           return;
         }
@@ -308,12 +308,12 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
   }
 
   async function handleSave() {
-    await saveCells("블록 수업이 저장되었습니다.");
+    await saveCells("선 수업 배치가 저장되었습니다.");
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const ok = await saveCells("블록 수업이 저장되었습니다.", true);
+    const ok = await saveCells("선 수업 배치가 저장되었습니다.", true);
     if (ok) router.push(`/terms/${termId}/constraints`);
   }
 
@@ -422,7 +422,7 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
           선 수업 배치(블록·고정 수업 등..)
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
-          블록 수업처럼 미리 정해 둘 공통 수업을 요일·교시에 고정합니다. SET이
+          선 수업 배치처럼 미리 정해 둘 공통 수업을 요일·교시에 고정합니다. SET이
           있는 칸에는 배치할 수 없으며, 나머지 시수는 이후 시간표 배치에서
           자동으로 채워집니다.
         </p>

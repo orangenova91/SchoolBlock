@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { getSessionFromRequest } from "@/lib/session";
 
-const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PATHS = ["/login", "/privacy"];
 const PUBLIC_API_PREFIXES = ["/api/auth/", "/api/schools/"];
 
 function isPublicPath(pathname: string): boolean {

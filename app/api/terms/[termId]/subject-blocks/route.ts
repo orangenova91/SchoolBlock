@@ -107,7 +107,7 @@ export async function PUT(request: Request, context: RouteContext) {
   );
   if (!parsed) {
     return NextResponse.json(
-      { error: "블록 수업 데이터가 올바르지 않습니다." },
+      { error: "선 수업 배치 데이터가 올바르지 않습니다." },
       { status: 400 },
     );
   }

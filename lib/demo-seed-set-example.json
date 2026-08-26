@@ -1,0 +1,2871 @@
+{
+  "version": 1,
+  "timetableName": "V1.0.2",
+  "academicYear": 2026,
+  "semester": 1,
+  "teachers": [
+    {
+      "name": "서지훈",
+      "assignments": {
+        "1": [
+          {
+            "name": "공통국어2",
+            "classHours": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "hours": 12
+          }
+        ],
+        "2": [],
+        "3": [
+          {
+            "name": "고전 읽기",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              0,
+              0,
+              0
+            ],
+            "hours": 4
+          }
+        ]
+      }
+    },
+    {
+      "name": "백서연",
+      "assignments": {
+        "1": [
+          {
+            "name": "공통국어2",
+            "classHours": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "hours": 12
+          }
+        ],
+        "2": [
+          {
+            "name": "독서 토론과 글쓰기",
+            "classHours": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "hours": 1
+          },
+          {
+            "name": "C독서 토론과 글쓰기2",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          },
+          {
+            "name": "C독서 토론과 글쓰기1",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          }
+        ],
+        "3": []
+      }
+    },
+    {
+      "name": "남궁현",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "독서와 작문",
+            "classHours": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "hours": 14
+          }
+        ],
+        "3": [
+          {
+            "name": "고전 읽기",
+            "classHours": [
+              0,
+              0,
+              0,
+              0,
+              1,
+              0,
+              0
+            ],
+            "hours": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "유하은",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "독서와 작문",
+            "classHours": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "hours": 14
+          }
+        ],
+        "3": [
+          {
+            "name": "고전 읽기",
+            "classHours": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0,
+              1
+            ],
+            "hours": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "조은비",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "C독서 토론과 글쓰기1",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          },
+          {
+            "name": "C독서 토론과 글쓰기2",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          },
+          {
+            "name": "독서 토론과 글쓰기",
+            "classHours": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "hours": 1
+          }
+        ],
+        "3": [
+          {
+            "name": "고전 읽기",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "hours": 7
+          },
+          {
+            "name": "A문학 개론",
+            "classHours": [
+              2
+            ],
+            "hours": 2
+          },
+          {
+            "name": "C문학개론",
+            "classHours": [
+              2
+            ],
+            "hours": 2
+          },
+          {
+            "name": "D문학개론",
+            "classHours": [
+              2
+            ],
+            "hours": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "배준영",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "C독서 토론과 글쓰기1",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          },
+          {
+            "name": "C독서 토론과 글쓰기2",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          },
+          {
+            "name": "독서 토론과 글쓰기",
+            "classHours": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "hours": 1
+          }
+        ],
+        "3": [
+          {
+            "name": "고전 읽기",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              2,
+              1
+            ],
+            "hours": 8
+          },
+          {
+            "name": "A문학 개론",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          },
+          {
+            "name": "C문학개론",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          },
+          {
+            "name": "D문학개론",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "신동혁",
+      "assignments": {
+        "1": [
+          {
+            "name": "공통영어2",
+            "classHours": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "hours": 12
+          }
+        ],
+        "2": [],
+        "3": [
+          {
+            "name": "심화영어독해Ⅱ",
+            "classHours": [
+              1,
+              0,
+              1,
+              0,
+              1,
+              1,
+              1
+            ],
+            "hours": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "강수아",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "영어2",
+            "classHours": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "hours": 14
+          },
+          {
+            "name": "C영어 독해와 작문",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          },
+          {
+            "name": "D영어독해와작문",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          }
+        ],
+        "3": []
+      }
+    },
+    {
+      "name": "문가영",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "영어2",
+            "classHours": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "hours": 14
+          },
+          {
+            "name": "C영어 독해와 작문",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          },
+          {
+            "name": "D영어독해와작문",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          }
+        ],
+        "3": []
+      }
+    },
+    {
+      "name": "한소정",
+      "assignments": {
+        "1": [
+          {
+            "name": "공통영어2",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [],
+        "3": [
+          {
+            "name": "심화영어독해Ⅱ",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "hours": 7
+          },
+          {
+            "name": "E진로 영어",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "오다인",
+      "assignments": {
+        "1": [
+          {
+            "name": "공통영어2",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [
+          {
+            "name": "C영어 독해와 작문",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          },
+          {
+            "name": "D영어독해와작문",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          }
+        ],
+        "3": [
+          {
+            "name": "심화영어독해Ⅱ",
+            "classHours": [
+              1,
+              2,
+              1,
+              2,
+              1,
+              1,
+              1
+            ],
+            "hours": 9
+          }
+        ]
+      }
+    },
+    {
+      "name": "임재현",
+      "assignments": {
+        "1": [
+          {
+            "name": "공통수학2",
+            "classHours": [
+              4,
+              4,
+              0,
+              0,
+              4,
+              4
+            ],
+            "hours": 16
+          }
+        ],
+        "2": [],
+        "3": []
+      }
+    },
+    {
+      "name": "정유빈",
+      "assignments": {
+        "1": [
+          {
+            "name": "공통수학2",
+            "classHours": [
+              0,
+              0,
+              4,
+              4,
+              0,
+              0
+            ],
+            "hours": 8
+          }
+        ],
+        "2": [
+          {
+            "name": "C기하",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "D기하",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ],
+        "3": [
+          {
+            "name": "창체",
+            "classHours": [
+              1,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "hours": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "노형준",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "미적분",
+            "classHours": [
+              4,
+              4,
+              0,
+              0,
+              0,
+              0,
+              4
+            ],
+            "hours": 12
+          }
+        ],
+        "3": [
+          {
+            "name": "수학과제 탐구",
+            "classHours": [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0
+            ],
+            "hours": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "홍지수",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "미적분",
+            "classHours": [
+              0,
+              0,
+              4,
+              4,
+              4,
+              4,
+              0
+            ],
+            "hours": 16
+          }
+        ],
+        "3": [
+          {
+            "name": "창체",
+            "classHours": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              0
+            ],
+            "hours": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "곽민서",
+      "assignments": {
+        "1": [],
+        "2": [],
+        "3": [
+          {
+            "name": "수학과제 탐구",
+            "classHours": [
+              0,
+              3,
+              0,
+              0,
+              0,
+              3,
+              3
+            ],
+            "hours": 9
+          },
+          {
+            "name": "C미적분",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "D미적분",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "성하늘",
+      "assignments": {
+        "1": [],
+        "2": [],
+        "3": [
+          {
+            "name": "A미적분",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "수학과제 탐구",
+            "classHours": [
+              3,
+              0,
+              3,
+              2,
+              3,
+              0,
+              0
+            ],
+            "hours": 11
+          },
+          {
+            "name": "B진로와 기업가 정신",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "우진혁",
+      "assignments": {
+        "1": [
+          {
+            "name": "한국사2",
+            "classHours": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "hours": 12
+          }
+        ],
+        "2": [],
+        "3": [
+          {
+            "name": "C사회 과제 연구",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "구태윤",
+      "assignments": {
+        "1": [
+          {
+            "name": "한국사2",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [
+          {
+            "name": "A동아시아 역사 기행",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          }
+        ],
+        "3": [
+          {
+            "name": "B사회 과제 연구",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "안도경",
+      "assignments": {
+        "1": [],
+        "2": [],
+        "3": [
+          {
+            "name": "B사회와 문화",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "C사회와 문화",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "D사회와 문화",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "E사회 과제 연구",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "A사회 과제 연구",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "황준서",
+      "assignments": {
+        "1": [
+          {
+            "name": "통합사회2",
+            "classHours": [
+              2,
+              2,
+              2,
+              2,
+              2,
+              2
+            ],
+            "hours": 12
+          }
+        ],
+        "2": [],
+        "3": [
+          {
+            "name": "B여행지리",
+            "classHours": [
+              2
+            ],
+            "hours": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "송채원",
+      "assignments": {
+        "1": [
+          {
+            "name": "통합사회2",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [
+          {
+            "name": "A세계시민과 지리",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          },
+          {
+            "name": "B세계시민과 지리",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          }
+        ],
+        "3": [
+          {
+            "name": "B여행지리",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "전민규",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "B현대사회와 윤리1",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          }
+        ],
+        "3": [
+          {
+            "name": "A생활과 윤리",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "D생활과 윤리",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "E생활과 윤리",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "하은솔",
+      "assignments": {
+        "1": [
+          {
+            "name": "통합사회2",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [
+          {
+            "name": "A현대사회와 윤리",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          },
+          {
+            "name": "B현대사회와 윤리2",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          }
+        ],
+        "3": []
+      }
+    },
+    {
+      "name": "최도현",
+      "assignments": {
+        "1": [
+          {
+            "name": "통합과학2",
+            "classHours": [
+              0,
+              0,
+              0,
+              1,
+              1,
+              1
+            ],
+            "hours": 3
+          }
+        ],
+        "2": [
+          {
+            "name": "A역학과 에너지",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          },
+          {
+            "name": "B역학과 에너지",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          }
+        ],
+        "3": [
+          {
+            "name": "B물리학Ⅱ",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "E물리학Ⅱ",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "이서준",
+      "assignments": {
+        "1": [
+          {
+            "name": "통합과학2",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [
+          {
+            "name": "A물질과 에너지1",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          },
+          {
+            "name": "B물질과 에너지1",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          }
+        ],
+        "3": [
+          {
+            "name": "E화학Ⅱ",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "탁서희",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "A물질과 에너지2",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          },
+          {
+            "name": "B물질과 에너지2",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          }
+        ],
+        "3": [
+          {
+            "name": "C화학Ⅱ",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "D화학Ⅱ",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "E화학Ⅱ",
+            "classHours": [
+              2
+            ],
+            "hours": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "윤재민",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "A세포와 물질대사",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          },
+          {
+            "name": "B세포와 물질대사",
+            "classHours": [
+              4
+            ],
+            "hours": 4
+          }
+        ],
+        "3": [
+          {
+            "name": "A생명과학",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "B생명과학Ⅱ",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "심우빈",
+      "assignments": {
+        "1": [
+          {
+            "name": "통합과학2",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [],
+        "3": [
+          {
+            "name": "A생활과 과학",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "D생활과 과학",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "B생활과 과학",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "허예은",
+      "assignments": {
+        "1": [
+          {
+            "name": "통합과학2",
+            "classHours": [
+              2,
+              2,
+              2,
+              1,
+              1,
+              1
+            ],
+            "hours": 9
+          },
+          {
+            "name": "과학탐구실험",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [],
+        "3": []
+      }
+    },
+    {
+      "name": "남도윤",
+      "assignments": {
+        "1": [
+          {
+            "name": "체육1",
+            "classHours": [
+              0,
+              0,
+              0,
+              2,
+              2,
+              2
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [
+          {
+            "name": "운동과 건강",
+            "classHours": [
+              0,
+              0,
+              0,
+              2,
+              2,
+              2,
+              2
+            ],
+            "hours": 8
+          }
+        ],
+        "3": [
+          {
+            "name": "스포츠 생활",
+            "classHours": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              1,
+              1
+            ],
+            "hours": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "백승우",
+      "assignments": {
+        "1": [
+          {
+            "name": "체육1",
+            "classHours": [
+              2,
+              2,
+              2,
+              0,
+              0,
+              0
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [
+          {
+            "name": "운동과 건강",
+            "classHours": [
+              2,
+              2,
+              2,
+              0,
+              0,
+              0,
+              0
+            ],
+            "hours": 6
+          }
+        ],
+        "3": [
+          {
+            "name": "스포츠 생활",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              0,
+              0
+            ],
+            "hours": 5
+          }
+        ]
+      }
+    },
+    {
+      "name": "조민아",
+      "assignments": {
+        "1": [
+          {
+            "name": "음악/미술",
+            "classHours": [
+              0,
+              0,
+              0,
+              2,
+              2,
+              2
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [
+          {
+            "name": "미술창작",
+            "classHours": [
+              0,
+              0,
+              0,
+              0,
+              2,
+              2,
+              2
+            ],
+            "hours": 6
+          }
+        ],
+        "3": [
+          {
+            "name": "창체",
+            "classHours": [
+              0,
+              0,
+              0,
+              1,
+              0,
+              0,
+              0
+            ],
+            "hours": 1
+          }
+        ]
+      }
+    },
+    {
+      "name": "배가은",
+      "assignments": {
+        "1": [
+          {
+            "name": "음악/미술",
+            "classHours": [
+              2,
+              2,
+              2,
+              0,
+              0,
+              0
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [
+          {
+            "name": "음악 감상과 비평",
+            "classHours": [
+              2,
+              2,
+              2,
+              2,
+              0,
+              0,
+              0
+            ],
+            "hours": 8
+          }
+        ],
+        "3": [
+          {
+            "name": "창체",
+            "classHours": [
+              0,
+              0,
+              1,
+              0,
+              1,
+              0,
+              0
+            ],
+            "hours": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "신유진",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "E프로그래밍1",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "F프로그래밍1",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ],
+        "3": [
+          {
+            "name": "C데이터 과학과 머신러닝",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "D데이터 과학과 머신러닝",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "E데이터 과학과 머신러닝",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "강민준",
+      "assignments": {
+        "1": [
+          {
+            "name": "디지털과 직업 생활",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [
+          {
+            "name": "E프로그래밍2",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "F프로그래밍2",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ],
+        "3": [
+          {
+            "name": "C진로와 기업가 정신",
+            "classHours": [
+              1
+            ],
+            "hours": 1
+          },
+          {
+            "name": "창체",
+            "classHours": [
+              0,
+              1,
+              0,
+              0,
+              0,
+              0,
+              1
+            ],
+            "hours": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "문소율",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "일본어Ⅰ",
+            "classHours": [
+              3,
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "hours": 3
+          },
+          {
+            "name": "E일본어회화Ⅱ",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "F일본어회화Ⅰ",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ],
+        "3": [
+          {
+            "name": "A일본어회화Ⅰ",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          },
+          {
+            "name": "E일본어회화Ⅰ",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ]
+      }
+    },
+    {
+      "name": "한지원",
+      "assignments": {
+        "1": [
+          {
+            "name": "디지털과 직업 생활",
+            "classHours": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1
+            ],
+            "hours": 6
+          }
+        ],
+        "2": [],
+        "3": [
+          {
+            "name": "B진로와 기업가 정신",
+            "classHours": [
+              2
+            ],
+            "hours": 2
+          },
+          {
+            "name": "C진로와 기업가 정신",
+            "classHours": [
+              2
+            ],
+            "hours": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "오태양",
+      "assignments": {
+        "1": [],
+        "2": [
+          {
+            "name": "E중국어회화Ⅱ",
+            "classHours": [
+              3
+            ],
+            "hours": 3
+          }
+        ],
+        "3": []
+      }
+    }
+  ],
+  "subjects": {
+    "1": [
+      {
+        "set": "공통",
+        "name": "공통국어2",
+        "units": 4,
+        "classCount": 6
+      },
+      {
+        "set": "공통",
+        "name": "공통수학2",
+        "units": 4,
+        "classCount": 6
+      },
+      {
+        "set": "공통",
+        "name": "공통영어2",
+        "units": 4,
+        "classCount": 6
+      },
+      {
+        "set": "공통",
+        "name": "과학탐구실험",
+        "units": 1,
+        "classCount": 6
+      },
+      {
+        "set": "공통",
+        "name": "디지털과 직업 생활",
+        "units": 2,
+        "classCount": 6
+      },
+      {
+        "set": "공통",
+        "name": "음악/미술",
+        "units": 2,
+        "classCount": 6
+      },
+      {
+        "set": "공통",
+        "name": "체육1",
+        "units": 2,
+        "classCount": 6
+      },
+      {
+        "set": "공통",
+        "name": "통합과학2",
+        "units": 4,
+        "classCount": 6
+      },
+      {
+        "set": "공통",
+        "name": "통합사회2",
+        "units": 4,
+        "classCount": 6
+      },
+      {
+        "set": "공통",
+        "name": "한국사2",
+        "units": 3,
+        "classCount": 6
+      }
+    ],
+    "2": [
+      {
+        "set": "공통",
+        "name": "독서 토론과 글쓰기",
+        "units": 3,
+        "classCount": 1
+      },
+      {
+        "set": "공통",
+        "name": "독서와 작문",
+        "units": 4,
+        "classCount": 7
+      },
+      {
+        "set": "공통",
+        "name": "미술창작",
+        "units": 3,
+        "classCount": 2
+      },
+      {
+        "set": "공통",
+        "name": "미적분",
+        "units": 4,
+        "classCount": 7
+      },
+      {
+        "set": "공통",
+        "name": "영어2",
+        "units": 4,
+        "classCount": 7
+      },
+      {
+        "set": "공통",
+        "name": "운동과 건강",
+        "units": 2,
+        "classCount": 7
+      },
+      {
+        "set": "공통",
+        "name": "음악 감상과 비평",
+        "units": 2,
+        "classCount": 4
+      },
+      {
+        "set": "공통",
+        "name": "일본어Ⅰ",
+        "units": 3,
+        "classCount": 1
+      },
+      {
+        "set": "A",
+        "name": "A동아시아 역사 기행",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 1
+      },
+      {
+        "set": "A",
+        "name": "A물질과 에너지1",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 2
+      },
+      {
+        "set": "A",
+        "name": "A물질과 에너지2",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 3
+      },
+      {
+        "set": "A",
+        "name": "A세계시민과 지리",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 4
+      },
+      {
+        "set": "A",
+        "name": "A세포와 물질대사",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 5
+      },
+      {
+        "set": "A",
+        "name": "A역학과 에너지",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 6
+      },
+      {
+        "set": "A",
+        "name": "A현대사회와 윤리",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 7
+      },
+      {
+        "set": "B",
+        "name": "B물질과 에너지1",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 1
+      },
+      {
+        "set": "B",
+        "name": "B물질과 에너지2",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 2
+      },
+      {
+        "set": "B",
+        "name": "B세계시민과 지리",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 3
+      },
+      {
+        "set": "B",
+        "name": "B세포와 물질대사",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 4
+      },
+      {
+        "set": "B",
+        "name": "B역학과 에너지",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 5
+      },
+      {
+        "set": "B",
+        "name": "B현대사회와 윤리1",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 6
+      },
+      {
+        "set": "B",
+        "name": "B현대사회와 윤리2",
+        "units": 4,
+        "classCount": 1,
+        "classNo": 7
+      },
+      {
+        "set": "C",
+        "name": "C기하",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 4
+      },
+      {
+        "set": "C",
+        "name": "C독서 토론과 글쓰기1",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 2
+      },
+      {
+        "set": "C",
+        "name": "C독서 토론과 글쓰기2",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 3
+      },
+      {
+        "set": "C",
+        "name": "C영어 독해와 작문",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 5
+      },
+      {
+        "set": "D",
+        "name": "D기하",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 6
+      },
+      {
+        "set": "D",
+        "name": "D영어독해와작문",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 7
+      },
+      {
+        "set": "E",
+        "name": "E일본어회화Ⅱ",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 2
+      },
+      {
+        "set": "E",
+        "name": "E중국어회화Ⅱ",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 3
+      },
+      {
+        "set": "E",
+        "name": "E프로그래밍1",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 4
+      },
+      {
+        "set": "E",
+        "name": "E프로그래밍2",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 5
+      },
+      {
+        "set": "F",
+        "name": "F일본어회화Ⅰ",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 6
+      },
+      {
+        "set": "F",
+        "name": "F프로그래밍1",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 7
+      },
+      {
+        "set": "F",
+        "name": "F프로그래밍2",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 8
+      }
+    ],
+    "3": [
+      {
+        "set": "공통",
+        "name": "고전 읽기",
+        "units": 3,
+        "classCount": 7
+      },
+      {
+        "set": "공통",
+        "name": "수학과제 탐구",
+        "units": 3,
+        "classCount": 7
+      },
+      {
+        "set": "공통",
+        "name": "스포츠 생활",
+        "units": 1,
+        "classCount": 7
+      },
+      {
+        "set": "공통",
+        "name": "심화영어독해Ⅱ",
+        "units": 3,
+        "classCount": 7
+      },
+      {
+        "set": "공통",
+        "name": "창체",
+        "units": 1,
+        "classCount": 7
+      },
+      {
+        "set": "A",
+        "name": "A문학 개론",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 1
+      },
+      {
+        "set": "A",
+        "name": "A미적분",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 2
+      },
+      {
+        "set": "A",
+        "name": "A사회 과제 연구",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 3
+      },
+      {
+        "set": "A",
+        "name": "A생명과학",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 4
+      },
+      {
+        "set": "A",
+        "name": "A생활과 과학",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 5
+      },
+      {
+        "set": "A",
+        "name": "A생활과 윤리",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 6
+      },
+      {
+        "set": "A",
+        "name": "A일본어회화Ⅰ",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 7
+      },
+      {
+        "set": "B",
+        "name": "B물리학Ⅱ",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 1
+      },
+      {
+        "set": "B",
+        "name": "B사회 과제 연구",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 2
+      },
+      {
+        "set": "B",
+        "name": "B사회와 문화",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 3
+      },
+      {
+        "set": "B",
+        "name": "B생명과학Ⅱ",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 4
+      },
+      {
+        "set": "B",
+        "name": "B생활과 과학",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 5
+      },
+      {
+        "set": "B",
+        "name": "B여행지리",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 6
+      },
+      {
+        "set": "B",
+        "name": "B진로와 기업가 정신",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 7
+      },
+      {
+        "set": "C",
+        "name": "C데이터 과학과 머신러닝",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 1
+      },
+      {
+        "set": "C",
+        "name": "C문학개론",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 2
+      },
+      {
+        "set": "C",
+        "name": "C미적분",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 3
+      },
+      {
+        "set": "C",
+        "name": "C사회 과제 연구",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 4
+      },
+      {
+        "set": "C",
+        "name": "C사회와 문화",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 5
+      },
+      {
+        "set": "C",
+        "name": "C진로와 기업가 정신",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 6
+      },
+      {
+        "set": "C",
+        "name": "C화학Ⅱ",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 7
+      },
+      {
+        "set": "D",
+        "name": "D데이터 과학과 머신러닝",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 1
+      },
+      {
+        "set": "D",
+        "name": "D문학개론",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 2
+      },
+      {
+        "set": "D",
+        "name": "D미적분",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 3
+      },
+      {
+        "set": "D",
+        "name": "D사회와 문화",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 4
+      },
+      {
+        "set": "D",
+        "name": "D생활과 과학",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 5
+      },
+      {
+        "set": "D",
+        "name": "D생활과 윤리",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 6
+      },
+      {
+        "set": "D",
+        "name": "D화학Ⅱ",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 7
+      },
+      {
+        "set": "E",
+        "name": "E데이터 과학과 머신러닝",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 1
+      },
+      {
+        "set": "E",
+        "name": "E물리학Ⅱ",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 2
+      },
+      {
+        "set": "E",
+        "name": "E사회 과제 연구",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 3
+      },
+      {
+        "set": "E",
+        "name": "E생활과 윤리",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 4
+      },
+      {
+        "set": "E",
+        "name": "E일본어회화Ⅰ",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 5
+      },
+      {
+        "set": "E",
+        "name": "E진로 영어",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 6
+      },
+      {
+        "set": "E",
+        "name": "E화학Ⅱ",
+        "units": 3,
+        "classCount": 1,
+        "classNo": 7
+      }
+    ]
+  },
+  "daySchedule": {
+    "classCounts": {
+      "1": 6,
+      "2": 7,
+      "3": 7
+    },
+    "grades": {
+      "1": {
+        "mon": 7,
+        "tue": 7,
+        "wed": 6,
+        "thu": 6,
+        "fri": 4
+      },
+      "2": {
+        "mon": 7,
+        "tue": 7,
+        "wed": 6,
+        "thu": 6,
+        "fri": 4
+      },
+      "3": {
+        "mon": 6,
+        "tue": 5,
+        "wed": 5,
+        "thu": 6,
+        "fri": 4
+      }
+    }
+  },
+  "preferences": {
+    "avoidLunchDouble": true,
+    "lunchAfterPeriod": 4,
+    "avoidTriplePeriod": true,
+    "avoidSameDaySubject": true,
+    "sameDaySubjectBans": [
+      {
+        "grade": 2,
+        "subjectName": "미적분"
+      },
+      {
+        "grade": 1,
+        "subjectName": "공통수학2"
+      },
+      {
+        "grade": 3,
+        "subjectName": "고전 읽기"
+      },
+      {
+        "grade": 1,
+        "subjectName": "공통국어2"
+      },
+      {
+        "grade": 2,
+        "subjectName": "독서 토론과 글쓰기"
+      },
+      {
+        "grade": 2,
+        "subjectName": "독서와 작문"
+      },
+      {
+        "grade": 1,
+        "subjectName": "체육1"
+      }
+    ]
+  },
+  "setBlocks": {
+    "cells": [
+      {
+        "grade": 3,
+        "set": "A",
+        "day": "mon",
+        "period": 2
+      },
+      {
+        "grade": 3,
+        "set": "A",
+        "day": "tue",
+        "period": 3
+      },
+      {
+        "grade": 3,
+        "set": "A",
+        "day": "wed",
+        "period": 4
+      },
+      {
+        "grade": 3,
+        "set": "B",
+        "day": "tue",
+        "period": 2
+      },
+      {
+        "grade": 3,
+        "set": "B",
+        "day": "wed",
+        "period": 3
+      },
+      {
+        "grade": 3,
+        "set": "B",
+        "day": "thu",
+        "period": 4
+      },
+      {
+        "grade": 3,
+        "set": "C",
+        "day": "wed",
+        "period": 2
+      },
+      {
+        "grade": 3,
+        "set": "C",
+        "day": "thu",
+        "period": 3
+      },
+      {
+        "grade": 3,
+        "set": "C",
+        "day": "fri",
+        "period": 4
+      },
+      {
+        "grade": 3,
+        "set": "D",
+        "day": "thu",
+        "period": 2
+      },
+      {
+        "grade": 3,
+        "set": "D",
+        "day": "fri",
+        "period": 3
+      },
+      {
+        "grade": 3,
+        "set": "D",
+        "day": "mon",
+        "period": 3
+      },
+      {
+        "grade": 3,
+        "set": "E",
+        "day": "mon",
+        "period": 4
+      },
+      {
+        "grade": 3,
+        "set": "E",
+        "day": "tue",
+        "period": 4
+      },
+      {
+        "grade": 3,
+        "set": "E",
+        "day": "fri",
+        "period": 2
+      },
+      {
+        "grade": 2,
+        "set": "A",
+        "day": "mon",
+        "period": 5
+      },
+      {
+        "grade": 2,
+        "set": "A",
+        "day": "tue",
+        "period": 6
+      },
+      {
+        "grade": 2,
+        "set": "A",
+        "day": "wed",
+        "period": 5
+      },
+      {
+        "grade": 2,
+        "set": "A",
+        "day": "thu",
+        "period": 6
+      },
+      {
+        "grade": 2,
+        "set": "B",
+        "day": "mon",
+        "period": 6
+      },
+      {
+        "grade": 2,
+        "set": "B",
+        "day": "tue",
+        "period": 5
+      },
+      {
+        "grade": 2,
+        "set": "B",
+        "day": "wed",
+        "period": 6
+      },
+      {
+        "grade": 2,
+        "set": "B",
+        "day": "thu",
+        "period": 5
+      }
+    ],
+    "partialCells": [
+      {
+        "grade": 2,
+        "set": "C",
+        "day": "tue",
+        "period": 2
+      },
+      {
+        "grade": 2,
+        "set": "C",
+        "day": "wed",
+        "period": 3
+      },
+      {
+        "grade": 2,
+        "set": "C",
+        "day": "thu",
+        "period": 4
+      },
+      {
+        "grade": 2,
+        "set": "D",
+        "day": "wed",
+        "period": 2
+      },
+      {
+        "grade": 2,
+        "set": "D",
+        "day": "thu",
+        "period": 3
+      },
+      {
+        "grade": 2,
+        "set": "D",
+        "day": "fri",
+        "period": 4
+      },
+      {
+        "grade": 2,
+        "set": "E",
+        "day": "thu",
+        "period": 1
+      },
+      {
+        "grade": 2,
+        "set": "E",
+        "day": "fri",
+        "period": 1
+      },
+      {
+        "grade": 2,
+        "set": "E",
+        "day": "wed",
+        "period": 1
+      },
+      {
+        "grade": 2,
+        "set": "F",
+        "day": "mon",
+        "period": 1
+      },
+      {
+        "grade": 2,
+        "set": "F",
+        "day": "tue",
+        "period": 1
+      },
+      {
+        "grade": 2,
+        "set": "F",
+        "day": "tue",
+        "period": 7
+      }
+    ],
+    "teacherAssignments": [
+      {
+        "grade": 3,
+        "set": "C",
+        "day": "wed",
+        "period": 2,
+        "subjectName": "C문학개론",
+        "teacherName": "조은비"
+      },
+      {
+        "grade": 3,
+        "set": "C",
+        "day": "thu",
+        "period": 3,
+        "subjectName": "C문학개론",
+        "teacherName": "조은비"
+      },
+      {
+        "grade": 3,
+        "set": "C",
+        "day": "fri",
+        "period": 4,
+        "subjectName": "C문학개론",
+        "teacherName": "배준영"
+      },
+      {
+        "grade": 3,
+        "set": "C",
+        "day": "wed",
+        "period": 2,
+        "subjectName": "C진로와 기업가 정신",
+        "teacherName": "강민준"
+      },
+      {
+        "grade": 3,
+        "set": "C",
+        "day": "thu",
+        "period": 3,
+        "subjectName": "C진로와 기업가 정신",
+        "teacherName": "한지원"
+      },
+      {
+        "grade": 3,
+        "set": "C",
+        "day": "fri",
+        "period": 4,
+        "subjectName": "C진로와 기업가 정신",
+        "teacherName": "한지원"
+      },
+      {
+        "grade": 3,
+        "set": "D",
+        "day": "thu",
+        "period": 2,
+        "subjectName": "D문학개론",
+        "teacherName": "조은비"
+      },
+      {
+        "grade": 3,
+        "set": "D",
+        "day": "fri",
+        "period": 3,
+        "subjectName": "D문학개론",
+        "teacherName": "조은비"
+      },
+      {
+        "grade": 3,
+        "set": "D",
+        "day": "mon",
+        "period": 3,
+        "subjectName": "D문학개론",
+        "teacherName": "배준영"
+      },
+      {
+        "grade": 3,
+        "set": "E",
+        "day": "mon",
+        "period": 4,
+        "subjectName": "E화학Ⅱ",
+        "teacherName": "이서준"
+      },
+      {
+        "grade": 3,
+        "set": "E",
+        "day": "tue",
+        "period": 4,
+        "subjectName": "E화학Ⅱ",
+        "teacherName": "탁서희"
+      },
+      {
+        "grade": 3,
+        "set": "E",
+        "day": "fri",
+        "period": 2,
+        "subjectName": "E화학Ⅱ",
+        "teacherName": "탁서희"
+      },
+      {
+        "grade": 3,
+        "set": "B",
+        "day": "tue",
+        "period": 2,
+        "subjectName": "B진로와 기업가 정신",
+        "teacherName": "성하늘"
+      },
+      {
+        "grade": 3,
+        "set": "B",
+        "day": "wed",
+        "period": 3,
+        "subjectName": "B진로와 기업가 정신",
+        "teacherName": "한지원"
+      },
+      {
+        "grade": 3,
+        "set": "B",
+        "day": "thu",
+        "period": 4,
+        "subjectName": "B진로와 기업가 정신",
+        "teacherName": "한지원"
+      },
+      {
+        "grade": 3,
+        "set": "B",
+        "day": "tue",
+        "period": 2,
+        "subjectName": "B여행지리",
+        "teacherName": "황준서"
+      },
+      {
+        "grade": 3,
+        "set": "B",
+        "day": "wed",
+        "period": 3,
+        "subjectName": "B여행지리",
+        "teacherName": "황준서"
+      },
+      {
+        "grade": 3,
+        "set": "B",
+        "day": "thu",
+        "period": 4,
+        "subjectName": "B여행지리",
+        "teacherName": "송채원"
+      },
+      {
+        "grade": 3,
+        "set": "A",
+        "day": "mon",
+        "period": 2,
+        "subjectName": "A문학 개론",
+        "teacherName": "조은비"
+      },
+      {
+        "grade": 3,
+        "set": "A",
+        "day": "tue",
+        "period": 3,
+        "subjectName": "A문학 개론",
+        "teacherName": "조은비"
+      },
+      {
+        "grade": 3,
+        "set": "A",
+        "day": "wed",
+        "period": 4,
+        "subjectName": "A문학 개론",
+        "teacherName": "배준영"
+      },
+      {
+        "grade": 2,
+        "set": "C",
+        "day": "tue",
+        "period": 2,
+        "subjectName": "C독서 토론과 글쓰기2",
+        "teacherName": "백서연"
+      },
+      {
+        "grade": 2,
+        "set": "C",
+        "day": "wed",
+        "period": 3,
+        "subjectName": "C독서 토론과 글쓰기2",
+        "teacherName": "조은비"
+      },
+      {
+        "grade": 2,
+        "set": "C",
+        "day": "thu",
+        "period": 4,
+        "subjectName": "C독서 토론과 글쓰기2",
+        "teacherName": "배준영"
+      },
+      {
+        "grade": 2,
+        "set": "C",
+        "day": "tue",
+        "period": 2,
+        "subjectName": "C영어 독해와 작문",
+        "teacherName": "강수아"
+      },
+      {
+        "grade": 2,
+        "set": "C",
+        "day": "wed",
+        "period": 3,
+        "subjectName": "C영어 독해와 작문",
+        "teacherName": "문가영"
+      },
+      {
+        "grade": 2,
+        "set": "C",
+        "day": "thu",
+        "period": 4,
+        "subjectName": "C영어 독해와 작문",
+        "teacherName": "오다인"
+      },
+      {
+        "grade": 2,
+        "set": "C",
+        "day": "tue",
+        "period": 2,
+        "subjectName": "C독서 토론과 글쓰기1",
+        "teacherName": "조은비"
+      },
+      {
+        "grade": 2,
+        "set": "C",
+        "day": "wed",
+        "period": 3,
+        "subjectName": "C독서 토론과 글쓰기1",
+        "teacherName": "배준영"
+      },
+      {
+        "grade": 2,
+        "set": "C",
+        "day": "thu",
+        "period": 4,
+        "subjectName": "C독서 토론과 글쓰기1",
+        "teacherName": "백서연"
+      }
+    ]
+  },
+  "subjectBlocks": {
+    "cells": [
+      {
+        "grade": 2,
+        "classNo": 5,
+        "subjectName": "미술창작",
+        "teacherName": "조민아",
+        "day": "mon",
+        "period": 3
+      },
+      {
+        "grade": 2,
+        "classNo": 5,
+        "subjectName": "미술창작",
+        "teacherName": "조민아",
+        "day": "mon",
+        "period": 4
+      },
+      {
+        "grade": 2,
+        "classNo": 6,
+        "subjectName": "미술창작",
+        "teacherName": "조민아",
+        "day": "thu",
+        "period": 3
+      },
+      {
+        "grade": 2,
+        "classNo": 6,
+        "subjectName": "미술창작",
+        "teacherName": "조민아",
+        "day": "thu",
+        "period": 4
+      },
+      {
+        "grade": 2,
+        "classNo": 7,
+        "subjectName": "미술창작",
+        "teacherName": "조민아",
+        "day": "fri",
+        "period": 3
+      },
+      {
+        "grade": 2,
+        "classNo": 7,
+        "subjectName": "미술창작",
+        "teacherName": "조민아",
+        "day": "fri",
+        "period": 4
+      },
+      {
+        "grade": 1,
+        "classNo": 1,
+        "subjectName": "과학탐구실험",
+        "teacherName": "허예은",
+        "day": "mon",
+        "period": 2
+      },
+      {
+        "grade": 1,
+        "classNo": 1,
+        "subjectName": "통합과학2",
+        "teacherName": "허예은",
+        "day": "mon",
+        "period": 3
+      },
+      {
+        "grade": 1,
+        "classNo": 3,
+        "subjectName": "과학탐구실험",
+        "teacherName": "허예은",
+        "day": "mon",
+        "period": 5
+      },
+      {
+        "grade": 1,
+        "classNo": 3,
+        "subjectName": "통합과학2",
+        "teacherName": "허예은",
+        "day": "mon",
+        "period": 6
+      },
+      {
+        "grade": 1,
+        "classNo": 2,
+        "subjectName": "과학탐구실험",
+        "teacherName": "허예은",
+        "day": "tue",
+        "period": 3
+      },
+      {
+        "grade": 1,
+        "classNo": 2,
+        "subjectName": "통합과학2",
+        "teacherName": "허예은",
+        "day": "tue",
+        "period": 4
+      },
+      {
+        "grade": 1,
+        "classNo": 6,
+        "subjectName": "과학탐구실험",
+        "teacherName": "허예은",
+        "day": "fri",
+        "period": 1
+      },
+      {
+        "grade": 1,
+        "classNo": 6,
+        "subjectName": "통합과학2",
+        "teacherName": "허예은",
+        "day": "fri",
+        "period": 2
+      },
+      {
+        "grade": 1,
+        "classNo": 5,
+        "subjectName": "통합과학2",
+        "teacherName": "허예은",
+        "day": "fri",
+        "period": 4
+      },
+      {
+        "grade": 1,
+        "classNo": 5,
+        "subjectName": "과학탐구실험",
+        "teacherName": "허예은",
+        "day": "fri",
+        "period": 3
+      }
+    ]
+  },
+  "teacherConstraints": {
+    "forbiddenSlots": []
+  }
+}

@@ -1,4 +1,5 @@
 import { LoginForm } from "@/components/login-form";
+import { TryDemoButton } from "@/components/try-demo-button";
 
 export default function LoginPage() {
   return (
@@ -17,12 +18,11 @@ export default function LoginPage() {
         </header>
         <LoginForm />
         <p className="text-center text-xs leading-relaxed text-zinc-500">
-          프로그램을 체험하고 싶다면 &ldquo;직접 입력&rdquo;을 누르고
-          아이디는 <strong className="font-semibold text-zinc-700">체험학교 </strong>
-          비밀번호 <strong className="font-semibold text-zinc-700">abcd1234!@</strong> 를
-          입력해보세요. 예시 데이터로 바로 체험할 수 있습니다.
+          프로그램을 체험하고 싶다면 아래 &ldquo;체험해보기&rdquo; 버튼을
+          눌러보세요. 예시 데이터로 바로 체험할 수 있습니다.
         </p>
         <div className="flex items-center gap-4">
+          <TryDemoButton />
           <a
             href="https://docs.google.com/forms/d/e/1FAIpQLSe1RpqiMHh4k9M6V9epCU94zxEWmeKGZdpCqzBIbEEnXakAxQ/viewform?usp=dialog"
             target="_blank"

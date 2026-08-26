@@ -149,6 +149,8 @@ export async function POST(request: Request, context: RouteContext) {
       subjectBlocks,
       forbiddenSlots,
       sameDaySubjectBans: preferences.sameDaySubjectBans,
+      avoidLunchDouble: preferences.avoidLunchDouble,
+      lunchAfterPeriod: preferences.lunchAfterPeriod,
       timeLimitMs: 15_000,
       restarts: 25,
     });

@@ -176,7 +176,7 @@ function SubjectClassCountEditor({
                           <th className="w-12 px-1 py-2 text-center font-medium">
                             단위수
                           </th>
-                          <th className="w-14 px-1 py-2 text-center font-medium">
+                          <th className=" min-w-[3rem] px-1 py-2 text-center font-medium">
                             학반수
                           </th>
                         </tr>

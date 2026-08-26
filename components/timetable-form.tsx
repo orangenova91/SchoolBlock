@@ -25,7 +25,8 @@ import {
   type Weekday,
 } from "@/lib/types";
 
-function formatLunchDouble(detail: SoftRunDetail): string {
+/** Shared formatter for teacher-based soft-run diagnostics (lunch doubles, 3연강). */
+function formatSoftRunDetail(detail: SoftRunDetail): string {
   const periods =
     detail.startPeriod === detail.endPeriod
       ? `${detail.startPeriod}교시`
@@ -79,6 +80,8 @@ export function TimetableForm({ termId }: TimetableFormProps) {
   const [unplaced, setUnplaced] = useState<TimetableUnplaced[]>([]);
   const [lunchDoubleCount, setLunchDoubleCount] = useState(0);
   const [lunchDoubles, setLunchDoubles] = useState<SoftRunDetail[]>([]);
+  const [tripleRunCount, setTripleRunCount] = useState(0);
+  const [tripleRuns, setTripleRuns] = useState<SoftRunDetail[]>([]);
   const [sameDaySubjectViolationCount, setSameDaySubjectViolationCount] =
     useState(0);
   const [sameDaySubjectViolations, setSameDaySubjectViolations] = useState<
@@ -95,6 +98,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
   const [lunchMessage, setLunchMessage] = useState("");
   const [lunchLockCount, setLunchLockCount] = useState(0);
   const [avoidLunchDouble, setAvoidLunchDouble] = useState(true);
+  const [avoidTriplePeriod, setAvoidTriplePeriod] = useState(true);
   const [sameDaySubjectStatus, setSameDaySubjectStatus] = useState<
     "idle" | "ready" | "failed"
   >("idle");
@@ -110,8 +114,6 @@ export function TimetableForm({ termId }: TimetableFormProps) {
   const [lunchGenerating, setLunchGenerating] = useState(false);
   const [sameDayGenerating, setSameDayGenerating] = useState(false);
   const [resetting, setResetting] = useState(false);
-  const [estimating, setEstimating] = useState(false);
-  const [estimateText, setEstimateText] = useState("");
   const [viewGrade, setViewGrade] = useState<Grade>(1);
   const [viewClass, setViewClass] = useState(1);
   const [viewMode, setViewMode] = useState<
@@ -143,6 +145,8 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           error?: string;
           lunchDoubleCount?: number;
           lunchDoubles?: SoftRunDetail[];
+          tripleRunCount?: number;
+          tripleRuns?: SoftRunDetail[];
           lunchStatus?: "idle" | "ready" | "failed";
           lunchMessage?: string | null;
           lunchLockCount?: number;
@@ -161,6 +165,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         const preferencesData = (await preferencesRes.json()) as {
           preferences?: {
             avoidLunchDouble?: boolean;
+            avoidTriplePeriod?: boolean;
             avoidSameDaySubject?: boolean;
           };
         };
@@ -183,6 +188,8 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           setMessage(tt.message ?? "");
           setLunchDoubleCount(tt.lunchDoubleCount ?? 0);
           setLunchDoubles(Array.isArray(tt.lunchDoubles) ? tt.lunchDoubles : []);
+          setTripleRunCount(tt.tripleRunCount ?? 0);
+          setTripleRuns(Array.isArray(tt.tripleRuns) ? tt.tripleRuns : []);
           setPreviewKind(
             Array.isArray(tt.cells) && tt.cells.length > 0 ? "full" : null,
           );
@@ -207,6 +214,9 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           if (preferencesRes.ok) {
             setAvoidLunchDouble(
               preferencesData.preferences?.avoidLunchDouble ?? true,
+            );
+            setAvoidTriplePeriod(
+              preferencesData.preferences?.avoidTriplePeriod ?? true,
             );
             setAvoidSameDaySubject(
               preferencesData.preferences?.avoidSameDaySubject ?? false,
@@ -268,6 +278,8 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         error?: string;
         lunchDoubleCount?: number;
         lunchDoubles?: SoftRunDetail[];
+        tripleRunCount?: number;
+        tripleRuns?: SoftRunDetail[];
         sameDaySubjectViolationCount?: number;
         sameDaySubjectViolations?: SameDaySubjectViolation[];
       };
@@ -281,6 +293,8 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       setMessage(data.message ?? "");
       setLunchDoubleCount(data.lunchDoubleCount ?? 0);
       setLunchDoubles(Array.isArray(data.lunchDoubles) ? data.lunchDoubles : []);
+      setTripleRunCount(data.tripleRunCount ?? 0);
+      setTripleRuns(Array.isArray(data.tripleRuns) ? data.tripleRuns : []);
       setSameDaySubjectViolationCount(data.sameDaySubjectViolationCount ?? 0);
       setSameDaySubjectViolations(
         Array.isArray(data.sameDaySubjectViolations)
@@ -395,63 +409,10 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       setSameDaySubjectMessage("");
       setSameDaySubjectLockCount(0);
       setPreviewKind(null);
-      setEstimateText("");
     } catch {
       setError("서버에 연결할 수 없습니다.");
     } finally {
       setResetting(false);
-    }
-  }
-
-  async function handleEstimate() {
-    setEstimating(true);
-    setError("");
-    setEstimateText("");
-    try {
-      const response = await fetch(
-        `/api/terms/${termId}/timetable/estimate`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ samples: 5 }),
-        },
-      );
-      const data = (await response.json()) as {
-        error?: string;
-        summary?: string;
-        upperBound?: {
-          lessonCount?: number;
-          upperBoundLabel?: string;
-          note?: string;
-          log10UpperBound?: number | null;
-        };
-        completeCount?: number;
-        distinctComplete?: number;
-        failedCount?: number;
-        elapsedMs?: number;
-        distinctHashes?: string[];
-      };
-      if (!response.ok) {
-        setError(data.error ?? "해공간 추정에 실패했습니다.");
-        return;
-      }
-      const hashes = (data.distinctHashes ?? []).join(", ") || "(없음)";
-      setEstimateText(
-        [
-          data.summary ?? "",
-          `공통 수업 ${data.upperBound?.lessonCount ?? "?"}교시`,
-          data.upperBound?.note ?? "",
-          `소요 ${(data.elapsedMs ?? 0) / 1000}초 · 실패 ${data.failedCount ?? 0}회`,
-          `해시: ${hashes}`,
-          "※ 저장된 시간표는 변경하지 않습니다.",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-      );
-    } catch {
-      setError("서버에 연결할 수 없습니다.");
-    } finally {
-      setEstimating(false);
     }
   }
 
@@ -530,7 +491,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
               void handleSameDaySubjectPriority();
             }}
             disabled={
-              generating || estimating || lunchGenerating || sameDayGenerating || resetting
+              generating || lunchGenerating || sameDayGenerating || resetting
             }
             className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -546,7 +507,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
               void handleLunchPriority();
             }}
             disabled={
-              generating || estimating || lunchGenerating || sameDayGenerating || resetting
+              generating || lunchGenerating || sameDayGenerating || resetting
             }
             className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -561,7 +522,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
             void handleGenerate();
           }}
           disabled={
-            generating || estimating || lunchGenerating || sameDayGenerating || resetting
+            generating || lunchGenerating || sameDayGenerating || resetting
           }
           className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
@@ -574,20 +535,6 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         <button
           type="button"
           onClick={() => {
-            void handleEstimate();
-          }}
-          disabled={
-            generating || estimating || lunchGenerating || sameDayGenerating || resetting
-          }
-          className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {estimating
-            ? "해공간 추정 중… (최대 약 1분)"
-            : "해공간 추정"}
-        </button>
-        <button
-          type="button"
-          onClick={() => {
             void handleReset();
           }}
           disabled={
@@ -595,7 +542,6 @@ export function TimetableForm({ termId }: TimetableFormProps) {
               lunchLockCount === 0 &&
               sameDaySubjectLockCount === 0) ||
             generating ||
-            estimating ||
             lunchGenerating ||
             sameDayGenerating ||
             resetting
@@ -624,15 +570,6 @@ export function TimetableForm({ termId }: TimetableFormProps) {
             {message}
           </pre>
         </div>
-      ) : null}
-
-      {estimateText ? (
-        <pre
-          role="status"
-          className="whitespace-pre-wrap rounded-xl border border-zinc-200 bg-zinc-50 px-4 py-3 text-left text-xs leading-relaxed text-zinc-700"
-        >
-          {estimateText}
-        </pre>
       ) : null}
 
       {error ? (
@@ -808,7 +745,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       )}
 
       {avoidSameDaySubject || avoidLunchDouble ? (
-        <div className="grid grid-cols-1 gap-1 text-center text-xs text-zinc-500 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-1 text-center text-xs text-zinc-500 lg:grid-cols-3">
           {avoidSameDaySubject ? (
             <p>
               저장된 동일 교과 우선 배치:{" "}
@@ -838,7 +775,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
 
       {(avoidSameDaySubject && sameDaySubjectMessage) ||
       (avoidLunchDouble && lunchMessage) ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
           {avoidSameDaySubject && sameDaySubjectMessage ? (
             <div>
               <p className="mb-1 text-center text-xs font-medium text-zinc-500">
@@ -878,7 +815,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       ) : null}
 
       {previewKind === "full" && cells.length > 0 ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
           <div
             className={`rounded-xl border px-4 py-3 text-sm ${
               sameDaySubjectViolationCount > 0
@@ -920,7 +857,31 @@ export function TimetableForm({ termId }: TimetableFormProps) {
               <ul className="mt-2 max-h-40 list-inside list-disc overflow-auto text-xs">
                 {lunchDoubles.map((d, i) => (
                   <li key={`${d.teacherName}-${d.day}-${i}`}>
-                    {formatLunchDouble(d)}
+                    {formatSoftRunDetail(d)}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+
+          <div
+            className={`rounded-xl border px-4 py-3 text-sm ${
+              tripleRunCount > 0
+                ? "border-amber-200 bg-amber-50 text-amber-900"
+                : "border-emerald-200 bg-emerald-50 text-emerald-900"
+            }`}
+          >
+            <p className="font-medium">
+              3연강 {tripleRunCount}건
+              {!avoidTriplePeriod && tripleRunCount > 0
+                ? " (3연강 완화가 꺼져 있어 참고용으로만 표시됩니다)"
+                : null}
+            </p>
+            {tripleRunCount > 0 ? (
+              <ul className="mt-2 max-h-40 list-inside list-disc overflow-auto text-xs">
+                {tripleRuns.map((d, i) => (
+                  <li key={`${d.teacherName}-${d.day}-${i}`}>
+                    {formatSoftRunDetail(d)}
                   </li>
                 ))}
               </ul>

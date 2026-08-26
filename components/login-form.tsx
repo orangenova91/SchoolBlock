@@ -11,9 +11,6 @@ type SchoolOption = {
   type: string;
 };
 
-/** 체험용 데모 계정 아이디. "직접 입력" 토글 시 비어 있으면 자동으로 채워진다. */
-const DEMO_USERNAME = "체험학교";
-
 export function LoginForm() {
   const router = useRouter();
   const [username, setUsername] = useState("");
@@ -84,7 +81,6 @@ export function LoginForm() {
     setManual(true);
     setOpen(false);
     setResults([]);
-    setUsername((current) => current || DEMO_USERNAME);
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {

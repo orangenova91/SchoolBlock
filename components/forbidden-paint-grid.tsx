@@ -34,7 +34,7 @@ function cellKey(day: Weekday, period: number) {
 function lockedTitle(label: ForbiddenLockedLabel): string {
   return label === "SET"
     ? "SET으로 이미 배정된 시간입니다."
-    : "블록 수업으로 이미 배정된 시간입니다.";
+    : "선 수업 배치 작업으로 이미 배정된 시간입니다.";
 }
 
 function lockedClassName(label: ForbiddenLockedLabel): string {

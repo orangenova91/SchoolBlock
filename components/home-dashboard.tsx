@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type FormEvent,
+  type KeyboardEvent,
+} from "react";
 import type { Semester } from "@/lib/types";
 
 type TermListItem = {
@@ -59,8 +66,10 @@ export function HomeDashboard() {
   const [savingId, setSavingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   const [editError, setEditError] = useState("");
   const [listMessage, setListMessage] = useState("");
+  const importInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -184,6 +193,63 @@ export function HomeDashboard() {
     }
   }
 
+  function downloadTerm(term: TermListItem) {
+    const link = document.createElement("a");
+    link.href = `/api/terms/${term.id}/export`;
+    link.click();
+  }
+
+  async function handleImportFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setImporting(true);
+    setListMessage("");
+    setError("");
+
+    try {
+      const text = await file.text();
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        setListMessage("올바른 JSON 파일이 아닙니다.");
+        return;
+      }
+
+      const response = await fetch("/api/terms/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed),
+      });
+      const data = (await response.json()) as Partial<TermListItem> & {
+        error?: string;
+      };
+
+      if (!response.ok || !data.id) {
+        setListMessage(data.error ?? "가져오기에 실패했습니다.");
+        return;
+      }
+
+      const created: TermListItem = {
+        id: data.id,
+        timetableName: data.timetableName ?? null,
+        school: data.school ?? "",
+        academicYear: data.academicYear ?? new Date().getFullYear(),
+        semester: data.semester ?? 1,
+        createdAt: data.createdAt ?? new Date().toISOString(),
+      };
+
+      setTerms((prev) => [created, ...prev]);
+      setListMessage(`"${created.timetableName}" 이름으로 가져왔습니다.`);
+    } catch {
+      setListMessage("서버에 연결할 수 없습니다.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   async function saveEdit(termId: string) {
     if (!draft) return;
 
@@ -288,7 +354,24 @@ export function HomeDashboard() {
       <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-baseline justify-between gap-3">
           <h2 className="text-base font-semibold text-zinc-900">시간표 목록</h2>
-          <span className="text-xs text-zinc-500">{terms.length}개</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-zinc-500">{terms.length}개</span>
+            <button
+              type="button"
+              onClick={() => importInputRef.current?.click()}
+              disabled={importing}
+              className="rounded-md px-2 py-1 text-xs font-medium text-zinc-600 transition hover:bg-zinc-100 hover:text-zinc-900 disabled:opacity-50"
+            >
+              {importing ? "가져오는 중…" : "가져오기"}
+            </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept="application/json"
+              onChange={(e) => void handleImportFile(e)}
+              className="hidden"
+            />
+          </div>
         </div>
 
         {loading ? (
@@ -307,7 +390,8 @@ export function HomeDashboard() {
           <p
             className={`mb-3 text-sm ${
               listMessage.includes("삭제되었습니다") ||
-              listMessage.includes("복제되었습니다")
+              listMessage.includes("복제되었습니다") ||
+              listMessage.includes("가져왔습니다")
                 ? "text-emerald-700"
                 : "text-red-600"
             }`}
@@ -484,6 +568,16 @@ export function HomeDashboard() {
                           title="복제 (설정값만, 시간표 생성 결과는 복제되지 않음)"
                         >
                           {duplicatingId === term.id ? "…" : "📋"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => downloadTerm(term)}
+                          disabled={deletingId === term.id || duplicatingId === term.id}
+                          className="shrink-0 rounded-md px-2 py-1 text-base leading-none text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 disabled:opacity-50"
+                          aria-label={`${term.timetableName || "시간표"} 다운로드`}
+                          title="다운로드 (설정값만, 시간표 생성 결과는 제외됨)"
+                        >
+                          ⬇️
                         </button>
                         <button
                           type="button"

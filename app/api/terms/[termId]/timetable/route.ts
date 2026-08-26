@@ -125,6 +125,8 @@ export async function GET(request: Request, context: RouteContext) {
       message: doc?.message ?? null,
       lunchDoubleCount: doc?.lunchDoubleCount ?? 0,
       lunchDoubles: doc?.lunchDoubles ?? [],
+      tripleRunCount: doc?.tripleRunCount ?? 0,
+      tripleRuns: doc?.tripleRuns ?? [],
       lunchStatus: doc?.lunchStatus ?? "idle",
       lunchMessage: doc?.lunchMessage ?? null,
       lunchGeneratedAt: doc?.lunchGeneratedAt ?? null,
@@ -312,6 +314,8 @@ export async function POST(request: Request, context: RouteContext) {
       message: result.message,
       lunchDoubleCount: result.lunchDoubleCount,
       lunchDoubles: result.lunchDoubles,
+      tripleRunCount: result.tripleRunCount,
+      tripleRuns: result.tripleRuns,
       sameDaySubjectViolationCount: result.sameDaySubjectViolationCount,
       sameDaySubjectViolations: result.sameDaySubjectViolations,
     };
@@ -333,6 +337,8 @@ export async function POST(request: Request, context: RouteContext) {
       lunchLockUsed: (existingTimetableDoc?.lunchLockCells?.length ?? 0) > 0,
       lunchDoubleCount: doc.lunchDoubleCount,
       lunchDoubles: doc.lunchDoubles,
+      tripleRunCount: doc.tripleRunCount,
+      tripleRuns: doc.tripleRuns,
       sameDaySubjectLockUsed:
         (existingTimetableDoc?.sameDaySubjectLockCells?.length ?? 0) > 0,
       sameDaySubjectViolationCount: doc.sameDaySubjectViolationCount,

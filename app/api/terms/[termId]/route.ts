@@ -1,6 +1,7 @@
 import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
+import { getAccountId, getSessionFromRequest } from "@/lib/session";
 import type { Semester, TermDocument } from "@/lib/types";
 
 type RouteContext = {
@@ -31,7 +32,17 @@ function invalidTermIdResponse() {
   );
 }
 
+function unauthorizedResponse() {
+  return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+}
+
 export async function PATCH(request: Request, context: RouteContext) {
+  const session = await getSessionFromRequest(request);
+  if (!session) return unauthorizedResponse();
+  const accountId = session.accountId;
+  // 학교명은 계정 아이디로 고정한다 — 클라이언트가 보낸 값은 신뢰하지 않는다.
+  const school = session.username;
+
   const { termId } = await context.params;
 
   if (!ObjectId.isValid(termId)) {
@@ -55,7 +66,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     );
   }
 
-  const { timetableName, school, academicYear, semester } = body as Record<
+  const { timetableName, academicYear, semester } = body as Record<
     string,
     unknown
   >;
@@ -71,13 +82,6 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (normalizedName.length === 0) {
     return NextResponse.json(
       { error: "시간표명을 입력해 주세요." },
-      { status: 400 },
-    );
-  }
-
-  if (typeof school !== "string" || school.trim().length === 0) {
-    return NextResponse.json(
-      { error: "학교를 입력해 주세요." },
       { status: 400 },
     );
   }
@@ -111,12 +115,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     const terms = db.collection<TermDocument>("terms");
     const objectId = new ObjectId(termId);
 
-    await terms.createIndex(
-      { timetableName: 1 },
-      { unique: true, sparse: true },
-    );
-
-    const current = await terms.findOne({ _id: objectId });
+    const current = await terms.findOne({ _id: objectId, ownerId: accountId });
     if (!current) {
       return NextResponse.json(
         { error: "시간표를 찾을 수 없습니다." },
@@ -125,6 +124,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     }
 
     const duplicate = await terms.findOne({
+      ownerId: accountId,
       timetableName: normalizedName,
       _id: { $ne: objectId },
     });
@@ -137,11 +137,11 @@ export async function PATCH(request: Request, context: RouteContext) {
 
     const updatedAt = new Date();
     await terms.updateOne(
-      { _id: objectId },
+      { _id: objectId, ownerId: accountId },
       {
         $set: {
           timetableName: normalizedName,
-          school: school.trim(),
+          school,
           academicYear: year,
           semester: semesterValue,
           updatedAt,
@@ -152,7 +152,7 @@ export async function PATCH(request: Request, context: RouteContext) {
     return NextResponse.json({
       id: termId,
       timetableName: normalizedName,
-      school: school.trim(),
+      school,
       academicYear: year,
       semester: semesterValue,
       createdAt: current.createdAt,
@@ -177,7 +177,10 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 }
 
-export async function DELETE(_request: Request, context: RouteContext) {
+export async function DELETE(request: Request, context: RouteContext) {
+  const accountId = await getAccountId(request);
+  if (!accountId) return unauthorizedResponse();
+
   const { termId } = await context.params;
 
   if (!ObjectId.isValid(termId)) {
@@ -189,7 +192,7 @@ export async function DELETE(_request: Request, context: RouteContext) {
     const objectId = new ObjectId(termId);
     const terms = db.collection<TermDocument>("terms");
 
-    const current = await terms.findOne({ _id: objectId });
+    const current = await terms.findOne({ _id: objectId, ownerId: accountId });
     if (!current) {
       return NextResponse.json(
         { error: "시간표를 찾을 수 없습니다." },
@@ -201,6 +204,12 @@ export async function DELETE(_request: Request, context: RouteContext) {
       terms.deleteOne({ _id: objectId }),
       db.collection("daySchedules").deleteMany({ termId }),
       db.collection("subjects").deleteMany({ termId }),
+      db.collection("teachers").deleteMany({ termId }),
+      db.collection("generationPreferences").deleteMany({ termId }),
+      db.collection("setBlocks").deleteMany({ termId }),
+      db.collection("subjectBlocks").deleteMany({ termId }),
+      db.collection("teacherConstraints").deleteMany({ termId }),
+      db.collection("timetables").deleteMany({ termId }),
     ]);
 
     return NextResponse.json({ id: termId, deleted: true });

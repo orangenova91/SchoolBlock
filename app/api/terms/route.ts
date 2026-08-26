@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
+import { getAccountId, getSessionFromRequest } from "@/lib/session";
 import type { Semester, TermDocument } from "@/lib/types";
 
 function isSemester(value: unknown): value is Semester {
@@ -19,12 +20,17 @@ function isDuplicateKeyError(error: unknown): boolean {
   );
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const accountId = await getAccountId(request);
+  if (!accountId) {
+    return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  }
+
   try {
     const db = await getDb();
     const terms = await db
       .collection<TermDocument>("terms")
-      .find({})
+      .find({ ownerId: accountId })
       .sort({ createdAt: -1 })
       .toArray();
 
@@ -51,6 +57,14 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const session = await getSessionFromRequest(request);
+  if (!session) {
+    return NextResponse.json({ error: "로그인이 필요합니다." }, { status: 401 });
+  }
+  const accountId = session.accountId;
+  // 학교명은 계정 아이디로 고정한다 — 클라이언트가 보낸 값은 신뢰하지 않는다.
+  const school = session.username;
+
   let body: unknown;
 
   try {
@@ -69,7 +83,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { timetableName, school, academicYear, semester } = body as Record<
+  const { timetableName, academicYear, semester } = body as Record<
     string,
     unknown
   >;
@@ -85,13 +99,6 @@ export async function POST(request: Request) {
   if (normalizedName.length === 0) {
     return NextResponse.json(
       { error: "시간표명을 입력해 주세요." },
-      { status: 400 },
-    );
-  }
-
-  if (typeof school !== "string" || school.trim().length === 0) {
-    return NextResponse.json(
-      { error: "학교를 입력해 주세요." },
       { status: 400 },
     );
   }
@@ -122,9 +129,10 @@ export async function POST(request: Request) {
 
   const doc: TermDocument = {
     timetableName: normalizedName,
-    school: school.trim(),
+    school,
     academicYear: year,
     semester: semesterValue,
+    ownerId: accountId,
     createdAt: new Date(),
   };
 
@@ -133,11 +141,14 @@ export async function POST(request: Request) {
     const terms = db.collection<TermDocument>("terms");
 
     await terms.createIndex(
-      { timetableName: 1 },
+      { ownerId: 1, timetableName: 1 },
       { unique: true, sparse: true },
     );
 
-    const existing = await terms.findOne({ timetableName: normalizedName });
+    const existing = await terms.findOne({
+      ownerId: accountId,
+      timetableName: normalizedName,
+    });
     if (existing) {
       return NextResponse.json(
         { error: "이미 사용 중인 시간표명입니다. 다른 이름을 입력해 주세요." },

@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { AccountHeader } from "@/components/account-header";
+import { getServerSession } from "@/lib/session";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -17,13 +19,18 @@ export const metadata: Metadata = {
   description: "학교 시간표 작성",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  const session = await getServerSession();
+
   return (
     <html
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        {session ? <AccountHeader username={session.username} /> : null}
+        {children}
+      </body>
     </html>
   );
 }

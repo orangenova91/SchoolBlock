@@ -1,7 +1,12 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { TermForm } from "@/components/term-form";
+import { getServerSession } from "@/lib/session";
 
-export default function NewTimetablePage() {
+export default async function NewTimetablePage() {
+  const session = await getServerSession();
+  if (!session) redirect("/login");
+
   return (
     <div className="flex flex-1 flex-col items-center justify-center bg-zinc-50 px-4 py-16">
       <main className="flex w-full max-w-md flex-col items-center gap-8">
@@ -10,10 +15,10 @@ export default function NewTimetablePage() {
             새 시간표 작성
           </h1>
           <p className="mt-2 text-sm text-zinc-600">
-            시간표명, 학교, 학년도, 학기를 입력해 주세요.
+            시간표명, 학년도, 학기를 입력해 주세요.
           </p>
         </header>
-        <TermForm />
+        <TermForm school={session.username} />
         <Link
           href="/"
           className="text-sm font-medium text-zinc-600 transition hover:text-zinc-900"

@@ -85,3 +85,8 @@ export function setPeriod(
     },
   };
 }
+
+/** Sum of Mon–Fri periods for one grade. */
+export function sumWeekdayPeriods(periods: WeekdayPeriods): number {
+  return WEEKDAYS.reduce((sum, { key }) => sum + periods[key], 0);
+}

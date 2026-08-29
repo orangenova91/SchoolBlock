@@ -171,8 +171,8 @@ export async function DELETE(request: Request, context: RouteContext) {
     }
 
     const db = await getDb();
-    // 최종 시간표 초기화: 배치 결과뿐 아니라 점심시간·동일 교과 우선 배치로
-    // 저장해 둔 잠금까지 모두 지워 처음 상태로 되돌린다.
+    // 작업본만 초기화: 배치 결과와 점심시간·동일 교과 우선 배치 잠금을 지운다.
+    // 확정 버전(timetableVersions)은 남긴다.
     await db.collection<TimetableDocument>("timetables").deleteOne({ termId });
 
     return NextResponse.json({ termId, status: "idle" });

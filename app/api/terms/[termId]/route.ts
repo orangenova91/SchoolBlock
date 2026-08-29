@@ -210,6 +210,7 @@ export async function DELETE(request: Request, context: RouteContext) {
       db.collection("subjectBlocks").deleteMany({ termId }),
       db.collection("teacherConstraints").deleteMany({ termId }),
       db.collection("timetables").deleteMany({ termId }),
+      db.collection("timetableVersions").deleteMany({ termId }),
     ]);
 
     return NextResponse.json({ id: termId, deleted: true });

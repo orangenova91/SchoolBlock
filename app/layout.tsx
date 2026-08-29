@@ -16,8 +16,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "TimeTable",
-  description: "학교 시간표 작성",
+  title: "스쿨블럭(SchoolBlock)",
+  description: "AI 시간표 작성 프로그램",
 };
 
 export default async function RootLayout({ children }: LayoutProps<"/">) {

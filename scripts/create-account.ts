@@ -61,7 +61,7 @@ function parseArgs(argv: string[]): CliOptions {
 function printHelp() {
   console.log(
     `
-TimeTable 계정 생성 스크립트
+스쿨블럭(SchoolBlock) 계정 생성 스크립트
 
 사용 방법:
   # 새 계정 생성

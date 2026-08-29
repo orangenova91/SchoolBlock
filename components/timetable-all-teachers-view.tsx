@@ -92,6 +92,7 @@ export function TimetableAllTeachersView({
   onSwap,
 }: TimetableAllTeachersViewProps) {
   const [picked, setPicked] = useState<TimetableCellRef | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const pointerRef = useRef({ x: 0, y: 0 });
 
@@ -144,14 +145,32 @@ export function TimetableAllTeachersView({
   }, [swapEnabled, swapping]);
 
   useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Escape") return;
+      if (picked) {
+        setPicked(null);
+        return;
+      }
+      if (fullscreen) setFullscreen(false);
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [picked, fullscreen]);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [fullscreen]);
+
+  useEffect(() => {
     if (!picked) return;
 
     function onPointerMove(event: PointerEvent) {
       pointerRef.current = { x: event.clientX, y: event.clientY };
-    }
-
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setPicked(null);
     }
 
     let frame = 0;
@@ -169,11 +188,9 @@ export function TimetableAllTeachersView({
     }
 
     window.addEventListener("pointermove", onPointerMove);
-    window.addEventListener("keydown", onKeyDown);
     frame = window.requestAnimationFrame(tick);
     return () => {
       window.removeEventListener("pointermove", onPointerMove);
-      window.removeEventListener("keydown", onKeyDown);
       window.cancelAnimationFrame(frame);
     };
   }, [picked]);
@@ -201,7 +218,31 @@ export function TimetableAllTeachersView({
   }
 
   return (
-    <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
+    <section
+      className={
+        fullscreen
+          ? "fixed inset-0 z-[60] flex flex-col bg-white p-4"
+          : "rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+      }
+    >
+      <div className="mb-3 flex items-start justify-end gap-3">
+        {swapEnabled && cells.length > 0 && teacherNames.length > 0 ? (
+          <p className="min-w-0 flex-1 text-center text-xs text-zinc-500">
+            {picked
+              ? `${picked.grade}-${picked.classNo} ${picked.subjectName}을 집었습니다. 초록 칸은 맞바꿀 수 있고, 주황 칸은 그 시간에 다른 수업이 있어 조정할 수 없습니다. Esc 또는 같은 칸을 다시 누르면 취소합니다.`
+              : "공통 수업을 클릭해 집고, 같은 학반의 다른 칸을 클릭하면 시간을 맞바꿉니다. SET 수업은 이동할 수 없습니다."}
+          </p>
+        ) : (
+          <span className="min-w-0 flex-1" />
+        )}
+        <button
+          type="button"
+          onClick={() => setFullscreen((open) => !open)}
+          className="shrink-0 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
+        >
+          {fullscreen ? "닫기" : "전체화면"}
+        </button>
+      </div>
       {cells.length === 0 ? (
         <p className="py-10 text-center text-sm text-zinc-500">
           시간표 생성을 누르면 결과가 표시됩니다.
@@ -212,16 +253,13 @@ export function TimetableAllTeachersView({
         </p>
       ) : (
         <>
-          {swapEnabled ? (
-            <p className="mb-3 text-center text-xs text-zinc-500">
-              {picked
-                ? `${picked.grade}-${picked.classNo} ${picked.subjectName}을 집었습니다. 초록 칸은 맞바꿀 수 있고, 주황 칸은 그 시간에 다른 수업이 있어 조정할 수 없습니다. Esc 또는 같은 칸을 다시 누르면 취소합니다.`
-                : "공통 수업을 클릭해 집고, 같은 학반의 다른 칸을 클릭하면 시간을 맞바꿉니다. SET 수업은 이동할 수 없습니다."}
-            </p>
-          ) : null}
           <div
             ref={scrollRef}
-            className="max-h-[75vh] overflow-auto rounded-lg border border-zinc-200"
+            className={
+              fullscreen
+                ? "min-h-0 flex-1 overflow-auto rounded-lg border border-zinc-200"
+                : "max-h-[75vh] overflow-auto rounded-lg border border-zinc-200"
+            }
           >
             <table className="min-w-full border-collapse text-center">
               <thead className="sticky top-0 z-20 bg-white">

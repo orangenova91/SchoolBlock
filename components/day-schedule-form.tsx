@@ -163,13 +163,6 @@ export function DayScheduleForm({ termId }: DayScheduleFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="flex w-full flex-col gap-10">
-      {term ? (
-        <p className="text-center text-sm text-zinc-600">
-          {term.timetableName ? `${term.timetableName} · ` : null}
-          {term.school} · {term.academicYear}학년도 · {term.semester}학기
-        </p>
-      ) : null}
-
       <div className="flex w-full flex-col items-center gap-6">
         <header className="text-center">
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">

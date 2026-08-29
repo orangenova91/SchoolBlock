@@ -215,13 +215,6 @@ export function GenerationPreferencesForm({
         </p>
       </header>
 
-      {term ? (
-        <p className="text-center text-sm text-zinc-600">
-          {term.timetableName ? `${term.timetableName} · ` : null}
-          {term.school} · {term.academicYear}학년도 · {term.semester}학기
-        </p>
-      ) : null}
-
       <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 flex-1">

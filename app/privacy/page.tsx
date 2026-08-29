@@ -134,7 +134,7 @@ export default function PrivacyPolicyPage() {
             <p>
               개인정보 관련 문의는 아래 채널로 접수해 주세요.
               <br />
-              담당자: 박주현 · 이메일:{" "}
+              담당자: 박성현 · 이메일:{" "}
               <a
                 href="mailto:Orangenova91@gmail.com"
                 className="font-medium text-zinc-900 underline underline-offset-2"

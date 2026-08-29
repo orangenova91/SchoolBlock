@@ -425,13 +425,6 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
         </p>
       </header>
 
-      {term ? (
-        <p className="text-center text-sm text-zinc-600">
-          {term.timetableName ? `${term.timetableName} · ` : null}
-          {term.school} · {term.academicYear}학년도 · {term.semester}학기
-        </p>
-      ) : null}
-
       {capacityIssues.length > 0 ? (
         <div
           className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"

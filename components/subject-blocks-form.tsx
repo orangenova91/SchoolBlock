@@ -428,13 +428,6 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
         </p>
       </header>
 
-      {term ? (
-        <p className="text-center text-sm text-zinc-600">
-          {term.timetableName ? `${term.timetableName} · ` : null}
-          {term.school} · {term.academicYear}학년도 · {term.semester}학기
-        </p>
-      ) : null}
-
       <div className="flex flex-wrap items-center justify-center gap-2">
         {GRADES.map((g) => (
           <button

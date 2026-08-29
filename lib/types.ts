@@ -351,6 +351,19 @@ export type TimetableDocument = {
   sameDaySubjectGeneratedAt?: Date;
 };
 
+/** 시간표 생성 화면에서 「확정」으로 남긴 스냅샷. 작업본(timetables)과는 별개다. */
+export type TimetableVersionDocument = {
+  termId: string;
+  versionNumber: number;
+  createdAt: Date;
+  cells: TimetableCell[];
+  lunchDoubleCount: number;
+  tripleRunCount: number;
+  sameDaySubjectViolationCount: number;
+};
+
+export const MAX_TIMETABLE_VERSIONS = 20;
+
 /** Teacher cannot be assigned any lesson at this weekday + period. */
 export type TeacherForbiddenSlot = {
   teacherName: string;

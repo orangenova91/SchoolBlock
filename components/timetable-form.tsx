@@ -6,7 +6,12 @@ import { TimetableAllTeachersView } from "@/components/timetable-all-teachers-vi
 import { TimetableGrid } from "@/components/timetable-grid";
 import { TimetableGradeView } from "@/components/timetable-grade-view";
 import { TimetableTeacherView } from "@/components/timetable-teacher-view";
+import {
+  TimetableVersionPanel,
+  type TimetableVersionSummary,
+} from "@/components/timetable-version-panel";
 import { subjectSetBadgeClass } from "@/lib/subjects";
+import type { TimetableCellRef } from "@/lib/timetable-swap";
 import { cellsForClass, maxPeriods } from "@/lib/timetable";
 import {
   GRADES,
@@ -121,6 +126,22 @@ export function TimetableForm({ termId }: TimetableFormProps) {
   >("class");
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [error, setError] = useState("");
+  const [versions, setVersions] = useState<TimetableVersionSummary[]>([]);
+  const [versionsLoading, setVersionsLoading] = useState(true);
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(
+    null,
+  );
+  const [selectedVersionCells, setSelectedVersionCells] = useState<
+    TimetableCell[] | null
+  >(null);
+  const [selectedVersionMeta, setSelectedVersionMeta] =
+    useState<TimetableVersionSummary | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [deletingVersionId, setDeletingVersionId] = useState<string | null>(
+    null,
+  );
+  const [versionMessage, setVersionMessage] = useState("");
+  const [swapping, setSwapping] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,12 +150,13 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       setLoading(true);
       setError("");
       try {
-        const [ttRes, scheduleRes, preferencesRes, teachersRes] =
+        const [ttRes, scheduleRes, preferencesRes, teachersRes, versionsRes] =
           await Promise.all([
             fetch(`/api/terms/${termId}/timetable`),
             fetch(`/api/terms/${termId}/day-schedule`),
             fetch(`/api/terms/${termId}/preferences`),
             fetch(`/api/terms/${termId}/teachers`),
+            fetch(`/api/terms/${termId}/timetable/versions`),
           ]);
         const tt = (await ttRes.json()) as {
           term?: TermSummary;
@@ -172,10 +194,14 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         const teachersData = (await teachersRes.json()) as {
           teachers?: Teacher[];
         };
+        const versionsData = (await versionsRes.json()) as {
+          versions?: TimetableVersionSummary[];
+        };
 
         if (!ttRes.ok) {
           if (!cancelled) {
             setError(tt.error ?? "시간표를 불러오지 못했습니다.");
+            setVersionsLoading(false);
           }
           return;
         }
@@ -233,11 +259,19 @@ export function TimetableForm({ termId }: TimetableFormProps) {
               Array.isArray(teachersData.teachers) ? teachersData.teachers : [],
             );
           }
+          if (versionsRes.ok) {
+            setVersions(
+              Array.isArray(versionsData.versions) ? versionsData.versions : [],
+            );
+          }
         }
       } catch {
         if (!cancelled) setError("서버에 연결할 수 없습니다.");
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+          setVersionsLoading(false);
+        }
       }
     }
 
@@ -257,15 +291,183 @@ export function TimetableForm({ termId }: TimetableFormProps) {
     [schedules, viewGrade],
   );
 
+  const displayedCells = selectedVersionCells ?? cells;
+
   const classCells = useMemo(
-    () => cellsForClass(cells, viewGrade, viewClass),
-    [cells, viewGrade, viewClass],
+    () => cellsForClass(displayedCells, viewGrade, viewClass),
+    [displayedCells, viewGrade, viewClass],
   );
 
+  const canConfirm =
+    previewKind === "full" &&
+    status === "ready" &&
+    cells.length > 0 &&
+    unplaced.length === 0;
+
+  const actionsBusy =
+    generating ||
+    lunchGenerating ||
+    sameDayGenerating ||
+    resetting ||
+    confirming ||
+    deletingVersionId !== null ||
+    swapping;
+
+  function clearVersionView() {
+    setSelectedVersionId(null);
+    setSelectedVersionCells(null);
+    setSelectedVersionMeta(null);
+  }
+
+  async function handleSelectVersion(id: string | null) {
+    if (!id) {
+      clearVersionView();
+      return;
+    }
+    setError("");
+    setVersionMessage("");
+    try {
+      const response = await fetch(
+        `/api/terms/${termId}/timetable/versions/${id}`,
+      );
+      const data = (await response.json()) as {
+        version?: TimetableVersionSummary & { cells?: TimetableCell[] };
+        error?: string;
+      };
+      if (!response.ok || !data.version) {
+        setError(data.error ?? "확정 버전을 불러오지 못했습니다.");
+        return;
+      }
+      setSelectedVersionId(id);
+      setSelectedVersionCells(
+        Array.isArray(data.version.cells) ? data.version.cells : [],
+      );
+      setSelectedVersionMeta({
+        id: data.version.id,
+        versionNumber: data.version.versionNumber,
+        createdAt:
+          typeof data.version.createdAt === "string"
+            ? data.version.createdAt
+            : String(data.version.createdAt),
+        lunchDoubleCount: data.version.lunchDoubleCount,
+        tripleRunCount: data.version.tripleRunCount,
+        sameDaySubjectViolationCount: data.version.sameDaySubjectViolationCount,
+      });
+    } catch {
+      setError("서버에 연결할 수 없습니다.");
+    }
+  }
+
+  async function handleConfirmVersion() {
+    setConfirming(true);
+    setError("");
+    setVersionMessage("");
+    try {
+      const response = await fetch(`/api/terms/${termId}/timetable/versions`, {
+        method: "POST",
+      });
+      const data = (await response.json()) as {
+        version?: TimetableVersionSummary;
+        error?: string;
+      };
+      if (!response.ok || !data.version) {
+        setError(data.error ?? "확정에 실패했습니다.");
+        return;
+      }
+      const created: TimetableVersionSummary = {
+        ...data.version,
+        createdAt:
+          typeof data.version.createdAt === "string"
+            ? data.version.createdAt
+            : String(data.version.createdAt),
+      };
+      setVersions((prev) => [created, ...prev]);
+      setVersionMessage(`확정 ${created.versionNumber}으로 저장했습니다.`);
+    } catch {
+      setError("서버에 연결할 수 없습니다.");
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  async function handleDeleteVersion(id: string) {
+    const target = versions.find((item) => item.id === id);
+    const confirmed = window.confirm(
+      `확정 ${target?.versionNumber ?? ""} 버전을 삭제할까요?`,
+    );
+    if (!confirmed) return;
+
+    setDeletingVersionId(id);
+    setError("");
+    setVersionMessage("");
+    try {
+      const response = await fetch(
+        `/api/terms/${termId}/timetable/versions/${id}`,
+        { method: "DELETE" },
+      );
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setError(data.error ?? "버전 삭제에 실패했습니다.");
+        return;
+      }
+      setVersions((prev) => prev.filter((item) => item.id !== id));
+      if (selectedVersionId === id) clearVersionView();
+      setVersionMessage("확정 버전을 삭제했습니다.");
+    } catch {
+      setError("서버에 연결할 수 없습니다.");
+    } finally {
+      setDeletingVersionId(null);
+    }
+  }
+
+  async function handleSwapCells(from: TimetableCellRef, to: TimetableCellRef) {
+    setSwapping(true);
+    setError("");
+    setVersionMessage("");
+    try {
+      const response = await fetch(`/api/terms/${termId}/timetable/swap`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ from, to }),
+      });
+      const data = (await response.json()) as {
+        cells?: TimetableCell[];
+        lunchDoubleCount?: number;
+        lunchDoubles?: SoftRunDetail[];
+        tripleRunCount?: number;
+        tripleRuns?: SoftRunDetail[];
+        sameDaySubjectViolationCount?: number;
+        sameDaySubjectViolations?: SameDaySubjectViolation[];
+        error?: string;
+      };
+      if (!response.ok) {
+        setError(data.error ?? "수업을 맞바꾸지 못했습니다.");
+        return;
+      }
+      setCells(Array.isArray(data.cells) ? data.cells : cells);
+      setLunchDoubleCount(data.lunchDoubleCount ?? 0);
+      setLunchDoubles(Array.isArray(data.lunchDoubles) ? data.lunchDoubles : []);
+      setTripleRunCount(data.tripleRunCount ?? 0);
+      setTripleRuns(Array.isArray(data.tripleRuns) ? data.tripleRuns : []);
+      setSameDaySubjectViolationCount(data.sameDaySubjectViolationCount ?? 0);
+      setSameDaySubjectViolations(
+        Array.isArray(data.sameDaySubjectViolations)
+          ? data.sameDaySubjectViolations
+          : [],
+      );
+    } catch {
+      setError("서버에 연결할 수 없습니다.");
+    } finally {
+      setSwapping(false);
+    }
+  }
+
   async function handleGenerate() {
+    clearVersionView();
     setGenerating(true);
     setError("");
     setMessage("");
+    setVersionMessage("");
     try {
       const response = await fetch(`/api/terms/${termId}/timetable`, {
         method: "POST",
@@ -310,6 +512,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
   }
 
   async function handleSameDaySubjectPriority() {
+    clearVersionView();
     setSameDayGenerating(true);
     setError("");
     setSameDaySubjectMessage("");
@@ -344,6 +547,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
   }
 
   async function handleLunchPriority() {
+    clearVersionView();
     setLunchGenerating(true);
     setError("");
     setLunchMessage("");
@@ -379,11 +583,13 @@ export function TimetableForm({ termId }: TimetableFormProps) {
 
   async function handleReset() {
     const confirmed = window.confirm(
-      "저장된 최종 시간표와 점심시간·동일 교과 우선 배치 결과를 모두 초기화할까요? 이 작업은 되돌릴 수 없습니다.",
+      "작업 중인 시간표와 점심시간·동일 교과 우선 배치 결과를 초기화할까요? 확정한 버전은 그대로 남습니다.",
     );
     if (!confirmed) return;
 
+    clearVersionView();
     setResetting(true);
+    setVersionMessage("");
     setError("");
     try {
       const response = await fetch(`/api/terms/${termId}/timetable`, {
@@ -433,15 +639,35 @@ export function TimetableForm({ termId }: TimetableFormProps) {
   }
 
   return (
-    <div className="flex w-full flex-col gap-6">
+    <div className="relative w-full">
+      <div className="mb-6 lg:absolute lg:top-0 lg:right-full lg:mb-0 lg:mr-4 lg:w-60">
+        <TimetableVersionPanel
+          versions={versions}
+          selectedId={selectedVersionId}
+          loading={versionsLoading}
+          confirming={confirming}
+          deletingId={deletingVersionId}
+          canConfirm={canConfirm}
+          busy={actionsBusy}
+          onSelect={(id) => void handleSelectVersion(id)}
+          onConfirm={() => void handleConfirmVersion()}
+          onDelete={(id) => void handleDeleteVersion(id)}
+        />
+      </div>
+      <div className="flex w-full flex-col gap-6">
       <header className="text-center">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          시간표
+          시간표 생성
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
           SET 블록·교과 블록을 고정하고 교사 배정 불가·추가 조건(점심 연강 등)을
           반영한 뒤 공통 수업을 자동 배치합니다.
         </p>
+        {selectedVersionMeta ? (
+          <p className="mt-2 text-sm font-medium text-zinc-700">
+            확정 {selectedVersionMeta.versionNumber} 보는 중
+          </p>
+        ) : null}
         <p className="mt-1 text-xs text-zinc-500">
           {avoidSameDaySubject && avoidLunchDouble
             ? "테스트 단계: 동일 교과 우선 배치 → 점심시간 우선 배치 → 남은 시간 시간표 배치 순서로 진행합니다. (둘 다 여러 번 가능)"
@@ -484,7 +710,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
               void handleSameDaySubjectPriority();
             }}
             disabled={
-              generating || lunchGenerating || sameDayGenerating || resetting
+              generating || lunchGenerating || sameDayGenerating || resetting || swapping
             }
             className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -500,7 +726,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
               void handleLunchPriority();
             }}
             disabled={
-              generating || lunchGenerating || sameDayGenerating || resetting
+              generating || lunchGenerating || sameDayGenerating || resetting || swapping
             }
             className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -515,7 +741,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
             void handleGenerate();
           }}
           disabled={
-            generating || lunchGenerating || sameDayGenerating || resetting
+            generating || lunchGenerating || sameDayGenerating || resetting || swapping
           }
           className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
@@ -537,7 +763,8 @@ export function TimetableForm({ termId }: TimetableFormProps) {
             generating ||
             lunchGenerating ||
             sameDayGenerating ||
-            resetting
+            resetting ||
+            swapping
           }
           className="rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -545,7 +772,13 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         </button>
       </div>
 
-      {message ? (
+      {versionMessage ? (
+        <p className="text-center text-sm text-emerald-700" role="status">
+          {versionMessage}
+        </p>
+      ) : null}
+
+      {message && !selectedVersionId ? (
         <div>
           <p className="mb-1 text-center text-xs font-medium text-zinc-500">
             {avoidSameDaySubject || avoidLunchDouble
@@ -571,7 +804,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         </p>
       ) : null}
 
-      {unplaced.length > 0 ? (
+      {unplaced.length > 0 && !selectedVersionId ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p className="font-medium">미배치 공통 수업</p>
           <ul className="mt-2 max-h-40 list-inside list-disc overflow-auto text-xs">
@@ -617,7 +850,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
             { key: "class", label: "학반별" },
             { key: "teacher", label: "교사별" },
             { key: "grade", label: "학년 전체" },
-            { key: "allTeachers", label: "전체 교사" },
+            { key: "allTeachers", label: "전체 교사(미세 조정)" },
           ] as const
         ).map((tab) => (
           <button
@@ -673,7 +906,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
             ))}
           </div>
 
-          {cells.length === 0 && status === "idle" ? (
+          {displayedCells.length === 0 && status === "idle" ? (
             <p className="py-10 text-center text-sm text-zinc-500">
               시간표 생성을 누르면 결과가 표시됩니다.
             </p>
@@ -722,18 +955,27 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           )}
         </section>
       ) : viewMode === "teacher" ? (
-        <TimetableTeacherView cells={cells} schedules={schedules} teachers={teachers} />
+        <TimetableTeacherView
+          cells={displayedCells}
+          schedules={schedules}
+          teachers={teachers}
+        />
       ) : viewMode === "grade" ? (
         <TimetableGradeView
-          cells={cells}
+          cells={displayedCells}
           schedules={schedules}
           classCounts={classCounts}
         />
       ) : (
         <TimetableAllTeachersView
-          cells={cells}
+          cells={displayedCells}
           schedules={schedules}
           teachers={teachers}
+          swapEnabled={
+            !selectedVersionId && previewKind === "full" && cells.length > 0
+          }
+          swapping={swapping}
+          onSwap={(from, to) => void handleSwapCells(from, to)}
         />
       )}
 
@@ -807,7 +1049,14 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         </div>
       ) : null}
 
-      {previewKind === "full" && cells.length > 0 ? (
+      {selectedVersionMeta ? (
+        <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-center text-sm text-zinc-600">
+          확정 {selectedVersionMeta.versionNumber} · 점심 연강{" "}
+          {selectedVersionMeta.lunchDoubleCount}건 · 3연강{" "}
+          {selectedVersionMeta.tripleRunCount}건 · 동일 교과 같은 날 중복{" "}
+          {selectedVersionMeta.sameDaySubjectViolationCount}건
+        </div>
+      ) : previewKind === "full" && cells.length > 0 ? (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
           <div
             className={`rounded-xl border px-4 py-3 text-sm ${
@@ -882,6 +1131,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           </div>
         </div>
       ) : null}
+      </div>
     </div>
   );
 }

@@ -25,6 +25,7 @@ const CHILD_COLLECTIONS = [
   "subjectBlocks",
   "teacherConstraints",
   "timetables",
+  "timetableVersions",
 ] as const;
 
 /** 만료된 데모 계정과 그 학기·딸린 문서를 지운다. cron 없이, 다음 방문이 올 때마다 정리한다. */

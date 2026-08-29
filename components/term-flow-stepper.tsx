@@ -41,7 +41,13 @@ function resolveCurrent(
   return null;
 }
 
-export function TermFlowStepper({ termId }: { termId: string }) {
+export function TermFlowStepper({
+  termId,
+  termLabel,
+}: {
+  termId: string;
+  termLabel?: string;
+}) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const current = resolveCurrent(pathname, searchParams.get("step"));
@@ -51,7 +57,19 @@ export function TermFlowStepper({ termId }: { termId: string }) {
 
   return (
     <div className="sticky top-[51px] z-40 border-b border-zinc-200 bg-white">
-      <div className="mx-auto w-full max-w-6xl overflow-x-auto px-4 py-4">
+      {termLabel ? (
+        <p
+          className="mx-auto max-w-6xl truncate px-4 pt-2.5 text-center text-sm text-zinc-600"
+          title={termLabel}
+        >
+          {termLabel}
+        </p>
+      ) : null}
+      <div
+        className={`mx-auto w-full max-w-6xl overflow-x-auto px-4 pb-4 ${
+          termLabel ? "pt-2" : "pt-4"
+        }`}
+      >
         <ol className="flex min-w-max items-start justify-center gap-1.5">
           {CHAPTERS.map((chapter, i) => {
             const status =

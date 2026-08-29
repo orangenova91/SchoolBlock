@@ -453,13 +453,6 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         </p>
       </header>
 
-      {term ? (
-        <p className="text-center text-sm text-zinc-600">
-          {term.timetableName ? `${term.timetableName} · ` : null}
-          {term.school} · {term.academicYear}학년도 · {term.semester}학기
-        </p>
-      ) : null}
-
       {sameSetTeacherConflictCount > 0 ? (
         <div className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">
           <p className="font-medium">

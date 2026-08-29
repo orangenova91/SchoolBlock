@@ -471,13 +471,6 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
         </p>
       </header>
 
-      {term ? (
-        <p className="text-center text-sm text-zinc-600">
-          {term.timetableName ? `${term.timetableName} · ` : null}
-          {term.school} · {term.academicYear}학년도 · {term.semester}학기
-        </p>
-      ) : null}
-
       {missingClassNos ? (
         <div
           className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"

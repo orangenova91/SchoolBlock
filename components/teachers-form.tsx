@@ -1488,13 +1488,6 @@ export function TeachersForm({ termId }: TeachersFormProps) {
         </p>
       </header>
 
-      {term ? (
-        <p className="text-center text-sm text-zinc-600">
-          {term.timetableName ? `${term.timetableName} · ` : null}
-          {term.school} · {term.academicYear}학년도 · {term.semester}학기
-        </p>
-      ) : null}
-
       <ClassCommonHoursSummary
         balances={classBalances}
         schedules={schedules}

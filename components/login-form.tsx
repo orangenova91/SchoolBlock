@@ -157,7 +157,7 @@ export function LoginForm() {
             autoComplete="username"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
-            placeholder="학교명을 입력해 주세요"
+            placeholder="아이디를 입력해주세요."
             className="rounded-lg border border-zinc-300 px-3 py-2 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
           />
         ) : (

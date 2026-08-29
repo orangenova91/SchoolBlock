@@ -7,10 +7,12 @@ export default function LoginPage() {
       <main className="flex w-full max-w-sm flex-col items-center gap-8">
         <header className="text-center">
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          시간표 작성 프로그램
+            스쿨블럭(
+            <span className="text-[#2D4B7C]">School</span>
+            <span className="text-[#68A366]">Block</span>)
           </h1>
           <p className="mt-1 text-base font-medium text-zinc-800">
-          TimeTable
+            AI 시간표 작성 프로그램
           </p>
           <p className="mt-2 text-sm text-zinc-600">
             아이디와 비밀번호로 로그인해 주세요.

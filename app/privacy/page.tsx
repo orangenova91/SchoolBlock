@@ -13,7 +13,7 @@ export default function PrivacyPolicyPage() {
 
         <div className="flex flex-col gap-8 rounded-2xl border border-zinc-200 bg-white p-6 text-sm leading-relaxed text-zinc-700 shadow-sm sm:p-8">
           <p>
-            TimeTable(이하 &ldquo;서비스&rdquo;)은 이용자의 개인정보를
+            스쿨블럭(SchoolBlock, 이하 &ldquo;서비스&rdquo;)은 이용자의 개인정보를
             소중히 여기며, 「개인정보 보호법」 등 관련 법령을 준수합니다. 이
             방침은 서비스가 어떤 정보를 왜 수집하고, 어떻게 보관·이용·파기하는지
             설명합니다.

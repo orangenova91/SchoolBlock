@@ -1,6 +1,7 @@
 import Image from "next/image";
 import { LoginForm } from "@/components/login-form";
 import { TryDemoButton } from "@/components/try-demo-button";
+import { APP_VERSION } from "@/lib/app-version";
 
 export default function LoginPage() {
   return (
@@ -22,8 +23,11 @@ export default function LoginPage() {
               <span className="text-[#68A366]">Block</span>)
             </h1>
           </div>
-          <p className="mt-1 text-base font-medium text-zinc-800">
+          <p className="mt-1 flex items-center justify-center gap-2 text-base font-medium text-zinc-800">
             AI 시간표 작성 프로그램
+            <span className="text-xs font-medium text-zinc-500">
+              {APP_VERSION}
+            </span>
           </p>
           <p className="mt-2 text-sm text-zinc-600">
             아이디와 비밀번호로 로그인해 주세요.

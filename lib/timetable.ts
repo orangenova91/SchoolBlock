@@ -320,32 +320,37 @@ function teacherNamesOnCell(cell: TimetableCell): string[] {
     .filter(Boolean);
 }
 
+/** Index of `teacherSlotKey -> present` for O(1) "does this teacher already
+ * have a lesson here" checks, instead of scanning a cell array per query. */
+function buildTeacherLessonSet(cells: TimetableCell[]): Set<string> {
+  const set = new Set<string>();
+  for (const cell of cells) {
+    for (const name of teacherNamesOnCell(cell)) {
+      set.add(teacherSlotKey(name, cell.day, cell.period));
+    }
+  }
+  return set;
+}
+
 function teacherHasLessonAt(
   teacherName: string,
   day: Weekday,
   period: number,
-  fixedCells: TimetableCell[],
-  placed: TimetableCell[],
+  fixedTeacherLessons: Set<string>,
+  placedTeacherLessons: Set<string>,
 ): boolean {
   const name = teacherName.trim();
   if (!name) return false;
-  for (const cell of fixedCells) {
-    if (cell.day !== day || cell.period !== period) continue;
-    if (teacherNamesOnCell(cell).includes(name)) return true;
-  }
-  for (const cell of placed) {
-    if (cell.day !== day || cell.period !== period) continue;
-    if (teacherNamesOnCell(cell).includes(name)) return true;
-  }
-  return false;
+  const key = teacherSlotKey(name, day, period);
+  return fixedTeacherLessons.has(key) || placedTeacherLessons.has(key);
 }
 
 /** Same teacher assigned on both sides of lunch. */
 function lunchDoublePenaltyForSlot(
   lesson: CommonLesson,
   slot: Slot,
-  fixedCells: TimetableCell[],
-  placed: TimetableCell[],
+  fixedTeacherLessons: Set<string>,
+  placedTeacherLessons: Set<string>,
   lunchAfterPeriod: number,
 ): number {
   const [before, after] = lunchPairPeriods(lunchAfterPeriod);
@@ -355,8 +360,8 @@ function lunchDoublePenaltyForSlot(
     lesson.teacherName,
     slot.day,
     partner,
-    fixedCells,
-    placed,
+    fixedTeacherLessons,
+    placedTeacherLessons,
   )
     ? 1
     : 0;
@@ -366,13 +371,19 @@ function lunchDoublePenaltyForSlot(
 function triplePeriodPenaltyForSlot(
   lesson: CommonLesson,
   slot: Slot,
-  fixedCells: TimetableCell[],
-  placed: TimetableCell[],
+  fixedTeacherLessons: Set<string>,
+  placedTeacherLessons: Set<string>,
   lunchAfterPeriod: number,
 ): number {
   const teacherHasPeriod = (period: number) =>
     period === slot.period ||
-    teacherHasLessonAt(lesson.teacherName, slot.day, period, fixedCells, placed);
+    teacherHasLessonAt(
+      lesson.teacherName,
+      slot.day,
+      period,
+      fixedTeacherLessons,
+      placedTeacherLessons,
+    );
 
   for (let start = slot.period - 2; start <= slot.period; start++) {
     if (start < 1) continue;
@@ -391,8 +402,8 @@ function triplePeriodPenaltyForSlot(
 function softSlotPenalty(
   lesson: CommonLesson,
   slot: Slot,
-  fixedCells: TimetableCell[],
-  placed: TimetableCell[],
+  fixedTeacherLessons: Set<string>,
+  placedTeacherLessons: Set<string>,
   preferences: GenerationPreferences,
 ): number {
   let penalty = 0;
@@ -401,8 +412,8 @@ function softSlotPenalty(
       lunchDoublePenaltyForSlot(
         lesson,
         slot,
-        fixedCells,
-        placed,
+        fixedTeacherLessons,
+        placedTeacherLessons,
         preferences.lunchAfterPeriod,
       ) * lunchDoubleWeight(preferences);
   }
@@ -410,8 +421,8 @@ function softSlotPenalty(
     penalty += triplePeriodPenaltyForSlot(
       lesson,
       slot,
-      fixedCells,
-      placed,
+      fixedTeacherLessons,
+      placedTeacherLessons,
       preferences.lunchAfterPeriod,
     );
   }
@@ -422,8 +433,8 @@ function softSlotPenalty(
 function orderSlotsForLesson(
   lesson: CommonLesson,
   slots: Slot[],
-  fixedCells: TimetableCell[],
-  placed: TimetableCell[],
+  fixedTeacherLessons: Set<string>,
+  placedTeacherLessons: Set<string>,
   preferences: GenerationPreferences,
 ): Slot[] {
   if (!hasSoftPreferences(preferences) || slots.length <= 1) {
@@ -431,7 +442,13 @@ function orderSlotsForLesson(
   }
   const scored = slots.map((slot) => ({
     slot,
-    penalty: softSlotPenalty(lesson, slot, fixedCells, placed, preferences),
+    penalty: softSlotPenalty(
+      lesson,
+      slot,
+      fixedTeacherLessons,
+      placedTeacherLessons,
+      preferences,
+    ),
     rand: Math.random(),
   }));
   scored.sort((a, b) => a.penalty - b.penalty || a.rand - b.rand);
@@ -453,8 +470,8 @@ function slotsForLessonSearch(
   teacherBusy: Set<string>,
   hardAvoidLunch: boolean,
   lunchAfterPeriod: number,
-  fixedCells: TimetableCell[],
-  placed: TimetableCell[],
+  fixedTeacherLessons: Set<string>,
+  placedTeacherLessons: Set<string>,
 ): Slot[] {
   const slots = availableSlotsForLesson(lesson, schedules, classBusy, teacherBusy);
   if (!hardAvoidLunch) return slots;
@@ -467,8 +484,8 @@ function slotsForLessonSearch(
       lesson.teacherName,
       slot.day,
       partner,
-      fixedCells,
-      placed,
+      fixedTeacherLessons,
+      placedTeacherLessons,
     );
   });
 }
@@ -903,7 +920,16 @@ type PlaceState = {
   teacherBusy: Set<string>;
   /** lessonId -> slot */
   assignment: Map<number, Slot>;
-  cells: TimetableCell[];
+  /**
+   * lessonId -> placed cell. Keyed by id (instead of a plain array) so
+   * placeLesson/unplaceLesson are O(1) — unplaceLesson in particular is not
+   * always undoing the most recently placed cell (repairUnplaced displaces
+   * arbitrary earlier placements), so a stack/pop shortcut isn't safe and a
+   * findIndex+splice scan would otherwise be O(placed count) per undo.
+   */
+  cellsByLessonId: Map<number, TimetableCell>;
+  /** teacherSlotKey set for placed cells, for O(1) teacherHasLessonAt checks. */
+  teacherLessons: Set<string>;
 };
 
 function placeLesson(
@@ -917,8 +943,11 @@ function placeLesson(
   state.teacherBusy.add(
     teacherSlotKey(lesson.teacherName, slot.day, slot.period),
   );
+  state.teacherLessons.add(
+    teacherSlotKey(lesson.teacherName.trim(), slot.day, slot.period),
+  );
   state.assignment.set(lesson.id, slot);
-  state.cells.push({
+  state.cellsByLessonId.set(lesson.id, {
     grade: lesson.grade,
     classNo: lesson.classNo,
     day: slot.day,
@@ -936,18 +965,15 @@ function unplaceLesson(state: PlaceState, lesson: CommonLesson, slot: Slot) {
   state.teacherBusy.delete(
     teacherSlotKey(lesson.teacherName, slot.day, slot.period),
   );
-  state.assignment.delete(lesson.id);
-  const idx = state.cells.findIndex(
-    (c) =>
-      c.kind === "common" &&
-      c.grade === lesson.grade &&
-      c.classNo === lesson.classNo &&
-      c.day === slot.day &&
-      c.period === slot.period &&
-      c.teacherName === lesson.teacherName &&
-      c.subjectName === lesson.subjectName,
+  state.teacherLessons.delete(
+    teacherSlotKey(lesson.teacherName.trim(), slot.day, slot.period),
   );
-  if (idx >= 0) state.cells.splice(idx, 1);
+  state.assignment.delete(lesson.id);
+  state.cellsByLessonId.delete(lesson.id);
+}
+
+function placedCellsArray(state: PlaceState): TimetableCell[] {
+  return [...state.cellsByLessonId.values()];
 }
 
 /**
@@ -1005,6 +1031,10 @@ function solveBacktracking(
   let bestComplete: TimetableCell[] | null = null;
   let bestCompletePenalty = Infinity;
 
+  // Fixed cells never change across restarts/nodes, so index them once
+  // instead of letting every slot check scan the fixedCells array.
+  const fixedTeacherLessons = buildTeacherLessonSet(fixedCells);
+
   const degrees = new Map<number, number>();
   for (const lesson of lessons) {
     degrees.set(lesson.id, lessonDegree(lesson, lessons));
@@ -1018,7 +1048,7 @@ function solveBacktracking(
     const left = [...remaining].map((id) => byId.get(id)!);
     if (left.length < bestRemaining.length) {
       bestRemaining = left;
-      bestCells = [...state.cells];
+      bestCells = placedCellsArray(state);
     }
   };
 
@@ -1036,7 +1066,8 @@ function solveBacktracking(
       classBusy: new Set(classBusySeed),
       teacherBusy: new Set(teacherBusySeed),
       assignment: new Map(),
-      cells: [],
+      cellsByLessonId: new Map(),
+      teacherLessons: new Set(),
     };
     const remaining = new Set(lessons.map((l) => l.id));
     const byId = new Map(lessons.map((l) => [l.id, l]));
@@ -1063,8 +1094,8 @@ function solveBacktracking(
           state.teacherBusy,
           options.hardAvoidLunch,
           preferences.lunchAfterPeriod,
-          fixedCells,
-          state.cells,
+          fixedTeacherLessons,
+          state.teacherLessons,
         );
         const deg = degrees.get(id) ?? 0;
         if (
@@ -1090,8 +1121,8 @@ function solveBacktracking(
       const ordered = orderSlotsForLesson(
         lesson,
         bestSlots,
-        fixedCells,
-        state.cells,
+        fixedTeacherLessons,
+        state.teacherLessons,
         preferences,
       );
 
@@ -1112,22 +1143,23 @@ function solveBacktracking(
     };
 
     if (search()) {
+      const finalCells = placedCellsArray(state);
       if (!keepSearchingAfterComplete()) {
         return {
-          commonCells: state.cells,
+          commonCells: finalCells,
           unplaced: [],
           attemptsUsed,
           nodes,
         };
       }
-      const penalty = scoreComplete(state.cells);
+      const penalty = scoreComplete(finalCells);
       if (penalty < bestCompletePenalty) {
         bestCompletePenalty = penalty;
-        bestComplete = [...state.cells];
+        bestComplete = finalCells;
       }
       if (penalty === 0) {
         return {
-          commonCells: state.cells,
+          commonCells: finalCells,
           unplaced: [],
           attemptsUsed,
           nodes,
@@ -1183,22 +1215,20 @@ function repairUnplaced(
     classBusy: new Set(classBusySeed),
     teacherBusy: new Set(teacherBusySeed),
     assignment: new Map(),
-    cells: [],
+    cellsByLessonId: new Map(),
+    teacherLessons: new Set(),
   };
 
-  // Rebuild state from initial common cells (approximate: match lessons greedily)
-  const pool = new Map<string, CommonLesson[]>();
-  for (const lesson of lessons) {
-    const key = unplacedKey(lesson);
-    const list = pool.get(key) ?? [];
-    list.push(lesson);
-    pool.set(key, list);
-  }
-
+  // Rebuild state from initial common cells (approximate: match lessons
+  // greedily). Both this loop and the "pending" loop below draw from the
+  // *same* `byKey` pool and consume it sequentially, so together they
+  // partition each key's lessons with no overlap and no gap — drawing from
+  // two independent copies here previously let both loops pop the same
+  // trailing lesson objects (double-placing them, silently losing others).
   for (const cell of initialCells) {
     if (cell.kind !== "common") continue;
     const key = `${cell.teacherName}|${cell.grade}|${cell.classNo}|${cell.subjectName}`;
-    const list = pool.get(key);
+    const list = byKey.get(key);
     const lesson = list?.pop();
     if (!lesson) continue;
     placeLesson(state, lesson, { day: cell.day, period: cell.period });
@@ -1265,7 +1295,7 @@ function repairUnplaced(
         const teacherTaken = state.teacherBusy.has(teacherKey);
 
         // Need exactly the conflicts we can undo (common cells only)
-        const blockers = state.cells.filter((c) => {
+        const blockers = placedCellsArray(state).filter((c) => {
           if (c.kind !== "common") return false;
           const sameClass =
             c.grade === lesson.grade &&
@@ -1384,7 +1414,7 @@ function repairUnplaced(
   }
 
   return {
-    commonCells: state.cells,
+    commonCells: placedCellsArray(state),
     unplaced: toUnplacedList(pending),
   };
 }
@@ -2412,6 +2442,8 @@ function candidateSlotsForBannedLesson(
   teacherBusy: Set<string>,
   fixedCells: TimetableCell[],
   placed: TimetableCell[],
+  fixedTeacherLessons: Set<string>,
+  placedTeacherLessons: Set<string>,
   avoidLunchDouble: boolean,
   lunchAfterPeriod: number,
 ): Slot[] {
@@ -2427,8 +2459,8 @@ function candidateSlotsForBannedLesson(
         lesson.teacherName,
         slot.day,
         partner,
-        fixedCells,
-        placed,
+        fixedTeacherLessons,
+        placedTeacherLessons,
       );
     });
     if (noLunchDouble.length > 0) pool = noLunchDouble;
@@ -2472,6 +2504,10 @@ function solveSameDaySubjectSlots(
   );
   const nodeLimit = 200_000;
 
+  // Fixed cells never change across restarts/nodes, so index them once
+  // instead of letting every slot check scan the fixedCells array.
+  const fixedTeacherLessons = buildTeacherLessonSet(fixedCells);
+
   let bestCells: TimetableCell[] = [];
   let attemptsUsed = 0;
 
@@ -2483,6 +2519,7 @@ function solveSameDaySubjectSlots(
     const classBusy = new Set(classBusySeed);
     const teacherBusy = new Set(teacherBusySeed);
     const placed: TimetableCell[] = [];
+    const placedTeacherLessons = new Set<string>();
     const remaining = new Set(lessons.map((_, i) => i));
     let nodes = 0;
     let bestPartial: TimetableCell[] = [];
@@ -2511,6 +2548,8 @@ function solveSameDaySubjectSlots(
           teacherBusy,
           fixedCells,
           placed,
+          fixedTeacherLessons,
+          placedTeacherLessons,
           avoidLunchDouble,
           lunchAfterPeriod,
         );
@@ -2537,6 +2576,9 @@ function solveSameDaySubjectSlots(
         teacherBusy.add(
           teacherSlotKey(lesson.teacherName, slot.day, slot.period),
         );
+        placedTeacherLessons.add(
+          teacherSlotKey(lesson.teacherName.trim(), slot.day, slot.period),
+        );
         const cell: TimetableCell = {
           grade: lesson.grade,
           classNo: lesson.classNo,
@@ -2556,6 +2598,9 @@ function solveSameDaySubjectSlots(
         );
         teacherBusy.delete(
           teacherSlotKey(lesson.teacherName, slot.day, slot.period),
+        );
+        placedTeacherLessons.delete(
+          teacherSlotKey(lesson.teacherName.trim(), slot.day, slot.period),
         );
 
         if (nodes > nodeLimit || Date.now() > restartDeadline) {

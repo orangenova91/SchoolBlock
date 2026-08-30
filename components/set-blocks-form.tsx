@@ -446,7 +446,7 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
         </div>
       ) : null}
 
-      <div className="flex w-full flex-col gap-6">
+      <div className="grid w-full grid-cols-1 items-start gap-4 lg:grid-cols-3">
         {GRADES.map((grade) => {
           const gradeSets = catalog.filter((item) => item.grade === grade);
           const wholes = gradeSets.filter((item) => item.kind === "whole");
@@ -454,7 +454,7 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
           return (
             <section
               key={grade}
-              className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+              className="min-w-0 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
             >
               <h2 className="mb-3 text-center text-base font-semibold text-zinc-900">
                 {grade}학년
@@ -753,7 +753,7 @@ function RotationRecommendation({
   );
 
   return (
-    <div className="w-full max-w-md rounded-xl border border-amber-200 bg-amber-50 p-3 text-left text-[11px] text-amber-900">
+    <div className="w-full min-w-0 max-w-md break-words rounded-xl border border-amber-200 bg-amber-50 p-3 text-left text-[11px] text-amber-900">
       <p className="font-medium">
         &quot;{subjectName}&quot;은 여러 교사가 나눠 담당합니다 (
         {resolvedCount}/{slots.length}교시 지정됨)

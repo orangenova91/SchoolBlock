@@ -2885,3 +2885,21 @@ function prepareBusySeeds(input: {
   return { catalog, setCells, classBusySeed, teacherBusySeed, lockedBlocks };
 }
 
+/** SET + 선 수업만으로 만든 미리보기 칸. 생성 결과 DB에는 쓰지 않는다. */
+export function buildSeedTimetableCells(input: {
+  teachers: Teacher[];
+  subjects: GradeSubjects;
+  classCounts: GradeClassCounts;
+  schedules: GradeDaySchedules;
+  wholeCells: SetBlockCell[];
+  partialCells: SetBlockCell[];
+  teacherAssignments?: SetTeacherAssignment[];
+  subjectBlocks?: SubjectBlockCell[];
+}): TimetableCell[] {
+  const { setCells, lockedBlocks } = prepareBusySeeds({
+    ...input,
+    forbiddenSlots: [],
+  });
+  return [...setCells, ...subjectBlocksToTimetableCells(lockedBlocks)];
+}
+

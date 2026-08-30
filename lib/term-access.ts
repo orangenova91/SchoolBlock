@@ -17,3 +17,27 @@ export async function findOwnedTerm(
     ownerId,
   });
 }
+
+/** 시간표 생성 페이지에 들어왔음을 기록해 스테퍼 앞·뒤 이동을 연다. */
+export async function markTermReachedTimetable(
+  termId: string,
+  ownerId: string,
+): Promise<void> {
+  await setTermMaxReachedChapter(termId, ownerId, 7);
+}
+
+export async function setTermMaxReachedChapter(
+  termId: string,
+  ownerId: string,
+  chapterIndex: number,
+): Promise<void> {
+  if (!ObjectId.isValid(termId)) return;
+  if (!Number.isInteger(chapterIndex) || chapterIndex < 0 || chapterIndex > 7) {
+    return;
+  }
+  const db = await getDb();
+  await db.collection<TermDocument>("terms").updateOne(
+    { _id: new ObjectId(termId), ownerId },
+    { $set: { maxReachedChapter: chapterIndex } },
+  );
+}

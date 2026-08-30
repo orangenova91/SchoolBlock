@@ -28,6 +28,11 @@ import {
   type SetTeacherShare,
 } from "@/lib/set-blocks";
 import {
+  autoPlacePartialSets,
+  formatAutoPlaceOutcome,
+} from "@/lib/set-blocks-auto";
+import { FLOW_CHAPTER, lockTermFlow } from "@/lib/term-flow-lock";
+import {
   classNoLabel,
   ensureGradeSubjects,
   sanitizeGradeSubjects,
@@ -98,6 +103,7 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
   const [status, setStatus] = useState<"idle" | "saving" | "success" | "error">(
     "idle",
   );
+  const [autoPlacing, setAutoPlacing] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -296,7 +302,7 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
   ]);
 
   function paint(grade: Grade, day: Weekday, period: number) {
-    if (!selectedSet || status === "saving") return;
+    if (!selectedSet || status === "saving" || autoPlacing) return;
     const result = tryPaintPartialCell({
       wholeCells,
       partialCells,
@@ -320,7 +326,7 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
   }
 
   function erase(grade: Grade, day: Weekday, period: number) {
-    if (!selectedSet || status === "saving") return;
+    if (!selectedSet || status === "saving" || autoPlacing) return;
     setPartialCells(
       removePartialCell(partialCells, grade, selectedSet, day, period),
     );
@@ -329,7 +335,7 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
   }
 
   function applyRotation(entries: SetTeacherAssignment[]) {
-    if (entries.length === 0 || status === "saving") return;
+    if (entries.length === 0 || status === "saving" || autoPlacing) return;
     setTeacherAssignments((prev) => {
       const keep = prev.filter(
         (a) =>
@@ -349,14 +355,68 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
   }
 
   function resetCells() {
-    if (status === "saving" || partialCells.length === 0) return;
+    if (status === "saving" || autoPlacing || partialCells.length === 0) return;
     const confirmed = window.confirm(
       "배치한 부분 SET 블록을 모두 초기화할까요? 저장을 눌러야 적용됩니다.",
     );
     if (!confirmed) return;
+    lockTermFlow(termId, FLOW_CHAPTER.sets);
     setPartialCells([]);
     setStatus("idle");
     setMessage("부분 SET 블록을 초기화했습니다. 저장을 눌러 반영해 주세요.");
+  }
+
+  function handleAutoPlace() {
+    if (status === "saving" || autoPlacing) return;
+    if (missingClassNos) {
+      setStatus("error");
+      setMessage(missingClassNos);
+      return;
+    }
+    if (capacityIssues.length > 0) {
+      setStatus("error");
+      setMessage(
+        "학반 시수가 주간 교시를 넘는 상태에서는 자동 배치할 수 없습니다.",
+      );
+      return;
+    }
+    if (partials.length === 0) {
+      setStatus("idle");
+      setMessage("부분 SET가 없습니다.");
+      return;
+    }
+
+    let start = partialCells;
+    if (placementComplete && partialCells.length > 0) {
+      const confirmed = window.confirm(
+        "부분 SET가 이미 모두 배치되어 있습니다. 지우고 다시 자동 배치할까요?",
+      );
+      if (!confirmed) return;
+      start = [];
+    }
+
+    setAutoPlacing(true);
+    setMessage("");
+    window.setTimeout(() => {
+      try {
+        const result = autoPlacePartialSets({
+          wholeCells,
+          partialCells: filterPartialCellsToCatalog(start, schedules, catalog),
+          catalog,
+          teachers,
+          schedules,
+          classCounts,
+          assignments: teacherAssignments,
+        });
+        setPartialCells(result.cells);
+        setTeacherAssignments(result.assignments);
+        const outcome = formatAutoPlaceOutcome("부분 SET", result);
+        setStatus(outcome.error ? "error" : "success");
+        setMessage(outcome.message);
+      } finally {
+        setAutoPlacing(false);
+      }
+    }, 0);
   }
 
   async function savePartial(
@@ -545,7 +605,7 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
                       <button
                         key={`${grade}-${item.set}`}
                         type="button"
-                        disabled={status === "saving"}
+                        disabled={status === "saving" || autoPlacing}
                         onClick={() =>
                           setSelectedSet((prev) =>
                             prev === item.set ? null : item.set,
@@ -576,7 +636,11 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
                       : null
                   }
                   blocked={blockedByGrade[grade]}
-                  disabled={status === "saving" || missingClassNos !== null}
+                  disabled={
+                    status === "saving" ||
+                    autoPlacing ||
+                    missingClassNos !== null
+                  }
                   onPaint={(day, period) => paint(grade, day, period)}
                   onErase={(day, period) => erase(grade, day, period)}
                   onSelectPlacedSet={setSelectedSet}
@@ -593,7 +657,7 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
                     partialCells={partialCells}
                     assignments={teacherAssignments}
                     onApplyRotation={applyRotation}
-                    disabled={status === "saving"}
+                    disabled={status === "saving" || autoPlacing}
                   />
                 ) : null}
               </section>
@@ -619,17 +683,42 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
         <button
           type="button"
           onClick={resetCells}
-          disabled={status === "saving" || partialCells.length === 0}
+          disabled={
+            status === "saving" || autoPlacing || partialCells.length === 0
+          }
           className="rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           초기화
         </button>
         <button
           type="button"
+          onClick={handleAutoPlace}
+          disabled={
+            status === "saving" ||
+            autoPlacing ||
+            missingClassNos !== null ||
+            capacityIssues.length > 0 ||
+            partials.length === 0
+          }
+          title={
+            missingClassNos
+              ? missingClassNos
+              : capacityIssues.length > 0
+                ? "학반 시수가 주간 교시를 넘습니다."
+                : partials.length === 0
+                  ? "부분 SET가 없습니다."
+                  : "부분 SET를 가능한 칸에 자동으로 채웁니다."
+          }
+          className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {autoPlacing ? "배치 중…" : "자동 배치"}
+        </button>
+        <button
+          type="button"
           onClick={() => {
             void handleSave();
           }}
-          disabled={status === "saving"}
+          disabled={status === "saving" || autoPlacing}
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {status === "saving" ? "저장 중…" : "저장"}
@@ -647,7 +736,7 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
         >
           <button
             type="submit"
-            disabled={status === "saving" || !canProceed}
+            disabled={status === "saving" || autoPlacing || !canProceed}
             className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {status === "saving" ? "저장 중…" : "다음"}

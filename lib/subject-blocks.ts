@@ -3,12 +3,14 @@ import {
   findGradeSet,
   homeRoomsForPartialSet,
   teachersForGradeSet,
+  type GradeSetKind,
 } from "@/lib/set-blocks";
 import { isSetSubject } from "@/lib/teachers";
 import {
   GRADES,
   MAX_PERIODS,
   WEEKDAYS,
+  type ElectiveSet,
   type Grade,
   type GradeClassCounts,
   type GradeDaySchedules,
@@ -227,6 +229,81 @@ export function withPlacedCounts(
   }));
 }
 
+export type TeacherClassPlacement = {
+  grade: Grade;
+  classNo: number;
+  subjectName: string;
+  placed: number;
+};
+
+/** Placed subject-block hours grouped by class and subject for one teacher. */
+export function teacherPlacementsByClass(
+  cells: SubjectBlockCell[],
+  teacherName: string,
+): TeacherClassPlacement[] {
+  const name = teacherName.trim();
+  const map = new Map<string, TeacherClassPlacement>();
+  for (const cell of cells) {
+    if (cell.teacherName.trim() !== name) continue;
+    const key = `${cell.grade}|${cell.classNo}|${cell.subjectName}`;
+    const prev = map.get(key);
+    if (prev) prev.placed += 1;
+    else {
+      map.set(key, {
+        grade: cell.grade,
+        classNo: cell.classNo,
+        subjectName: cell.subjectName,
+        placed: 1,
+      });
+    }
+  }
+  return [...map.values()].sort((a, b) => {
+    if (a.grade !== b.grade) return a.grade - b.grade;
+    if (a.classNo !== b.classNo) return a.classNo - b.classNo;
+    return a.subjectName.localeCompare(b.subjectName, "ko");
+  });
+}
+
+export function teacherOtherClassPlacedCount(
+  cells: SubjectBlockCell[],
+  teacherName: string,
+  grade: Grade,
+  classNo: number,
+  subjectName: string,
+): number {
+  const name = teacherName.trim();
+  const subject = subjectName.trim();
+  const keys = new Set<string>();
+  for (const cell of cells) {
+    if (cell.teacherName.trim() !== name) continue;
+    if (cell.subjectName !== subject) continue;
+    if (cell.grade === grade && cell.classNo === classNo) continue;
+    keys.add(`${cell.grade}|${cell.classNo}|${cell.subjectName}`);
+  }
+  return keys.size;
+}
+
+export function formatTeacherClassPlacement(p: TeacherClassPlacement): string {
+  return `${p.grade}-${p.classNo} ${p.subjectName} ${p.placed}`;
+}
+
+/** Other-class subject blocks for this teacher, keyed by `${day}|${period}`. */
+export function teacherBusyElsewhereBySlot(
+  cells: SubjectBlockCell[],
+  teacherName: string,
+  grade: Grade,
+  classNo: number,
+): Map<string, SubjectBlockCell> {
+  const name = teacherName.trim();
+  const map = new Map<string, SubjectBlockCell>();
+  for (const cell of cells) {
+    if (cell.teacherName.trim() !== name) continue;
+    if (cell.grade === grade && cell.classNo === classNo) continue;
+    map.set(`${cell.day}|${cell.period}`, cell);
+  }
+  return map;
+}
+
 /** Drop blocks that no longer match assignments / schedule / class counts. */
 export function filterSubjectBlocksToAssignments(
   cells: SubjectBlockCell[],
@@ -311,6 +388,70 @@ function setOccupiesClass(
   return false;
 }
 
+function occupyingSetAtClassSlot(
+  wholeCells: SetBlockCell[],
+  partialCells: SetBlockCell[],
+  subjects: GradeSubjects,
+  classCounts: GradeClassCounts,
+  grade: Grade,
+  classNo: number,
+  day: Weekday,
+  period: number,
+): { set: ElectiveSet; grade: Grade; kind: Extract<GradeSetKind, "whole" | "partial"> } | null {
+  const catalog = catalogGradeSets(subjects, classCounts);
+
+  for (const cell of wholeCells) {
+    if (cell.grade !== grade || cell.day !== day || cell.period !== period) {
+      continue;
+    }
+    return { set: cell.set, grade: cell.grade, kind: "whole" };
+  }
+
+  for (const cell of partialCells) {
+    if (cell.grade !== grade || cell.day !== day || cell.period !== period) {
+      continue;
+    }
+    const info = findGradeSet(catalog, cell.grade, cell.set);
+    if (!info) continue;
+    const rooms = homeRoomsForPartialSet(info, classCounts[grade]);
+    if (rooms.includes(classNo)) {
+      return { set: cell.set, grade: cell.grade, kind: "partial" };
+    }
+  }
+
+  return null;
+}
+
+function firstSetBusyForTeacher(
+  wholeCells: SetBlockCell[],
+  partialCells: SetBlockCell[],
+  teachers: Teacher[],
+  subjects: GradeSubjects,
+  classCounts: GradeClassCounts,
+  teacherName: string,
+  day: Weekday,
+  period: number,
+): { set: ElectiveSet; grade: Grade; kind: Extract<GradeSetKind, "whole" | "partial"> } | null {
+  const catalog = catalogGradeSets(subjects, classCounts);
+  const name = teacherName.trim();
+  if (!name) return null;
+
+  for (const cell of [...wholeCells, ...partialCells]) {
+    if (cell.day !== day || cell.period !== period) continue;
+    const info = findGradeSet(catalog, cell.grade, cell.set);
+    if (!info || info.kind === "invalid") continue;
+    if (teachersForGradeSet(teachers, info).includes(name)) {
+      return {
+        set: cell.set,
+        grade: cell.grade,
+        kind: info.kind === "partial" ? "partial" : "whole",
+      };
+    }
+  }
+
+  return null;
+}
+
 function teachersBusyAtSetSlot(
   wholeCells: SetBlockCell[],
   partialCells: SetBlockCell[],
@@ -333,6 +474,106 @@ function teachersBusyAtSetSlot(
   }
 
   return busy;
+}
+
+export type SubjectBlockSetConflictKind = "set-lock" | "set-teacher";
+
+export type SubjectBlockSetConflict = {
+  grade: Grade;
+  classNo: number;
+  day: Weekday;
+  period: number;
+  subjectName: string;
+  teacherName: string;
+  kind: SubjectBlockSetConflictKind;
+  set: ElectiveSet;
+  setGrade: Grade;
+  setKind: "whole" | "partial";
+};
+
+/** Subject blocks that occupy a SET class slot or a SET teacher's time. */
+export function findSubjectBlockSetConflicts(
+  blocks: SubjectBlockCell[],
+  wholeCells: SetBlockCell[],
+  partialCells: SetBlockCell[],
+  teachers: Teacher[],
+  subjects: GradeSubjects,
+  classCounts: GradeClassCounts,
+): SubjectBlockSetConflict[] {
+  const out: SubjectBlockSetConflict[] = [];
+
+  for (const block of blocks) {
+    const occupying = occupyingSetAtClassSlot(
+      wholeCells,
+      partialCells,
+      subjects,
+      classCounts,
+      block.grade,
+      block.classNo,
+      block.day,
+      block.period,
+    );
+    if (occupying) {
+      out.push({
+        grade: block.grade,
+        classNo: block.classNo,
+        day: block.day,
+        period: block.period,
+        subjectName: block.subjectName,
+        teacherName: block.teacherName,
+        kind: "set-lock",
+        set: occupying.set,
+        setGrade: occupying.grade,
+        setKind: occupying.kind,
+      });
+      continue;
+    }
+
+    const busy = firstSetBusyForTeacher(
+      wholeCells,
+      partialCells,
+      teachers,
+      subjects,
+      classCounts,
+      block.teacherName,
+      block.day,
+      block.period,
+    );
+    if (busy) {
+      out.push({
+        grade: block.grade,
+        classNo: block.classNo,
+        day: block.day,
+        period: block.period,
+        subjectName: block.subjectName,
+        teacherName: block.teacherName,
+        kind: "set-teacher",
+        set: busy.set,
+        setGrade: busy.grade,
+        setKind: busy.kind,
+      });
+    }
+  }
+
+  return out;
+}
+
+export function formatSubjectBlockSetConflict(
+  c: SubjectBlockSetConflict,
+): string {
+  const dayLabel = WEEKDAYS.find((d) => d.key === c.day)?.label ?? c.day;
+  const slot = `${c.grade}학년 ${c.classNo}반 ${dayLabel}${c.period}교시`;
+  const lesson = `"${c.subjectName}"(${c.teacherName})`;
+  if (c.kind === "set-lock") {
+    return `${slot}: ${lesson} ↔ SET ${c.set}`;
+  }
+  return `${slot}: ${lesson} ↔ ${c.setGrade}학년 SET ${c.set} (교사 겹침)`;
+}
+
+export function subjectBlockSetConflictSlotKey(
+  c: Pick<SubjectBlockSetConflict, "day" | "period">,
+): string {
+  return `${c.day}|${c.period}`;
 }
 
 export type SubjectBlockPaintError =

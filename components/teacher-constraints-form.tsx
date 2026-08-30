@@ -18,6 +18,7 @@ import {
 } from "@/lib/teacher-constraints";
 import type { ForbiddenLockedLabel } from "@/components/forbidden-paint-grid";
 import { ensureTeachers, sanitizeTeachers } from "@/lib/teachers";
+import { FLOW_CHAPTER, lockTermFlow } from "@/lib/term-flow-lock";
 import {
   createDefaultClassCounts,
   createDefaultGradeDaySchedules,
@@ -409,6 +410,18 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
     await saveConstraints("배정 불가 교시가 저장되었습니다.", false);
   }
 
+  function resetForbiddenSlots() {
+    if (status === "saving" || forbiddenSlots.length === 0) return;
+    const confirmed = window.confirm(
+      "칠한 배정 불가 교시를 모두 초기화할까요? 저장을 눌러야 적용됩니다.",
+    );
+    if (!confirmed) return;
+    lockTermFlow(termId, FLOW_CHAPTER.constraints);
+    setForbiddenSlots([]);
+    setStatus("idle");
+    setMessage("배정 불가 교시를 초기화했습니다. 저장을 눌러 반영해 주세요.");
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const ok = await saveConstraints(
@@ -499,6 +512,7 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
                     (s) => s.teacherName === name,
                   ).length;
                   const selected = name === selectedTeacher;
+                  const started = count > 0;
                   return (
                     <li key={name}>
                       <button
@@ -507,7 +521,9 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
                         className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm transition ${
                           selected
                             ? "bg-zinc-900 text-white"
-                            : "text-zinc-800 hover:bg-zinc-50"
+                            : started
+                              ? "bg-rose-50 text-zinc-800 hover:bg-rose-100"
+                              : "text-zinc-800 hover:bg-zinc-50"
                         }`}
                       >
                         <span className="truncate">{name}</span>
@@ -526,6 +542,19 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
                 })
               )}
             </ul>
+            <p className="mt-2 flex justify-center">
+              <span
+                className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold tabular-nums ${
+                  forbiddenSlots.length > 0
+                    ? "border-rose-200 bg-rose-50 text-rose-800"
+                    : "border-zinc-200 bg-zinc-100 text-zinc-600"
+                }`}
+              >
+                {forbiddenSlots.length > 0
+                  ? `전체 배정 불가 ${forbiddenSlots.length}칸`
+                  : "배정 불가 0칸"}
+              </span>
+            </p>
           </aside>
 
           <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
@@ -564,6 +593,14 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
         >
           이전
+        </button>
+        <button
+          type="button"
+          onClick={resetForbiddenSlots}
+          disabled={status === "saving" || forbiddenSlots.length === 0}
+          className="rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          초기화
         </button>
         <button
           type="button"

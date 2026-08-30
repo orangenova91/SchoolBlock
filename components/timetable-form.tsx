@@ -82,6 +82,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
     createDefaultClassCounts(),
   );
   const [cells, setCells] = useState<TimetableCell[]>([]);
+  const [seedCells, setSeedCells] = useState<TimetableCell[]>([]);
   const [unplaced, setUnplaced] = useState<TimetableUnplaced[]>([]);
   const [lunchDoubleCount, setLunchDoubleCount] = useState(0);
   const [lunchDoubles, setLunchDoubles] = useState<SoftRunDetail[]>([]);
@@ -162,6 +163,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           term?: TermSummary;
           status?: "idle" | "ready" | "failed";
           cells?: TimetableCell[];
+          seedCells?: TimetableCell[];
           unplaced?: TimetableUnplaced[];
           message?: string | null;
           error?: string;
@@ -210,6 +212,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           setTerm(tt.term ?? null);
           setStatus(tt.status ?? "idle");
           setCells(Array.isArray(tt.cells) ? tt.cells : []);
+          setSeedCells(Array.isArray(tt.seedCells) ? tt.seedCells : []);
           setUnplaced(Array.isArray(tt.unplaced) ? tt.unplaced : []);
           setMessage(tt.message ?? "");
           setLunchDoubleCount(tt.lunchDoubleCount ?? 0);
@@ -291,7 +294,11 @@ export function TimetableForm({ termId }: TimetableFormProps) {
     [schedules, viewGrade],
   );
 
-  const displayedCells = selectedVersionCells ?? cells;
+  const showingSeed =
+    !selectedVersionId && cells.length === 0 && seedCells.length > 0;
+
+  const displayedCells =
+    selectedVersionCells ?? (cells.length > 0 ? cells : seedCells);
 
   const classCells = useMemo(
     () => cellsForClass(displayedCells, viewGrade, viewClass),
@@ -844,6 +851,13 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         </p>
       ) : null}
 
+      {showingSeed ? (
+        <p className="text-center text-xs font-medium text-sky-700">
+          SET·선 수업이 미리 들어가 있습니다. 시간표 배치를 누르면 나머지를
+          채웁니다. 보라색은 SET, 하늘색은 선 수업입니다.
+        </p>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-center gap-2">
         {(
           [
@@ -930,7 +944,9 @@ export function TimetableForm({ termId }: TimetableFormProps) {
                           : cell?.kind === "set"
                             ? subjectSetBadgeClass(cell.set)
                             : cell
-                              ? "border-zinc-300 bg-zinc-50"
+                              ? showingSeed
+                                ? "border-sky-300 bg-sky-50"
+                                : "border-zinc-300 bg-zinc-50"
                               : "border-dashed border-zinc-200 bg-white"
                       }`}
                     >

@@ -10,6 +10,7 @@ import {
   catalogHasInvalidSets,
   classCapacityIssues,
   countPlaced,
+  filterAssignmentsToPlacement,
   filterCellsToCatalog,
   filterPartialCellsToCatalog,
   findGradeSet,
@@ -25,6 +26,11 @@ import {
   type GradeSetInfo,
   type SetTeacherShare,
 } from "@/lib/set-blocks";
+import {
+  autoPlaceWholeSets,
+  formatAutoPlaceOutcome,
+} from "@/lib/set-blocks-auto";
+import { FLOW_CHAPTER, lockTermFlow } from "@/lib/term-flow-lock";
 import {
   ensureGradeSubjects,
   sanitizeGradeSubjects,
@@ -91,6 +97,7 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
   const [status, setStatus] = useState<"idle" | "saving" | "success" | "error">(
     "idle",
   );
+  const [autoPlacing, setAutoPlacing] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
@@ -269,7 +276,7 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
   }, [catalog, selectedSet]);
 
   function paint(grade: Grade, day: Weekday, period: number) {
-    if (!selectedSet || status === "saving") return;
+    if (!selectedSet || status === "saving" || autoPlacing) return;
     const result = tryPaintCell({
       cells,
       partialCells,
@@ -292,14 +299,14 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
   }
 
   function erase(grade: Grade, day: Weekday, period: number) {
-    if (status === "saving") return;
+    if (status === "saving" || autoPlacing) return;
     setCells(removeCell(cells, grade, day, period));
     setStatus("idle");
     setMessage("");
   }
 
   function applyRotation(entries: SetTeacherAssignment[]) {
-    if (entries.length === 0 || status === "saving") return;
+    if (entries.length === 0 || status === "saving" || autoPlacing) return;
     setTeacherAssignments((prev) => {
       const keep = prev.filter(
         (a) =>
@@ -319,14 +326,101 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
   }
 
   function resetCells() {
-    if (status === "saving" || cells.length === 0) return;
+    if (status === "saving" || autoPlacing) return;
+    if (cells.length === 0 && partialCells.length === 0) return;
+    const hasPartial = partialCells.length > 0;
     const confirmed = window.confirm(
-      "배치한 전학년 SET 블록을 모두 초기화할까요? 저장을 눌러야 적용됩니다.",
+      hasPartial
+        ? "전학년 SET와 부분 SET(2/2) 배치를 모두 지울까요? 저장을 눌러야 적용됩니다."
+        : "배치한 전학년 SET 블록을 모두 초기화할까요? 저장을 눌러야 적용됩니다.",
     );
     if (!confirmed) return;
+    lockTermFlow(termId, FLOW_CHAPTER.sets);
     setCells([]);
+    setPartialCells([]);
+    setTeacherAssignments(
+      filterAssignmentsToPlacement([], [], catalog, teachers),
+    );
     setStatus("idle");
-    setMessage("전학년 SET 블록을 초기화했습니다. 저장을 눌러 반영해 주세요.");
+    setMessage(
+      hasPartial
+        ? "전학년·부분 SET 블록을 초기화했습니다. 저장을 눌러 반영해 주세요."
+        : "전학년 SET 블록을 초기화했습니다. 저장을 눌러 반영해 주세요.",
+    );
+  }
+
+  function handleAutoPlace() {
+    if (status === "saving" || autoPlacing) return;
+    if (capacityIssues.length > 0) {
+      setStatus("error");
+      setMessage(
+        "학반 시수가 주간 교시를 넘는 상태에서는 자동 배치할 수 없습니다.",
+      );
+      return;
+    }
+    if (invalidSets) {
+      setStatus("error");
+      setMessage(
+        "같은 SET 안 과목의 단위가 서로 다릅니다. 교과 설정을 확인해 주세요.",
+      );
+      return;
+    }
+
+    const wholes = catalog.filter(
+      (item) => item.kind === "whole" && item.units !== null,
+    );
+    if (wholes.length === 0) {
+      setStatus("idle");
+      setMessage("전학년 SET가 없습니다.");
+      return;
+    }
+
+    let start = cells;
+    let startPartial = partialCells;
+    if (placementComplete && cells.length > 0) {
+      const confirmed = window.confirm(
+        partialCells.length > 0
+          ? "전학년 SET가 이미 모두 배치되어 있습니다. 부분 SET(2/2)도 지우고 다시 자동 배치할까요?"
+          : "전학년 SET가 이미 모두 배치되어 있습니다. 지우고 다시 자동 배치할까요?",
+      );
+      if (!confirmed) return;
+      start = [];
+      startPartial = [];
+    }
+
+    setAutoPlacing(true);
+    setMessage("");
+    window.setTimeout(() => {
+      try {
+        const result = autoPlaceWholeSets({
+          cells: filterCellsToCatalog(start, schedules, catalog),
+          partialCells: filterPartialCellsToCatalog(
+            startPartial,
+            schedules,
+            catalog,
+          ),
+          catalog,
+          teachers,
+          schedules,
+          classCounts,
+          assignments: filterAssignmentsToPlacement(
+            teacherAssignments,
+            start,
+            startPartial,
+            catalog,
+            teachers,
+          ),
+        });
+        setCells(result.cells);
+        setPartialCells(startPartial);
+        setTeacherAssignments(result.assignments);
+        const outcome = formatAutoPlaceOutcome("전학년 SET", result);
+        setStatus(outcome.error ? "error" : "success");
+        setMessage(outcome.message);
+      } finally {
+        setAutoPlacing(false);
+      }
+    }, 0);
   }
 
   async function saveCells(successMessage: string, requireComplete: boolean) {
@@ -349,15 +443,25 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
     setMessage("");
 
     const nextCells = filterCellsToCatalog(cells, schedules, catalog);
+    const nextPartial = filterPartialCellsToCatalog(
+      partialCells,
+      schedules,
+      catalog,
+    );
 
     try {
       const response = await fetch(`/api/terms/${termId}/set-blocks`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cells: nextCells, teacherAssignments }),
+        body: JSON.stringify({
+          cells: nextCells,
+          partialCells: nextPartial,
+          teacherAssignments,
+        }),
       });
       const data = (await response.json()) as {
         cells?: SetBlockCell[];
+        partialCells?: SetBlockCell[];
         teacherAssignments?: SetTeacherAssignment[];
         error?: string;
       };
@@ -370,6 +474,13 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
 
       setCells(
         filterCellsToCatalog(data.cells ?? nextCells, schedules, catalog),
+      );
+      setPartialCells(
+        filterPartialCellsToCatalog(
+          data.partialCells ?? nextPartial,
+          schedules,
+          catalog,
+        ),
       );
       setTeacherAssignments(
         Array.isArray(data.teacherAssignments)
@@ -478,7 +589,7 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
                         <button
                           key={`${grade}-${item.set}`}
                           type="button"
-                          disabled={!clickable || status === "saving"}
+                          disabled={!clickable || status === "saving" || autoPlacing}
                           onClick={() =>
                             setSelectedSet((prev) =>
                               prev === item.set ? null : item.set,
@@ -519,7 +630,7 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
                         : null
                     }
                     blocked={blockedByGrade[grade]}
-                    disabled={status === "saving"}
+                    disabled={status === "saving" || autoPlacing}
                     onPaint={(day, period) => paint(grade, day, period)}
                     onErase={(day, period) => erase(grade, day, period)}
                     onSelectPlacedSet={setSelectedSet}
@@ -536,7 +647,7 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
                       partialCells={partialCells}
                       assignments={teacherAssignments}
                       onApplyRotation={applyRotation}
-                      disabled={status === "saving"}
+                      disabled={status === "saving" || autoPlacing}
                     />
                   ) : null}
                 </>
@@ -568,17 +679,41 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
         <button
           type="button"
           onClick={resetCells}
-          disabled={status === "saving" || cells.length === 0}
+          disabled={
+            status === "saving" ||
+            autoPlacing ||
+            (cells.length === 0 && partialCells.length === 0)
+          }
           className="rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
           초기화
         </button>
         <button
           type="button"
+          onClick={handleAutoPlace}
+          disabled={
+            status === "saving" ||
+            autoPlacing ||
+            invalidSets ||
+            capacityIssues.length > 0
+          }
+          title={
+            capacityIssues.length > 0
+              ? "학반 시수가 주간 교시를 넘습니다."
+              : invalidSets
+                ? "SET 단위가 일치하지 않습니다."
+                : "전학년 SET를 가능한 칸에 자동으로 채웁니다."
+          }
+          className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {autoPlacing ? "배치 중…" : "자동 배치"}
+        </button>
+        <button
+          type="button"
           onClick={() => {
             void handleSave();
           }}
-          disabled={status === "saving"}
+          disabled={status === "saving" || autoPlacing}
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {status === "saving" ? "저장 중…" : "저장"}
@@ -596,7 +731,7 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
         >
           <button
             type="submit"
-            disabled={status === "saving" || !canProceed}
+            disabled={status === "saving" || autoPlacing || !canProceed}
             className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {status === "saving" ? "저장 중…" : "다음"}

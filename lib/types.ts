@@ -11,6 +11,13 @@ export type TermDocument = TermInput & {
   /** 소유 계정의 accounts._id (문자열). 서버가 세션에서 채우며 클라이언트가 보내지 않는다. */
   ownerId: string;
   createdAt: Date;
+  /**
+   * 스테퍼에서 한 번이라도 연 가장 먼 장(0=학반 … 7=시간표).
+   * 이 값 이하로는 자유롭게 이동한다.
+   */
+  maxReachedChapter?: number;
+  /** @deprecated maxReachedChapter로 대체. 읽기 하위 호환만 유지. */
+  reachedTimetable?: boolean;
 };
 
 export type AccountDocument = {

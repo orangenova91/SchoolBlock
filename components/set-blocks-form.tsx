@@ -339,7 +339,7 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
     setCells([]);
     setPartialCells([]);
     setTeacherAssignments(
-      filterAssignmentsToPlacement([], [], catalog, teachers),
+      filterAssignmentsToPlacement([], [], [], catalog, teachers),
     );
     setStatus("idle");
     setMessage(

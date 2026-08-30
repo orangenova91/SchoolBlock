@@ -1,7 +1,12 @@
 import Image from "next/image";
+import { redirect } from "next/navigation";
 import { HomeDashboard } from "@/components/home-dashboard";
+import { getServerSession } from "@/lib/session";
 
-export default function Home() {
+export default async function Home() {
+  const session = await getServerSession();
+  if (session?.role === "admin") redirect("/admin");
+
   return (
     <div className="flex flex-1 flex-col items-center bg-zinc-50 px-4 py-12">
       <main className="flex w-full max-w-5xl flex-col items-center gap-8">

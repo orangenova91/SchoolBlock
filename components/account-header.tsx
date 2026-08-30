@@ -5,7 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
-export function AccountHeader({ username }: { username: string }) {
+export function AccountHeader({
+  username,
+  isAdmin = false,
+}: {
+  username: string;
+  isAdmin?: boolean;
+}) {
   const router = useRouter();
   const [loggingOut, setLoggingOut] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -46,7 +52,7 @@ export function AccountHeader({ username }: { username: string }) {
 
   return (
     <header className="sticky top-0 z-50 flex items-center justify-between border-b border-zinc-200 bg-white px-4 py-2.5">
-      <Link href="/" className="flex items-center gap-1.5">
+      <Link href={isAdmin ? "/admin" : "/"} className="flex items-center gap-1.5">
         <Image
           src="/logo/SchoolBlock_Logo_S2B.jpg"
           alt=""
@@ -89,6 +95,16 @@ export function AccountHeader({ username }: { username: string }) {
             role="menu"
             className="absolute right-0 top-full mt-1 min-w-[8rem] overflow-hidden rounded-lg border border-zinc-200 bg-white py-1 shadow-lg"
           >
+            {isAdmin ? (
+              <Link
+                href="/admin"
+                role="menuitem"
+                className="block px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50"
+                onClick={() => setMenuOpen(false)}
+              >
+                신청 관리
+              </Link>
+            ) : null}
             <button
               type="button"
               role="menuitem"

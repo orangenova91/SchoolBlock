@@ -1,7 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
+import {
+  FLOW_CHAPTER,
+  FLOW_CLAMPED_EVENT,
+  persistMaxReachedChapter,
+  type FlowClampedDetail,
+} from "@/lib/term-flow-lock";
 
 type Chapter = {
   key: string;
@@ -27,33 +34,70 @@ function resolveCurrent(
   pathname: string,
   step: string | null,
 ): { chapterIndex: number; subIndex: number } | null {
-  if (pathname.endsWith("/days")) return { chapterIndex: 0, subIndex: 0 };
+  if (pathname.endsWith("/days")) return { chapterIndex: FLOW_CHAPTER.days, subIndex: 0 };
   if (pathname.endsWith("/subjects")) {
-    return { chapterIndex: 1, subIndex: step === "2" ? 1 : 0 };
+    return { chapterIndex: FLOW_CHAPTER.subjects, subIndex: step === "2" ? 1 : 0 };
   }
-  if (pathname.endsWith("/teachers")) return { chapterIndex: 2, subIndex: 0 };
-  if (pathname.endsWith("/sets/partial")) return { chapterIndex: 3, subIndex: 1 };
-  if (pathname.endsWith("/sets")) return { chapterIndex: 3, subIndex: 0 };
-  if (pathname.endsWith("/blocks")) return { chapterIndex: 4, subIndex: 0 };
-  if (pathname.endsWith("/constraints")) return { chapterIndex: 5, subIndex: 0 };
-  if (pathname.endsWith("/preferences")) return { chapterIndex: 6, subIndex: 0 };
-  if (pathname.endsWith("/timetable")) return { chapterIndex: 7, subIndex: 0 };
+  if (pathname.endsWith("/teachers")) return { chapterIndex: FLOW_CHAPTER.teachers, subIndex: 0 };
+  if (pathname.endsWith("/sets/partial")) {
+    return { chapterIndex: FLOW_CHAPTER.sets, subIndex: 1 };
+  }
+  if (pathname.endsWith("/sets")) return { chapterIndex: FLOW_CHAPTER.sets, subIndex: 0 };
+  if (pathname.endsWith("/blocks")) return { chapterIndex: FLOW_CHAPTER.blocks, subIndex: 0 };
+  if (pathname.endsWith("/constraints")) {
+    return { chapterIndex: FLOW_CHAPTER.constraints, subIndex: 0 };
+  }
+  if (pathname.endsWith("/preferences")) {
+    return { chapterIndex: FLOW_CHAPTER.preferences, subIndex: 0 };
+  }
+  if (pathname.endsWith("/timetable")) {
+    return { chapterIndex: FLOW_CHAPTER.timetable, subIndex: 0 };
+  }
   return null;
 }
 
 export function TermFlowStepper({
   termId,
   termLabel,
+  maxReachedChapter = 0,
 }: {
   termId: string;
   termLabel?: string;
+  /** 한 번이라도 연 가장 먼 장. 이 값 이하로는 스테퍼로 이동할 수 있다. */
+  maxReachedChapter?: number;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const current = resolveCurrent(pathname, searchParams.get("step"));
+  const chapterIndex = current?.chapterIndex;
+  const [maxReached, setMaxReached] = useState(maxReachedChapter);
 
-  if (!current) return null;
-  const { chapterIndex, subIndex } = current;
+  useEffect(() => {
+    setMaxReached((prev) => Math.max(prev, maxReachedChapter));
+  }, [maxReachedChapter]);
+
+  useEffect(() => {
+    if (chapterIndex == null) return;
+    setMaxReached((prev) => {
+      if (chapterIndex <= prev) return prev;
+      persistMaxReachedChapter(termId, chapterIndex);
+      return chapterIndex;
+    });
+  }, [chapterIndex, termId]);
+
+  useEffect(() => {
+    function handleClamp(event: Event) {
+      const chapterIndex = (event as CustomEvent<FlowClampedDetail>).detail
+        ?.chapterIndex;
+      if (typeof chapterIndex !== "number") return;
+      setMaxReached(chapterIndex);
+    }
+    window.addEventListener(FLOW_CLAMPED_EVENT, handleClamp);
+    return () => window.removeEventListener(FLOW_CLAMPED_EVENT, handleClamp);
+  }, []);
+
+  if (!current || chapterIndex == null) return null;
+  const { subIndex } = current;
 
   return (
     <div className="sticky top-[51px] z-40 border-b border-zinc-200 bg-white">
@@ -75,17 +119,27 @@ export function TermFlowStepper({
             const status =
               i < chapterIndex ? "done" : i === chapterIndex ? "current" : "upcoming";
             const isLast = i === CHAPTERS.length - 1;
+            const visitedAhead = status === "upcoming" && i <= maxReached;
+            const canJump = status === "done" || visitedAhead;
 
             return (
               <li key={chapter.key} className="flex items-start">
                 <div className="flex w-20 flex-col items-center gap-1.5 text-center">
-                  {status === "done" ? (
+                  {canJump ? (
                     <Link
                       href={chapter.href(termId)}
-                      className="flex h-7 w-7 items-center justify-center rounded-full bg-zinc-300 text-xs font-medium text-zinc-700 transition hover:bg-zinc-400"
-                      aria-label={`${chapter.label} (완료, 다시 보기)`}
+                      className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-medium transition ${
+                        status === "done"
+                          ? "bg-zinc-300 text-zinc-700 hover:bg-zinc-400"
+                          : "border border-zinc-400 bg-white text-zinc-700 hover:bg-zinc-100"
+                      }`}
+                      aria-label={
+                        status === "done"
+                          ? `${chapter.label} (완료, 다시 보기)`
+                          : `${chapter.label}로 이동`
+                      }
                     >
-                      ✓
+                      {status === "done" ? "✓" : i + 1}
                     </Link>
                   ) : (
                     <div
@@ -102,7 +156,7 @@ export function TermFlowStepper({
                     className={`text-[11px] leading-tight ${
                       status === "current"
                         ? "font-semibold text-zinc-900"
-                        : status === "done"
+                        : canJump
                           ? "text-zinc-600"
                           : "text-zinc-400"
                     }`}
@@ -116,6 +170,7 @@ export function TermFlowStepper({
                           key={s}
                           className={`h-1.5 w-1.5 rounded-full ${
                             status === "done" ||
+                            visitedAhead ||
                             (status === "current" && s <= subIndex)
                               ? "bg-zinc-900"
                               : "bg-zinc-200"
@@ -128,7 +183,7 @@ export function TermFlowStepper({
                 {!isLast ? (
                   <div
                     className={`mt-3.5 h-px w-4 shrink-0 sm:w-8 ${
-                      i < chapterIndex ? "bg-zinc-400" : "bg-zinc-200"
+                      i < maxReached ? "bg-zinc-400" : "bg-zinc-200"
                     }`}
                   />
                 ) : null}

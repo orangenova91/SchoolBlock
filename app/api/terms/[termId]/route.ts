@@ -1,5 +1,6 @@
 import { ObjectId } from "mongodb";
 import { NextResponse } from "next/server";
+import { deleteTermChildren } from "@/lib/account-cleanup";
 import { getDb } from "@/lib/mongodb";
 import { getAccountId, getSessionFromRequest } from "@/lib/session";
 import type { Semester, TermDocument } from "@/lib/types";
@@ -202,15 +203,7 @@ export async function DELETE(request: Request, context: RouteContext) {
 
     await Promise.all([
       terms.deleteOne({ _id: objectId }),
-      db.collection("daySchedules").deleteMany({ termId }),
-      db.collection("subjects").deleteMany({ termId }),
-      db.collection("teachers").deleteMany({ termId }),
-      db.collection("generationPreferences").deleteMany({ termId }),
-      db.collection("setBlocks").deleteMany({ termId }),
-      db.collection("subjectBlocks").deleteMany({ termId }),
-      db.collection("teacherConstraints").deleteMany({ termId }),
-      db.collection("timetables").deleteMany({ termId }),
-      db.collection("timetableVersions").deleteMany({ termId }),
+      deleteTermChildren(db, [termId]),
     ]);
 
     return NextResponse.json({ id: termId, deleted: true });

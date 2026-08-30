@@ -1,4 +1,5 @@
 import Image from "next/image";
+import Link from "next/link";
 import { LoginForm } from "@/components/login-form";
 import { TryDemoButton } from "@/components/try-demo-button";
 import { APP_VERSION } from "@/lib/app-version";
@@ -40,14 +41,12 @@ export default function LoginPage() {
         </p>
         <div className="flex items-center gap-4">
           <TryDemoButton />
-          <a
-            href="https://docs.google.com/forms/d/e/1FAIpQLSe1RpqiMHh4k9M6V9epCU94zxEWmeKGZdpCqzBIbEEnXakAxQ/viewform?usp=dialog"
-            target="_blank"
-            rel="noopener noreferrer"
+          <Link
+            href="/apply"
             className="text-sm font-medium text-zinc-600 underline underline-offset-2 transition hover:text-zinc-900"
           >
             프로그램 계정 신청하기
-          </a>
+          </Link>
           <a
             href="https://open.kakao.com/o/ghpSxzIh"
             target="_blank"

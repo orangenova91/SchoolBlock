@@ -11,16 +11,23 @@ import {
 import {
   eraseSubjectBlockAt,
   filterSubjectBlocksToAssignments,
+  findSubjectBlockSetConflicts,
+  formatSubjectBlockSetConflict,
+  formatTeacherClassPlacement,
   lessonTargetKey,
   listSubjectBlockLessons,
   setLockedSlotsForClass,
+  subjectBlockSetConflictSlotKey,
   subjectBlocksBySlotForClass,
+  teacherBusyElsewhereBySlot,
+  teacherPlacementsByClass,
   tryPaintSubjectBlock,
   withPlacedCounts,
   type SubjectBlockLessonOption,
 } from "@/lib/subject-blocks";
 import { ensureGradeSubjects, sanitizeGradeSubjects } from "@/lib/subjects";
 import { ensureTeachers, sanitizeTeachers } from "@/lib/teachers";
+import { FLOW_CHAPTER, lockTermFlow } from "@/lib/term-flow-lock";
 import {
   GRADES,
   createDefaultClassCounts,
@@ -227,12 +234,25 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
       (opt) => opt.grade === grade && opt.classNo === classNo,
     );
     const q = query.trim().toLowerCase();
-    if (!q) return list;
-    return list.filter(
-      (opt) =>
-        opt.subjectName.toLowerCase().includes(q) ||
-        opt.teacherName.toLowerCase().includes(q),
-    );
+    const filtered = q
+      ? list.filter(
+          (opt) =>
+            opt.subjectName.toLowerCase().includes(q) ||
+            opt.teacherName.toLowerCase().includes(q),
+        )
+      : list;
+    return [...filtered]
+      .map((opt, index) => ({ opt, index }))
+      .sort((a, b) => {
+        const aPlaced = a.opt.placed > 0 ? 1 : 0;
+        const bPlaced = b.opt.placed > 0 ? 1 : 0;
+        if (bPlaced !== aPlaced) return bPlaced - aPlaced;
+        const aDone = a.opt.placed >= a.opt.required ? 1 : 0;
+        const bDone = b.opt.placed >= b.opt.required ? 1 : 0;
+        if (bDone !== aDone) return bDone - aDone;
+        return a.index - b.index;
+      })
+      .map((item) => item.opt);
   }, [lessonOptions, grade, classNo, query]);
 
   const selected = useMemo(() => {
@@ -268,9 +288,80 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
     [cells, grade, classNo],
   );
 
+  const setConflicts = useMemo(
+    () =>
+      findSubjectBlockSetConflicts(
+        cells,
+        wholeCells,
+        partialCells,
+        teachers,
+        subjects,
+        classCounts,
+      ),
+    [cells, wholeCells, partialCells, teachers, subjects, classCounts],
+  );
+
+  const conflictMessages = useMemo(
+    () => setConflicts.map(formatSubjectBlockSetConflict),
+    [setConflicts],
+  );
+
+  const conflictKeys = useMemo(() => {
+    const keys = new Set<string>();
+    for (const item of setConflicts) {
+      if (item.grade !== grade || item.classNo !== classNo) continue;
+      keys.add(subjectBlockSetConflictSlotKey(item));
+    }
+    return keys;
+  }, [setConflicts, grade, classNo]);
+
   const placedTotal = cells.length;
 
+  const otherPlacedByTeacherSubject = useMemo(() => {
+    const groups = new Map<string, Set<string>>();
+    for (const cell of cells) {
+      if (cell.grade === grade && cell.classNo === classNo) continue;
+      const key = `${cell.teacherName.trim()}|${cell.subjectName}`;
+      const classes = groups.get(key) ?? new Set<string>();
+      classes.add(`${cell.grade}|${cell.classNo}`);
+      groups.set(key, classes);
+    }
+    const map = new Map<string, number>();
+    for (const [key, classes] of groups) {
+      map.set(key, classes.size);
+    }
+    return map;
+  }, [cells, grade, classNo]);
+
+  const selectedOtherPlacements = useMemo(() => {
+    if (!selected) return [];
+    return teacherPlacementsByClass(cells, selected.teacherName).filter(
+      (item) =>
+        item.subjectName === selected.subjectName &&
+        (item.grade !== selected.grade || item.classNo !== selected.classNo),
+    );
+  }, [cells, selected]);
+
+  const selectedOtherCount = selectedOtherPlacements.length;
+
+  const teacherBusyElsewhere = useMemo(() => {
+    if (!selected) return new Map<string, SubjectBlockCell>();
+    return teacherBusyElsewhereBySlot(
+      cells,
+      selected.teacherName,
+      grade,
+      classNo,
+    );
+  }, [cells, selected, grade, classNo]);
+
   async function saveCells(successMessage: string, requireOk = false) {
+    if (requireOk && setConflicts.length > 0) {
+      setStatus("error");
+      setMessage(
+        "SET과 겹치는 교과 블록이 있습니다. 겹친 칸의 교과 블록을 지운 뒤 다음으로 가 주세요.",
+      );
+      return false;
+    }
     setStatus("saving");
     setMessage("");
     try {
@@ -311,6 +402,18 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
     await saveCells("선 수업 배치가 저장되었습니다.");
   }
 
+  function resetCells() {
+    if (status === "saving" || cells.length === 0) return;
+    const confirmed = window.confirm(
+      "배치한 선 수업 블록을 모두 초기화할까요? 저장을 눌러야 적용됩니다.",
+    );
+    if (!confirmed) return;
+    lockTermFlow(termId, FLOW_CHAPTER.blocks);
+    setCells([]);
+    setStatus("idle");
+    setMessage("선 수업 블록을 초기화했습니다. 저장을 눌러 반영해 주세요.");
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const ok = await saveCells("선 수업 배치가 저장되었습니다.", true);
@@ -348,8 +451,9 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
   function handleErase(day: Weekday, period: number) {
     const existing = blocksBySlot.get(`${day}|${period}`);
     if (!existing) return;
-    // Erase only matching selection if one is selected; otherwise erase any
+    const isConflict = conflictKeys.has(`${day}|${period}`);
     if (
+      !isConflict &&
       selected &&
       (existing.teacherName !== selected.teacherName ||
         existing.subjectName !== selected.subjectName)
@@ -371,8 +475,8 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
         classNo,
         day,
         period,
-        selected?.teacherName,
-        selected?.subjectName,
+        isConflict ? undefined : selected?.teacherName,
+        isConflict ? undefined : selected?.subjectName,
       ),
     );
     setStatus("idle");
@@ -427,6 +531,26 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
           자동으로 채워집니다.
         </p>
       </header>
+
+      {conflictMessages.length > 0 ? (
+        <div
+          className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"
+          role="alert"
+        >
+          <p className="font-medium">
+            SET과 겹치는 교과 블록 ({conflictMessages.length})
+          </p>
+          <ul className="mt-2 max-h-36 list-inside list-disc overflow-auto text-xs">
+            {conflictMessages.map((line) => (
+              <li key={line}>{line}</li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs">
+            빨간 칸을 누르면 교과 블록이 지워집니다. 저장은 가능하지만, 다음으로
+            가려면 충돌을 해소해야 합니다.
+          </p>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center justify-center gap-2">
         {GRADES.map((g) => (
@@ -499,6 +623,11 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
                 );
                 const active = key === selectedKey;
                 const done = opt.placed >= opt.required;
+                const started = opt.placed > 0;
+                const otherPlaced =
+                  otherPlacedByTeacherSubject.get(
+                    `${opt.teacherName.trim()}|${opt.subjectName}`,
+                  ) ?? 0;
                 return (
                   <li key={key}>
                     <button
@@ -507,7 +636,11 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
                       className={`flex w-full flex-col rounded-lg px-2.5 py-2 text-left text-sm transition ${
                         active
                           ? "bg-zinc-900 text-white"
-                          : "text-zinc-800 hover:bg-zinc-50"
+                          : done
+                            ? "bg-emerald-50 text-zinc-800 hover:bg-emerald-100"
+                            : started
+                              ? "bg-amber-50 text-zinc-800 hover:bg-amber-100"
+                              : "text-zinc-800 hover:bg-zinc-50"
                       }`}
                     >
                       <span className="truncate font-medium">
@@ -520,18 +653,30 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
                       >
                         {opt.teacherName}
                       </span>
-                      <span
-                        className={`mt-0.5 text-[10px] tabular-nums ${
-                          done
-                            ? active
-                              ? "text-emerald-300"
-                              : "text-emerald-700"
-                            : active
-                              ? "text-amber-200"
-                              : "text-amber-700"
-                        }`}
-                      >
-                        {opt.placed}/{opt.required}
+                      <span className="mt-0.5 text-[10px] tabular-nums">
+                        <span
+                          className={
+                            done
+                              ? active
+                                ? "text-emerald-300"
+                                : "text-emerald-700"
+                              : active
+                                ? "text-amber-200"
+                                : "text-amber-700"
+                          }
+                        >
+                          {opt.placed}/{opt.required}
+                        </span>
+                        {otherPlaced > 0 ? (
+                          <span
+                            className={
+                              active ? "text-zinc-300" : "text-zinc-500"
+                            }
+                          >
+                            {" "}
+                            · 다른 반 {otherPlaced}개
+                          </span>
+                        ) : null}
                       </span>
                     </button>
                   </li>
@@ -539,8 +684,18 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
               })
             )}
           </ul>
-          <p className="mt-2 text-center text-[11px] text-zinc-500">
-            전체 블록 {placedTotal}칸
+          <p className="mt-2 flex justify-center">
+            <span
+              className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-semibold tabular-nums ${
+                placedTotal > 0
+                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                  : "border-zinc-200 bg-zinc-100 text-zinc-600"
+              }`}
+            >
+              {placedTotal > 0
+                ? `전체 선 배정된 수업 ${placedTotal}칸`
+                : "선 배정된 수업 0칸"}
+            </span>
           </p>
         </aside>
 
@@ -550,16 +705,50 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
               {grade}학년 {classNo}반
               {selected ? ` · ${selected.subjectName}` : ""}
             </h2>
-            <p className="text-xs text-zinc-500">
-              {selected
-                ? `${selected.teacherName} · ${selected.placed}/${selected.required}`
-                : "왼쪽에서 교과를 선택하세요"}
-            </p>
+            <div className="max-w-full text-right text-xs text-zinc-500">
+              {selected ? (
+                <>
+                  <p>
+                    {selected.teacherName} · {selected.placed}/{selected.required}
+                    {selectedOtherCount > 0
+                      ? ` · 다른 반 ${selectedOtherCount}개`
+                      : ""}
+                  </p>
+                  {selectedOtherPlacements.length > 0 ? (
+                    <p className="mt-1 flex flex-wrap justify-end gap-1">
+                      {selectedOtherPlacements.map((item) => (
+                        <button
+                          key={`${item.grade}-${item.classNo}-${item.subjectName}`}
+                          type="button"
+                          onClick={() =>
+                            selectLesson({
+                              teacherName: selected.teacherName,
+                              grade: item.grade,
+                              classNo: item.classNo,
+                              subjectName: item.subjectName,
+                              required: item.placed,
+                              placed: item.placed,
+                            })
+                          }
+                          className="rounded-md border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] text-zinc-700 transition hover:border-zinc-400 hover:bg-zinc-100"
+                        >
+                          {formatTeacherClassPlacement(item)}
+                        </button>
+                      ))}
+                    </p>
+                  ) : null}
+                </>
+              ) : (
+                <p>왼쪽에서 교과를 선택하세요</p>
+              )}
+            </div>
           </div>
           <SubjectBlockGrid
             periods={schedules[grade]}
             setLocked={setLocked}
+            conflictKeys={conflictKeys}
             blocksBySlot={blocksBySlot}
+            teacherBusyElsewhere={teacherBusyElsewhere}
             selectedKey={selectedKey}
             disabled={status === "saving"}
             onPaint={handlePaint}
@@ -567,7 +756,7 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
           />
           <p className="mt-3 text-center text-xs text-zinc-500">
             칸을 눌러 배치하고, 같은 칸을 다시 누르면 지워집니다. 보라색은 SET
-            고정입니다.
+            고정, 회색 타반은 선택한 교사가 다른 학반에 있는 시간입니다.
           </p>
         </section>
       </div>
@@ -582,6 +771,14 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
         </button>
         <button
           type="button"
+          onClick={resetCells}
+          disabled={status === "saving" || cells.length === 0}
+          className="rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          초기화
+        </button>
+        <button
+          type="button"
           onClick={() => {
             void handleSave();
           }}
@@ -592,7 +789,12 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
         </button>
         <button
           type="submit"
-          disabled={status === "saving"}
+          disabled={status === "saving" || setConflicts.length > 0}
+          title={
+            setConflicts.length > 0
+              ? "SET과 겹치는 교과 블록을 해소해 주세요."
+              : undefined
+          }
           className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {status === "saving" ? "저장 중…" : "다음"}

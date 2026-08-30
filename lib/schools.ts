@@ -1,13 +1,8 @@
 import fs from "fs";
 import path from "path";
+import type { NeisSchoolOption } from "@/lib/types";
 
-export type NeisSchoolOption = {
-  code: string;
-  atptCode: string;
-  name: string;
-  sido: string;
-  type: string;
-};
+export type { NeisSchoolOption };
 
 let cachedSchools: NeisSchoolOption[] | null = null;
 
@@ -43,4 +38,14 @@ export function searchSchools(query: string, limit = 20): NeisSchoolOption[] {
   });
 
   return scored.slice(0, limit).map((x) => x.item);
+}
+
+export function findSchoolByCodes(
+  code: string,
+  atptCode: string,
+): NeisSchoolOption | null {
+  const schools = loadSchools();
+  return (
+    schools.find((s) => s.code === code && s.atptCode === atptCode) ?? null
+  );
 }

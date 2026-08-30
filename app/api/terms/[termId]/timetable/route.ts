@@ -18,7 +18,7 @@ import { getAccountId } from "@/lib/session";
 import { filterForbiddenSlots } from "@/lib/teacher-constraints";
 import { ensureTeachers, sanitizeTeachers } from "@/lib/teachers";
 import { findOwnedTerm } from "@/lib/term-access";
-import { generateTimetable } from "@/lib/timetable";
+import { buildSeedTimetableCells, generateTimetable } from "@/lib/timetable";
 import {
   createDefaultClassCounts,
   createDefaultGradeDaySchedules,
@@ -66,14 +66,23 @@ export async function GET(request: Request, context: RouteContext) {
     }
 
     const db = await getDb();
-    const [doc, teachersDoc, subjectsDoc, scheduleDoc, setBlocksDoc] =
-      await Promise.all([
-        db.collection<TimetableDocument>("timetables").findOne({ termId }),
-        db.collection<TeachersDocument>("teachers").findOne({ termId }),
-        db.collection<SubjectsDocument>("subjects").findOne({ termId }),
-        db.collection<DayScheduleDocument>("daySchedules").findOne({ termId }),
-        db.collection<SetBlocksDocument>("setBlocks").findOne({ termId }),
-      ]);
+    const [
+      doc,
+      teachersDoc,
+      subjectsDoc,
+      scheduleDoc,
+      setBlocksDoc,
+      subjectBlocksDoc,
+    ] = await Promise.all([
+      db.collection<TimetableDocument>("timetables").findOne({ termId }),
+      db.collection<TeachersDocument>("teachers").findOne({ termId }),
+      db.collection<SubjectsDocument>("subjects").findOne({ termId }),
+      db.collection<DayScheduleDocument>("daySchedules").findOne({ termId }),
+      db.collection<SetBlocksDocument>("setBlocks").findOne({ termId }),
+      db
+        .collection<SubjectBlocksDocument>("subjectBlocks")
+        .findOne({ termId }),
+    ]);
 
     // Structural check, independent of whether a timetable has been
     // generated yet: a teacher required by two different subjects of the
@@ -109,6 +118,16 @@ export async function GET(request: Request, context: RouteContext) {
       catalog,
       setBlocksDoc?.teacherAssignments ?? [],
     );
+    const seedCells = buildSeedTimetableCells({
+      teachers,
+      subjects,
+      classCounts,
+      schedules,
+      wholeCells,
+      partialCells,
+      teacherAssignments: setBlocksDoc?.teacherAssignments ?? [],
+      subjectBlocks: subjectBlocksDoc?.cells ?? [],
+    });
 
     return NextResponse.json({
       term: {
@@ -120,6 +139,7 @@ export async function GET(request: Request, context: RouteContext) {
       },
       status: doc?.status ?? "idle",
       cells: doc?.cells ?? [],
+      seedCells,
       unplaced: doc?.unplaced ?? [],
       generatedAt: doc?.generatedAt ?? null,
       message: doc?.message ?? null,

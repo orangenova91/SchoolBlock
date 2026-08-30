@@ -12,8 +12,15 @@ export function TryDemoButton() {
     setLoading(true);
     setError("");
 
+    const timeoutMs = 20_000;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
     try {
-      const response = await fetch("/api/auth/demo-login", { method: "POST" });
+      const response = await fetch("/api/auth/demo-login", {
+        method: "POST",
+        signal: controller.signal,
+      });
 
       if (!response.ok) {
         const data = (await response.json().catch(() => ({}))) as {
@@ -25,9 +32,14 @@ export function TryDemoButton() {
 
       router.push("/");
       router.refresh();
-    } catch {
-      setError("서버에 연결할 수 없습니다.");
+    } catch (err) {
+      setError(
+        err instanceof DOMException && err.name === "AbortError"
+          ? "서버 응답이 너무 오래 걸립니다. 잠시 후 다시 시도해 주세요."
+          : "서버에 연결할 수 없습니다.",
+      );
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   }

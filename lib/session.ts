@@ -1,5 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { findAccountById, isAdminAccount } from "@/lib/accounts";
 
 export const SESSION_COOKIE_NAME = "session";
 const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30일
@@ -7,6 +8,7 @@ const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30일
 export type SessionPayload = {
   accountId: string;
   username: string;
+  role?: "admin";
 };
 
 function getSecretKey(): Uint8Array {
@@ -40,7 +42,12 @@ export async function verifySessionToken(
     ) {
       return null;
     }
-    return { accountId: payload.accountId, username: payload.username };
+    const role = payload.role === "admin" ? "admin" : undefined;
+    return {
+      accountId: payload.accountId,
+      username: payload.username,
+      ...(role ? { role } : {}),
+    };
   } catch {
     return null;
   }
@@ -67,13 +74,26 @@ function extractSessionCookie(cookieHeader: string | null): string | null {
   return null;
 }
 
+async function sessionIfAccountExists(
+  session: SessionPayload | null,
+): Promise<SessionPayload | null> {
+  if (!session) return null;
+  const account = await findAccountById(session.accountId);
+  if (!account) return null;
+  return {
+    accountId: session.accountId,
+    username: session.username,
+    ...(isAdminAccount(account) ? { role: "admin" as const } : {}),
+  };
+}
+
 /** Route Handler / Proxy 등 Request 기반 컨텍스트에서 세션을 검증한다. */
 export async function getSessionFromRequest(
   request: Request,
 ): Promise<SessionPayload | null> {
   const token = extractSessionCookie(request.headers.get("cookie"));
   if (!token) return null;
-  return verifySessionToken(token);
+  return sessionIfAccountExists(await verifySessionToken(token));
 }
 
 /** Route Handler에서 accountId만 필요할 때 쓰는 짧은 헬퍼. */
@@ -87,5 +107,5 @@ export async function getServerSession(): Promise<SessionPayload | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   if (!token) return null;
-  return verifySessionToken(token);
+  return sessionIfAccountExists(await verifySessionToken(token));
 }

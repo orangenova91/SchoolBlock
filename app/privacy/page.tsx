@@ -27,6 +27,10 @@ export default function PrivacyPolicyPage() {
             <ul className="list-inside list-disc space-y-1">
               <li>계정 정보: 아이디(학교명), 비밀번호(암호화 저장)</li>
               <li>
+                계정 신청 정보: 학교명·지역·학교급, 담당 교사 성명·휴대전화·이메일,
+                직위, 문의 내용
+              </li>
+              <li>
                 시간표 작성 정보: 교사 성명, 담당 교과·학반·시수, 학반·교과·요일
                 설정, 생성된 시간표 결과 등 이용자가 입력하는 학사 정보
               </li>
@@ -36,9 +40,8 @@ export default function PrivacyPolicyPage() {
               </li>
             </ul>
             <p>
-              별도 계정 발급을 신청하실 때는 서비스 밖의 구글 설문(Google
-              Forms)을 이용하며, 그 정보는 구글의 개인정보 처리방침을
-              따릅니다.
+              계정 신청은 서비스 내 신청 페이지에서 접수하며, 신청 정보는
+              계정 발급 검토와 안내 연락에 사용합니다.
             </p>
           </section>
 
@@ -48,6 +51,7 @@ export default function PrivacyPolicyPage() {
             </h2>
             <ul className="list-inside list-disc space-y-1">
               <li>계정 식별 및 로그인 유지</li>
+              <li>프로그램 계정 신청 접수 및 발급 안내</li>
               <li>학교별 시간표 작성·저장·자동 생성 기능 제공</li>
               <li>서비스 문의 응대 및 오류 대응</li>
             </ul>
@@ -58,6 +62,10 @@ export default function PrivacyPolicyPage() {
               3. 개인정보의 보유 및 이용 기간
             </h2>
             <ul className="list-inside list-disc space-y-1">
+              <li>
+                계정 신청 정보: 계정 발급 및 문의 응대를 위해 보관하며, 발급
+                완료 또는 신청 반려 후 1년이 지나면 파기합니다.
+              </li>
               <li>
                 일반 계정: 이용자가 직접 삭제하거나 삭제를 요청하기 전까지
                 보유합니다. 학기(시간표) 삭제 시 그에 딸린 교과·교사·시간표

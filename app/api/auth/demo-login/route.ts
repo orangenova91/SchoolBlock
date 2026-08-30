@@ -1,8 +1,8 @@
 import { randomBytes } from "node:crypto";
-import type { Db } from "mongodb";
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { hashPassword } from "@/lib/accounts";
+import { deleteAccountsAndOwnedData } from "@/lib/account-cleanup";
 import {
   DEMO_ACCOUNT_MAX_AGE_MS,
   DEMO_TIMETABLE_NAME_NO_SET,
@@ -14,49 +14,23 @@ import {
 } from "@/lib/demo-seed";
 import { createSessionToken, sessionCookieOptions } from "@/lib/session";
 import { insertTermBundle } from "@/lib/term-bundle";
-import type { AccountDocument, TermDocument } from "@/lib/types";
-
-const CHILD_COLLECTIONS = [
-  "teachers",
-  "subjects",
-  "daySchedules",
-  "generationPreferences",
-  "setBlocks",
-  "subjectBlocks",
-  "teacherConstraints",
-  "timetables",
-  "timetableVersions",
-] as const;
+import type { AccountDocument } from "@/lib/types";
 
 /** 만료된 데모 계정과 그 학기·딸린 문서를 지운다. cron 없이, 다음 방문이 올 때마다 정리한다. */
-async function cleanupStaleDemoAccounts(db: Db): Promise<void> {
-  const accounts = db.collection<AccountDocument>("accounts");
-  const stale = await accounts
+async function cleanupStaleDemoAccounts(): Promise<void> {
+  const db = await getDb();
+  const stale = await db
+    .collection<AccountDocument>("accounts")
     .find({
       isDemo: true,
       createdAt: { $lt: new Date(Date.now() - DEMO_ACCOUNT_MAX_AGE_MS) },
     })
     .toArray();
   if (stale.length === 0) return;
-
-  const staleAccountIds = stale.map((a) => a._id.toString());
-
-  const terms = db.collection<TermDocument>("terms");
-  const staleTerms = await terms
-    .find({ ownerId: { $in: staleAccountIds } })
-    .toArray();
-  const staleTermIds = staleTerms.map((t) => t._id.toString());
-
-  if (staleTermIds.length > 0) {
-    await Promise.all(
-      CHILD_COLLECTIONS.map((name) =>
-        db.collection(name).deleteMany({ termId: { $in: staleTermIds } }),
-      ),
-    );
-    await terms.deleteMany({ ownerId: { $in: staleAccountIds } });
-  }
-
-  await accounts.deleteMany({ _id: { $in: stale.map((a) => a._id) } });
+  await deleteAccountsAndOwnedData(
+    db,
+    stale.map((account) => account._id),
+  );
 }
 
 /**
@@ -70,7 +44,7 @@ export async function POST() {
     const db = await getDb();
     const accounts = db.collection<AccountDocument>("accounts");
 
-    await cleanupStaleDemoAccounts(db);
+    await cleanupStaleDemoAccounts();
 
     const passwordHash = await hashPassword(randomBytes(16).toString("hex"));
     const insertResult = await accounts.insertOne({

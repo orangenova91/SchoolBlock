@@ -29,7 +29,12 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        {session ? <AccountHeader username={session.username} /> : null}
+        {session ? (
+          <AccountHeader
+            username={session.username}
+            isAdmin={session.role === "admin"}
+          />
+        ) : null}
         {children}
         <SiteFooter />
       </body>

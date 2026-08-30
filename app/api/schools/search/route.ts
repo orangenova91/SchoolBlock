@@ -1,33 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { checkRateLimit, getClientIp } from "@/lib/rate-limit";
 import { searchSchools } from "@/lib/schools";
 
 export const dynamic = "force-dynamic";
 
-const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
-
-function checkRateLimit(
-  ip: string,
-  maxRequests = 60,
-  windowMs = 60 * 1000,
-): boolean {
-  const now = Date.now();
-  const record = rateLimitMap.get(ip);
-  if (!record || now > record.resetTime) {
-    rateLimitMap.set(ip, { count: 1, resetTime: now + windowMs });
-    return true;
-  }
-  if (record.count >= maxRequests) return false;
-  record.count++;
-  return true;
-}
-
 export async function GET(request: NextRequest) {
   try {
-    const ip =
-      request.headers.get("x-forwarded-for") ||
-      request.headers.get("x-real-ip") ||
-      "unknown";
-    if (!checkRateLimit(ip)) {
+    const ip = getClientIp(request);
+    if (!checkRateLimit("schools-search", ip, 60, 60 * 1000)) {
       return NextResponse.json(
         { error: "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요." },
         { status: 429 },

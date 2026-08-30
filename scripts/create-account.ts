@@ -11,6 +11,7 @@ type CliOptions = {
   username?: string;
   password?: string;
   force?: boolean;
+  admin?: boolean;
   help?: boolean;
 };
 
@@ -50,6 +51,9 @@ function parseArgs(argv: string[]): CliOptions {
       case "password":
         options.password = consumeValue();
         break;
+      case "admin":
+        options.admin = true;
+        break;
       default:
         console.warn(`[경고] 알 수 없는 옵션을 무시합니다: ${arg}`);
     }
@@ -70,9 +74,13 @@ function printHelp() {
   # 기존 계정 비밀번호 강제 갱신
   npx tsx scripts/create-account.ts --username unyang --password "새비밀번호123!" --force
 
+  # 관리자 계정 생성
+  npx tsx scripts/create-account.ts --username admin --password "Abcd1234!" --admin
+
 옵션:
   --username  아이디 (필수)
   --password  비밀번호 (필수)
+  --admin     관리자 계정으로 생성(또는 --force 시 관리자로 승격)
   --force     이미 있는 아이디면 비밀번호를 덮어씀
   --help      이 도움말 표시
 `.trim(),
@@ -137,11 +145,24 @@ async function main() {
     }
 
     if (existing) {
-      await accounts.updateOne({ username }, { $set: { passwordHash } });
-      console.log(`"${username}" 계정의 비밀번호를 갱신했습니다.`);
+      const $set: Partial<AccountDocument> = { passwordHash };
+      if (options.admin) $set.role = "admin";
+      await accounts.updateOne({ username }, { $set });
+      const roleNote = options.admin || existing.role === "admin" ? " (관리자)" : "";
+      console.log(`"${username}" 계정의 비밀번호를 갱신했습니다.${roleNote}`);
     } else {
-      await accounts.insertOne({ username, passwordHash, createdAt: new Date() });
-      console.log(`새 계정 "${username}"을 만들었습니다.`);
+      const doc: AccountDocument = {
+        username,
+        passwordHash,
+        createdAt: new Date(),
+      };
+      if (options.admin) doc.role = "admin";
+      await accounts.insertOne(doc);
+      console.log(
+        options.admin
+          ? `새 관리자 계정 "${username}"을 만들었습니다.`
+          : `새 계정 "${username}"을 만들었습니다.`,
+      );
     }
   } catch (error) {
     console.error("계정 생성 중 오류가 발생했습니다:", error instanceof Error ? error.message : error);

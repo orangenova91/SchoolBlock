@@ -54,9 +54,13 @@ export async function POST(request: Request) {
     const token = await createSessionToken({
       accountId: account._id.toString(),
       username: account.username,
+      ...(account.role === "admin" ? { role: "admin" as const } : {}),
     });
 
-    const response = NextResponse.json({ username: account.username });
+    const response = NextResponse.json({
+      username: account.username,
+      role: account.role === "admin" ? "admin" : null,
+    });
     response.cookies.set(sessionCookieOptions.name, token, {
       httpOnly: sessionCookieOptions.httpOnly,
       sameSite: sessionCookieOptions.sameSite,

@@ -11,6 +11,10 @@ export function isAdminAccount(
   return Boolean(account && account.role === "admin" && !account.isDemo);
 }
 
+/** 로그인에 쓰지 않는 계정(데모 등)에 넣는 고정 해시. 클릭 경로에서 bcrypt를 피한다. */
+export const UNUSED_PASSWORD_HASH =
+  "$2b$12$eVSJmw9wbTK3B78BYpxIsembYanLjvj58MBVtY1bYlaM5QerJecOq";
+
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, SALT_ROUNDS);
 }

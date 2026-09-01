@@ -45,10 +45,10 @@ export default function LoginPage() {
             href="/apply"
             className="text-sm font-medium text-zinc-600 underline underline-offset-2 transition hover:text-zinc-900"
           >
-            프로그램 계정 신청하기
+            계정 신청하기
           </Link>
           <a
-            href="https://open.kakao.com/o/ghpSxzIh"
+            href="http://pf.kakao.com/_dGxexaX"
             target="_blank"
             rel="noopener noreferrer"
             className="text-sm font-medium text-zinc-600 underline underline-offset-2 transition hover:text-zinc-900"

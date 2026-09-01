@@ -7,7 +7,7 @@ import { countParticipatingSchools } from "@/lib/school-participation-count";
 import { getApplySocialProofMessage } from "@/lib/school-participation";
 
 export const metadata: Metadata = {
-  title: "프로그램 계정 신청 · 스쿨블럭(SchoolBlock)",
+  title: "계정 신청 · 스쿨블럭(SchoolBlock)",
 };
 
 export default async function ApplyPage() {
@@ -38,7 +38,7 @@ export default async function ApplyPage() {
             </h1>
           </div>
           <p className="mt-1 flex items-center justify-center gap-2 text-base font-medium text-zinc-800">
-            프로그램 계정 신청
+            계정 신청
             <span className="text-xs font-medium text-zinc-500">
               {APP_VERSION}
             </span>

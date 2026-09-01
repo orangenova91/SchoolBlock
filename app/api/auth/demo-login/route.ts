@@ -1,7 +1,6 @@
-import { randomBytes } from "node:crypto";
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
-import { hashPassword } from "@/lib/accounts";
+import { UNUSED_PASSWORD_HASH } from "@/lib/accounts";
 import { deleteAccountsAndOwnedData } from "@/lib/account-cleanup";
 import {
   DEMO_ACCOUNT_MAX_AGE_MS,
@@ -16,6 +15,11 @@ import { createSessionToken, sessionCookieOptions } from "@/lib/session";
 import { insertTermBundle } from "@/lib/term-bundle";
 import type { AccountDocument } from "@/lib/types";
 
+export const dynamic = "force-dynamic";
+export const maxDuration = 30;
+
+const CLEANUP_BATCH = 3;
+
 /** 만료된 데모 계정과 그 학기·딸린 문서를 지운다. cron 없이, 다음 방문이 올 때마다 정리한다. */
 async function cleanupStaleDemoAccounts(): Promise<void> {
   const db = await getDb();
@@ -25,6 +29,7 @@ async function cleanupStaleDemoAccounts(): Promise<void> {
       isDemo: true,
       createdAt: { $lt: new Date(Date.now() - DEMO_ACCOUNT_MAX_AGE_MS) },
     })
+    .limit(CLEANUP_BATCH)
     .toArray();
   if (stale.length === 0) return;
   await deleteAccountsAndOwnedData(
@@ -44,12 +49,9 @@ export async function POST() {
     const db = await getDb();
     const accounts = db.collection<AccountDocument>("accounts");
 
-    await cleanupStaleDemoAccounts();
-
-    const passwordHash = await hashPassword(randomBytes(16).toString("hex"));
     const insertResult = await accounts.insertOne({
       username: createDemoAccountUsername(),
-      passwordHash,
+      passwordHash: UNUSED_PASSWORD_HASH,
       createdAt: new Date(),
       isDemo: true,
     });
@@ -86,6 +88,13 @@ export async function POST() {
       path: sessionCookieOptions.path,
       maxAge: sessionCookieOptions.maxAge,
     });
+
+    after(() => {
+      void cleanupStaleDemoAccounts().catch((error) => {
+        console.error("demo cleanup failed:", error);
+      });
+    });
+
     return response;
   } catch (error) {
     console.error("demo login failed:", error);

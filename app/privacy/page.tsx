@@ -51,7 +51,7 @@ export default function PrivacyPolicyPage() {
             </h2>
             <ul className="list-inside list-disc space-y-1">
               <li>계정 식별 및 로그인 유지</li>
-              <li>프로그램 계정 신청 접수 및 발급 안내</li>
+              <li>계정 신청 접수 및 발급 안내</li>
               <li>학교별 시간표 작성·저장·자동 생성 기능 제공</li>
               <li>서비스 문의 응대 및 오류 대응</li>
             </ul>
@@ -152,12 +152,12 @@ export default function PrivacyPolicyPage() {
               <br />
               카카오톡 문의:{" "}
               <a
-                href="https://open.kakao.com/o/ghpSxzIh"
+                href="http://pf.kakao.com/_dGxexaX"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="font-medium text-zinc-900 underline underline-offset-2"
               >
-                open.kakao.com/o/ghpSxzIh
+                pf.kakao.com/_dGxexaX
               </a>
             </p>
           </section>

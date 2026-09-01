@@ -18,7 +18,7 @@ export function SiteFooter() {
             개인정보처리방침
           </Link>
           <a
-            href="https://open.kakao.com/o/ghpSxzIh"
+            href="http://pf.kakao.com/_dGxexaX"
             target="_blank"
             rel="noopener noreferrer"
             className="transition hover:text-zinc-900 hover:underline hover:underline-offset-2"

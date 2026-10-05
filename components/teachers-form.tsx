@@ -409,12 +409,17 @@ function ClassTotalHoursSummary({
   subjects,
   classCounts,
   schedules,
+  balances,
+  setSummaries,
 }: {
   teachers: Teacher[];
   subjects: GradeSubjects;
   classCounts: GradeClassCounts;
   schedules: GradeDaySchedules;
+  balances: ClassCommonHourBalance[];
+  setSummaries: SetAssignmentSummary[];
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const totals = useMemo(
     () => totalHoursByClass(teachers, subjects, classCounts),
     [teachers, subjects, classCounts],
@@ -447,7 +452,7 @@ function ClassTotalHoursSummary({
 
   return (
     <section
-      className={`rounded-2xl border px-4 py-3 shadow-sm ${
+      className={`w-full rounded-2xl border px-4 py-3 shadow-sm ${
         warn ? "border-amber-200 bg-amber-50" : "border-zinc-200 bg-white"
       }`}
       aria-label="학반별 총 시수 합계"
@@ -598,6 +603,48 @@ function ClassTotalHoursSummary({
           주간 교시와 같아야 다음으로 진행할 수 있습니다.
         </p>
       ) : null}
+
+      <div
+        className={`mt-3 border-t pt-3 ${
+          warn ? "border-amber-200" : "border-zinc-200"
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p
+            className={`text-xs ${warn ? "text-amber-800" : "text-zinc-500"}`}
+          >
+            학반별 공통 시수 합계 · SET 시수 배정
+          </p>
+          <button
+            type="button"
+            aria-expanded={detailsOpen}
+            aria-controls="class-hour-details"
+            onClick={() => setDetailsOpen((open) => !open)}
+            className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition ${
+              warn
+                ? "border-amber-300 bg-white text-amber-950 hover:bg-amber-100"
+                : "border-zinc-300 bg-white text-zinc-800 hover:bg-zinc-50"
+            }`}
+          >
+            {detailsOpen ? "접기" : "펼치기"}
+          </button>
+        </div>
+        {detailsOpen ? (
+          <div
+            id="class-hour-details"
+            className="mt-3 grid grid-cols-1 gap-4 lg:grid-cols-2"
+          >
+            <ClassCommonHoursSummary
+              balances={balances}
+              schedules={schedules}
+            />
+            <SetHoursAssignmentSummary
+              summaries={setSummaries}
+              classCounts={classCounts}
+            />
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -615,7 +662,7 @@ function ClassCommonHoursSummary({
 
   return (
     <section
-      className={`rounded-2xl border px-4 py-3 shadow-sm ${
+      className={`h-full rounded-2xl border px-4 py-3 shadow-sm ${
         hasImbalance
           ? "border-amber-200 bg-amber-50"
           : "border-zinc-200 bg-white"
@@ -749,7 +796,7 @@ function SetHoursAssignmentSummary({
   if (summaries.length === 0) {
     return (
       <section
-        className="rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-sm"
+        className="h-full rounded-2xl border border-zinc-200 bg-white px-4 py-3 shadow-sm"
         aria-label="SET 시수 배정"
       >
         <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
@@ -763,7 +810,7 @@ function SetHoursAssignmentSummary({
 
   return (
     <section
-      className={`rounded-2xl border px-4 py-3 shadow-sm ${
+      className={`h-full rounded-2xl border px-4 py-3 shadow-sm ${
         hasMismatch
           ? "border-amber-200 bg-amber-50"
           : "border-zinc-200 bg-white"
@@ -1488,14 +1535,13 @@ export function TeachersForm({ termId }: TeachersFormProps) {
         </p>
       </header>
 
-      <ClassCommonHoursSummary
-        balances={classBalances}
-        schedules={schedules}
-      />
-
-      <SetHoursAssignmentSummary
-        summaries={setSummaries}
+      <ClassTotalHoursSummary
+        teachers={teachers}
+        subjects={subjects}
         classCounts={gradeClassCounts}
+        schedules={schedules}
+        balances={classBalances}
+        setSummaries={setSummaries}
       />
 
       <div className="grid w-full grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
@@ -1744,15 +1790,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
           </button>
         </section>
 
-        <div className="flex flex-col gap-4 xl:sticky xl:top-4 xl:self-start">
-          <ClassTotalHoursSummary
-            teachers={teachers}
-            subjects={subjects}
-            classCounts={gradeClassCounts}
-            schedules={schedules}
-          />
-
-          <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
+        <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:self-start xl:overflow-y-auto">
           <h2 className="mb-3 text-center text-base font-semibold text-zinc-900">
             교과 목록
           </h2>
@@ -1789,7 +1827,6 @@ export function TeachersForm({ termId }: TeachersFormProps) {
             })}
           </div>
         </section>
-        </div>
       </div>
 
       <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">

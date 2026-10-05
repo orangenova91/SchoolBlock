@@ -16,6 +16,21 @@ export function lunchDoubleWeight(
   return preferences.avoidLunchDouble ? LUNCH_DOUBLE_PENALTY_WEIGHT : 0;
 }
 
+/**
+ * Score weight for one 동일 교과 같은 날 중복 (class+day+subject). Same tier as
+ * lunch doubles: both are rules the user explicitly turned on, while 3연강
+ * (weight 1) is a milder comfort preference.
+ */
+export const SAME_DAY_SUBJECT_PENALTY_WEIGHT = 10;
+
+export function sameDaySubjectWeight(
+  preferences: Pick<GenerationPreferences, "avoidSameDaySubject" | "sameDaySubjectBans">,
+): number {
+  return preferences.avoidSameDaySubject && preferences.sameDaySubjectBans.length > 0
+    ? SAME_DAY_SUBJECT_PENALTY_WEIGHT
+    : 0;
+}
+
 export function sameDaySubjectBanKey(
   grade: Grade,
   subjectName: string,
@@ -184,5 +199,9 @@ export function isTripleRunWindow(
 }
 
 export function hasSoftPreferences(preferences: GenerationPreferences): boolean {
-  return preferences.avoidLunchDouble || preferences.avoidTriplePeriod;
+  return (
+    preferences.avoidLunchDouble ||
+    preferences.avoidTriplePeriod ||
+    sameDaySubjectWeight(preferences) > 0
+  );
 }

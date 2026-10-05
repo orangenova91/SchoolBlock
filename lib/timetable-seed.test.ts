@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { catalogGradeSets } from "@/lib/set-blocks";
-import { buildSeedTimetableCells } from "@/lib/timetable";
+import { buildSeedTimetableCells, generateTimetable } from "@/lib/timetable";
 import {
   createEmptyTeacherAssignments,
   type Grade,
@@ -104,5 +104,67 @@ describe("buildSeedTimetableCells", () => {
       subjectBlocks: [],
     });
     assert.equal(cells.length, 0);
+  });
+});
+
+describe("generateTimetable with colliding locks", () => {
+  it("drops lock cells that collide with SET slots or earlier locks", () => {
+    const subjects: GradeSubjects = {
+      1: [
+        { set: "공통", name: "국어", units: 4, classCount: 2 },
+        setRow("A", "물리", 1, 1),
+        setRow("A", "화학", 1, 2),
+      ],
+      2: [],
+      3: [],
+    };
+    const korean = createEmptyTeacherAssignments();
+    korean[1] = [{ name: "국어", hours: 8, classHours: [4, 4] }];
+
+    const lock = (classNo: number, day: "mon" | "tue", period: number) => ({
+      grade: 1 as Grade,
+      classNo,
+      subjectName: "국어",
+      teacherName: "박국어",
+      day,
+      period,
+    });
+
+    const result = generateTimetable({
+      teachers: [
+        { name: "박국어", assignments: korean },
+        teacher("김물리", 1, "물리", 1),
+        teacher("이화학", 1, "화학", 1),
+      ],
+      subjects,
+      classCounts: classCounts(2),
+      schedules: schedulesOf(),
+      wholeCells: [{ grade: 1, set: "A", day: "mon", period: 1 }],
+      partialCells: [],
+      subjectBlocks: [
+        lock(1, "tue", 2), // kept
+        lock(1, "tue", 2), // same class slot as an earlier lock
+        lock(2, "tue", 2), // same teacher slot as an earlier lock
+        lock(1, "mon", 1), // on a SET slot
+      ],
+      timeLimitMs: 2000,
+      restarts: 2,
+    });
+
+    assert.equal(result.status, "ready");
+    const classSlots = new Set<string>();
+    const teacherSlots = new Set<string>();
+    for (const cell of result.cells) {
+      const classKey = `${cell.grade}:${cell.classNo}:${cell.day}:${cell.period}`;
+      assert.ok(!classSlots.has(classKey), `class slot reused: ${classKey}`);
+      classSlots.add(classKey);
+      for (const name of cell.teacherName.split("·")) {
+        const teacherKey = `${name}:${cell.day}:${cell.period}`;
+        assert.ok(!teacherSlots.has(teacherKey), `teacher double-booked: ${teacherKey}`);
+        teacherSlots.add(teacherKey);
+      }
+    }
+    const koreanCells = result.cells.filter((c) => c.subjectName === "국어");
+    assert.equal(koreanCells.length, 8);
   });
 });

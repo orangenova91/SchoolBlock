@@ -14,17 +14,18 @@ import {
   lunchDoubleWeight,
   lunchPairPeriods,
   sameDaySubjectBanKey,
+  sameDaySubjectWeight,
 } from "@/lib/generation-preferences";
 import {
   consumeLessonsForSubjectBlocks,
   filterSubjectBlocksToAssignments,
-  markBusyFromSubjectBlocks,
   subjectBlocksToTimetableCells,
 } from "@/lib/subject-blocks";
 import { isSetSubject } from "@/lib/teachers";
 import {
   GRADES,
   WEEKDAYS,
+  dayLabel,
   type GenerationPreferences,
   type Grade,
   type GradeClassCounts,
@@ -68,6 +69,11 @@ function teacherSlotKey(
   period: number,
 ): string {
   return `${teacherName}:${day}:${period}`;
+}
+
+/** Mon→Fri order; day keys sorted as strings would give 금·월·목·화·수. */
+function weekdayIndex(day: Weekday): number {
+  return WEEKDAYS.findIndex((w) => w.key === day);
 }
 
 function shuffle<T>(items: T[]): T[] {
@@ -399,14 +405,56 @@ function triplePeriodPenaltyForSlot(
   return 0;
 }
 
+function classDaySubjectKey(
+  grade: Grade,
+  classNo: number,
+  day: Weekday,
+  subjectName: string,
+): string {
+  return `${grade}|${classNo}|${day}|${subjectName}`;
+}
+
+/** Fixed + placed lesson counts per (class, day, subject), for 동일 교과 checks. */
+type ClassDaySubjectCounts = Map<string, number>;
+
+function bumpClassDaySubject(
+  counts: ClassDaySubjectCounts,
+  cell: Pick<TimetableCell, "grade" | "classNo" | "day" | "subjectName">,
+  delta: number,
+) {
+  const key = classDaySubjectKey(cell.grade, cell.classNo, cell.day, cell.subjectName);
+  const next = (counts.get(key) ?? 0) + delta;
+  if (next > 0) counts.set(key, next);
+  else counts.delete(key);
+}
+
+function sameDayBanKeys(preferences: GenerationPreferences): Set<string> {
+  if (sameDaySubjectWeight(preferences) === 0) return new Set();
+  return new Set(
+    preferences.sameDaySubjectBans.map((b) =>
+      sameDaySubjectBanKey(b.grade, b.subjectName),
+    ),
+  );
+}
+
 function softSlotPenalty(
   lesson: CommonLesson,
   slot: Slot,
   fixedTeacherLessons: Set<string>,
   placedTeacherLessons: Set<string>,
+  classDaySubjects: ClassDaySubjectCounts,
+  banKeys: Set<string>,
   preferences: GenerationPreferences,
 ): number {
   let penalty = 0;
+  if (
+    banKeys.has(sameDaySubjectBanKey(lesson.grade, lesson.subjectName)) &&
+    classDaySubjects.has(
+      classDaySubjectKey(lesson.grade, lesson.classNo, slot.day, lesson.subjectName),
+    )
+  ) {
+    penalty += sameDaySubjectWeight(preferences);
+  }
   if (preferences.avoidLunchDouble) {
     penalty +=
       lunchDoublePenaltyForSlot(
@@ -435,6 +483,8 @@ function orderSlotsForLesson(
   slots: Slot[],
   fixedTeacherLessons: Set<string>,
   placedTeacherLessons: Set<string>,
+  classDaySubjects: ClassDaySubjectCounts,
+  banKeys: Set<string>,
   preferences: GenerationPreferences,
 ): Slot[] {
   if (!hasSoftPreferences(preferences) || slots.length <= 1) {
@@ -447,6 +497,8 @@ function orderSlotsForLesson(
       slot,
       fixedTeacherLessons,
       placedTeacherLessons,
+      classDaySubjects,
+      banKeys,
       preferences,
     ),
     rand: Math.random(),
@@ -534,7 +586,7 @@ export function listLunchTeacherDoubles(
     });
   }
   out.sort((a, b) => {
-    if (a.day !== b.day) return a.day.localeCompare(b.day);
+    if (a.day !== b.day) return weekdayIndex(a.day) - weekdayIndex(b.day);
     return a.teacherName.localeCompare(b.teacherName, "ko");
   });
   return out;
@@ -563,223 +615,277 @@ export function countLunchSubjectDoubles(
   return countLunchTeacherDoubles(cells, lunchAfterPeriod);
 }
 
-function sameTimetableCell(a: TimetableCell, b: TimetableCell): boolean {
-  return (
-    a.grade === b.grade &&
-    a.classNo === b.classNo &&
-    a.day === b.day &&
-    a.period === b.period &&
-    a.subjectName === b.subjectName &&
-    a.teacherName === b.teacherName &&
-    a.kind === b.kind
-  );
-}
-
-function isFixedTimetableCell(
-  cell: TimetableCell,
-  fixedCells: TimetableCell[],
-): boolean {
-  return fixedCells.some((f) => sameTimetableCell(f, cell));
-}
-
-function findTeacherLessonAt(
-  cells: TimetableCell[],
-  teacherName: string,
-  day: Weekday,
-  period: number,
-): TimetableCell | undefined {
-  const name = teacherName.trim();
-  return cells.find(
-    (c) =>
-      c.day === day &&
-      c.period === period &&
-      teacherNamesOnCell(c).includes(name),
-  );
-}
-
-function buildOccupancy(cells: TimetableCell[]): {
-  classBusy: Set<string>;
-  teacherBusy: Set<string>;
-} {
-  const classBusy = new Set<string>();
-  const teacherBusy = new Set<string>();
-  for (const cell of cells) {
-    classBusy.add(
-      classSlotKey(cell.grade, cell.classNo, cell.day, cell.period),
-    );
-    for (const name of teacherNamesOnCell(cell)) {
-      teacherBusy.add(teacherSlotKey(name, cell.day, cell.period));
-    }
-  }
-  return { classBusy, teacherBusy };
-}
-
-/** Free slots for relocating one common cell (class + all its teachers). */
-function candidateSlotsForCommonMove(
-  cell: TimetableCell,
-  otherCells: TimetableCell[],
-  schedules: GradeDaySchedules,
-): Slot[] {
-  const { classBusy, teacherBusy } = buildOccupancy(otherCells);
-  const teachers = teacherNamesOnCell(cell);
-  const slots: Slot[] = [];
-  const periods = schedules[cell.grade];
-  for (const { key: day } of WEEKDAYS) {
-    const count = periods[day] ?? 0;
-    for (let period = 1; period <= count; period++) {
-      if (day === cell.day && period === cell.period) continue;
-      if (
-        classBusy.has(classSlotKey(cell.grade, cell.classNo, day, period))
-      ) {
-        continue;
-      }
-      if (
-        teachers.some((name) =>
-          teacherBusy.has(teacherSlotKey(name, day, period)),
-        )
-      ) {
-        continue;
-      }
-      slots.push({ day, period });
-    }
-  }
-  return slots;
-}
-
-function lunchDoubleCountIfMoved(
-  fixedCells: TimetableCell[],
-  commonCells: TimetableCell[],
-  commonIndex: number,
-  slot: Slot,
-  lunchAfterPeriod: number,
-): number {
-  const nextCommon = commonCells.map((c, i) =>
-    i === commonIndex ? { ...c, day: slot.day, period: slot.period } : c,
-  );
-  return countLunchTeacherDoubles(
-    [...fixedCells, ...nextCommon],
-    lunchAfterPeriod,
-  );
-}
-
 /**
- * Hill-climb: move movable common lessons off lunch doubles when a free
- * alternative slot exists. SET / 교과 블록 cells are never moved.
+ * Local search over the soft preferences (점심 연강, 3연강, 동일 교과 같은 날
+ * 중복) after a complete solve. Only common cells produced by the search move;
+ * SET, 선 수업 and 우선 배치 잠금 cells stay fixed.
+ *
+ * Moves are within one class: swap two of its common lessons, or move one to
+ * a free slot of that class. Swaps matter because a full timetable often has
+ * no free slot at all, where single moves can't do anything. A move must keep
+ * every teacher clear of fixed lessons, SET duty and 배정 불가 (all in
+ * `teacherBusySeed`) and of other common lessons.
+ *
+ * Every penalty is local to a (teacher, day) or a (class, day), so a move is
+ * scored by re-evaluating only the teacher-days and class-days it touches.
  */
-export function improveLunchTeacherDoubles(args: {
+function improveSoftPreferences(args: {
   fixedCells: TimetableCell[];
   commonCells: TimetableCell[];
   schedules: GradeDaySchedules;
-  lunchAfterPeriod: number;
+  classBusySeed: Set<string>;
+  teacherBusySeed: Set<string>;
+  preferences: GenerationPreferences;
   timeLimitMs: number;
-}): {
-  commonCells: TimetableCell[];
-  beforeCount: number;
-  afterCount: number;
-  moves: number;
-} {
-  const { fixedCells, schedules, lunchAfterPeriod } = args;
+}): TimetableCell[] {
+  const { fixedCells, schedules, classBusySeed, teacherBusySeed, preferences } =
+    args;
   const deadline = Date.now() + Math.max(0, args.timeLimitMs);
-  let commonCells = [...args.commonCells];
-  const beforeCount = countLunchTeacherDoubles(
-    [...fixedCells, ...commonCells],
-    lunchAfterPeriod,
-  );
-  let afterCount = beforeCount;
-  let moves = 0;
+  const lunchWeight = lunchDoubleWeight(preferences);
+  const tripleWeight = preferences.avoidTriplePeriod ? 1 : 0;
+  const sameDayWeight = sameDaySubjectWeight(preferences);
+  const banKeys = sameDayBanKeys(preferences);
+  const lunchAfter = preferences.lunchAfterPeriod;
+  const [beforeLunch, afterLunch] = lunchPairPeriods(lunchAfter);
 
-  if (beforeCount === 0 || args.timeLimitMs <= 0) {
-    return { commonCells, beforeCount, afterCount, moves };
-  }
+  const cells = args.commonCells.map((c) => ({ ...c }));
 
-  let guard = 0;
-  while (Date.now() < deadline && guard < 500) {
-    guard += 1;
-    const all = [...fixedCells, ...commonCells];
-    const doubles = listLunchTeacherDoubles(all, lunchAfterPeriod);
-    if (doubles.length === 0) break;
+  // teacher|day -> period -> lesson count (fixed + common)
+  const teacherDays = new Map<string, Map<number, number>>();
+  // grade|classNo|day -> subject -> lesson count (fixed + common)
+  const classDays = new Map<string, Map<string, number>>();
+  // classSlotKey / teacherSlotKey -> index into `cells`
+  const commonByClassSlot = new Map<string, number>();
+  const commonByTeacherSlot = new Map<string, number>();
 
-    let progressed = false;
-    for (const detail of doubles) {
-      if (Date.now() >= deadline) break;
+  const teacherDayKey = (name: string, day: Weekday) => `${name}|${day}`;
+  const classDayKey = (c: Pick<TimetableCell, "grade" | "classNo">, day: Weekday) =>
+    `${c.grade}|${c.classNo}|${day}`;
 
-      const sides = [
-        findTeacherLessonAt(
-          all,
-          detail.teacherName,
-          detail.day,
-          detail.startPeriod,
-        ),
-        findTeacherLessonAt(
-          all,
-          detail.teacherName,
-          detail.day,
-          detail.endPeriod,
-        ),
-      ];
-
-      for (const side of sides) {
-        if (!side || side.kind !== "common") continue;
-        if (isFixedTimetableCell(side, fixedCells)) continue;
-
-        const commonIndex = commonCells.findIndex((c) =>
-          sameTimetableCell(c, side),
-        );
-        if (commonIndex < 0) continue;
-
-        const others = all.filter((c) => !sameTimetableCell(c, side));
-        const candidates = shuffle(
-          candidateSlotsForCommonMove(side, others, schedules),
-        );
-        if (candidates.length === 0) continue;
-
-        const current = afterCount;
-        // Prefer moves that clear this teacher's lunch pair first (heuristic order).
-        const [beforeP, afterP] = lunchPairPeriods(lunchAfterPeriod);
-        const ranked = [...candidates].sort((a, b) => {
-          const score = (slot: Slot) => {
-            // Avoid landing on the other lunch side same day for this teacher.
-            if (
-              slot.day === detail.day &&
-              (slot.period === beforeP || slot.period === afterP)
-            ) {
-              return 1;
-            }
-            return 0;
-          };
-          return score(a) - score(b) || Math.random() - 0.5;
-        });
-
-        for (const slot of ranked) {
-          if (Date.now() >= deadline) break;
-          const nextCount = lunchDoubleCountIfMoved(
-            fixedCells,
-            commonCells,
-            commonIndex,
-            slot,
-            lunchAfterPeriod,
-          );
-          if (nextCount < current) {
-            commonCells = commonCells.map((c, i) =>
-              i === commonIndex
-                ? { ...c, day: slot.day, period: slot.period }
-                : c,
-            );
-            afterCount = nextCount;
-            moves += 1;
-            progressed = true;
-            break;
-          }
-        }
-        if (progressed) break;
-      }
-      if (progressed) break;
+  const bump = <K>(map: Map<string, Map<K, number>>, key: string, inner: K, delta: number) => {
+    let m = map.get(key);
+    if (!m) {
+      m = new Map();
+      map.set(key, m);
     }
+    const next = (m.get(inner) ?? 0) + delta;
+    if (next > 0) m.set(inner, next);
+    else m.delete(inner);
+  };
 
-    if (!progressed) break;
+  const index = (cell: TimetableCell, delta: number) => {
+    for (const name of teacherNamesOnCell(cell)) {
+      if (name === "—") continue;
+      bump(teacherDays, teacherDayKey(name, cell.day), cell.period, delta);
+    }
+    bump(classDays, classDayKey(cell, cell.day), cell.subjectName, delta);
+  };
+  const indexCommon = (i: number, delta: number) => {
+    const cell = cells[i];
+    index(cell, delta);
+    const classKey = classSlotKey(cell.grade, cell.classNo, cell.day, cell.period);
+    const teacherKey = teacherSlotKey(cell.teacherName, cell.day, cell.period);
+    if (delta > 0) {
+      commonByClassSlot.set(classKey, i);
+      commonByTeacherSlot.set(teacherKey, i);
+    } else {
+      commonByClassSlot.delete(classKey);
+      commonByTeacherSlot.delete(teacherKey);
+    }
+  };
+  for (const cell of fixedCells) index(cell, 1);
+  cells.forEach((_, i) => indexCommon(i, 1));
+
+  const teacherDayPenalty = (key: string): number => {
+    const periods = teacherDays.get(key);
+    if (!periods || periods.size === 0) return 0;
+    let penalty = 0;
+    if (lunchWeight > 0 && periods.has(beforeLunch) && periods.has(afterLunch)) {
+      penalty += lunchWeight;
+    }
+    if (tripleWeight > 0) {
+      const last = Math.max(...periods.keys());
+      for (let start = 1; start + 2 <= last; start++) {
+        if (
+          isTripleRunWindow(start, lunchAfter) &&
+          periods.has(start) &&
+          periods.has(start + 1) &&
+          periods.has(start + 2)
+        ) {
+          penalty += tripleWeight;
+        }
+      }
+    }
+    return penalty;
+  };
+
+  const classDayPenalty = (grade: Grade, key: string): number => {
+    if (sameDayWeight === 0) return 0;
+    const subjects = classDays.get(key);
+    if (!subjects) return 0;
+    let penalty = 0;
+    for (const [subject, count] of subjects) {
+      if (count >= 2 && banKeys.has(sameDaySubjectBanKey(grade, subject))) {
+        penalty += sameDayWeight;
+      }
+    }
+    return penalty;
+  };
+
+  const isHot = (i: number): boolean => {
+    const cell = cells[i];
+    if (teacherDayPenalty(teacherDayKey(cell.teacherName, cell.day)) > 0) return true;
+    if (!banKeys.has(sameDaySubjectBanKey(cell.grade, cell.subjectName))) return false;
+    return (classDays.get(classDayKey(cell, cell.day))?.get(cell.subjectName) ?? 0) >= 2;
+  };
+
+  /** Can `teacherName` take `slot`, ignoring the common lesson at index `vacating`? */
+  const teacherFree = (teacherName: string, slot: Slot, vacating: number | null) => {
+    const key = teacherSlotKey(teacherName, slot.day, slot.period);
+    if (teacherBusySeed.has(key)) return false;
+    const occupant = commonByTeacherSlot.get(key);
+    return occupant === undefined || occupant === vacating;
+  };
+
+  /**
+   * Try moving cells[i] to `slot`; if `j` is given, cells[j] (same class,
+   * currently at `slot`) goes to cells[i]'s old slot. The move is kept when
+   * `accept(delta)` says so (delta = change in total penalty), and the delta
+   * is returned; otherwise it is undone and null is returned.
+   */
+  const attemptMove = (
+    i: number,
+    slot: Slot,
+    j: number | null,
+    accept: (delta: number) => boolean,
+  ): number | null => {
+    const a = cells[i];
+    const from: Slot = { day: a.day, period: a.period };
+    if (!teacherFree(a.teacherName, slot, j)) return null;
+    if (j !== null && !teacherFree(cells[j].teacherName, from, i)) return null;
+
+    const teacherKeys = new Set<string>();
+    const classKeys = new Set<string>([classDayKey(a, from.day), classDayKey(a, slot.day)]);
+    for (const name of [a.teacherName, ...(j !== null ? [cells[j].teacherName] : [])]) {
+      teacherKeys.add(teacherDayKey(name, from.day));
+      teacherKeys.add(teacherDayKey(name, slot.day));
+    }
+    const score = () => {
+      let total = 0;
+      for (const key of teacherKeys) total += teacherDayPenalty(key);
+      for (const key of classKeys) total += classDayPenalty(a.grade, key);
+      return total;
+    };
+
+    const before = score();
+    const relocate = (to: Slot, other: Slot | null) => {
+      indexCommon(i, -1);
+      if (j !== null) indexCommon(j, -1);
+      cells[i] = { ...cells[i], day: to.day, period: to.period };
+      if (j !== null && other) cells[j] = { ...cells[j], day: other.day, period: other.period };
+      indexCommon(i, 1);
+      if (j !== null) indexCommon(j, 1);
+    };
+    relocate(slot, from);
+    const delta = score() - before;
+    if (accept(delta)) return delta;
+    relocate(from, slot);
+    return null;
+  };
+
+  const classIndices = new Map<string, number[]>();
+  cells.forEach((cell, i) => {
+    const key = `${cell.grade}:${cell.classNo}`;
+    const list = classIndices.get(key);
+    if (list) list.push(i);
+    else classIndices.set(key, [i]);
+  });
+
+  const freeSlotsOf = (cell: TimetableCell): Slot[] => {
+    const slots: Slot[] = [];
+    for (const { key: day } of WEEKDAYS) {
+      const count = schedules[cell.grade][day] ?? 0;
+      for (let period = 1; period <= count; period++) {
+        const key = classSlotKey(cell.grade, cell.classNo, day, period);
+        if (!classBusySeed.has(key) && !commonByClassSlot.has(key)) {
+          slots.push({ day, period });
+        }
+      }
+    }
+    return slots;
+  };
+
+  /** Same-class partner (swap) or free slot (move) for cells[i]. */
+  const moveOptions = (i: number): { slot: Slot; j: number | null }[] => {
+    const cell = cells[i];
+    const options: { slot: Slot; j: number | null }[] = [];
+    for (const j of classIndices.get(`${cell.grade}:${cell.classNo}`) ?? []) {
+      if (j === i) continue;
+      options.push({ slot: { day: cells[j].day, period: cells[j].period }, j });
+    }
+    for (const slot of freeSlotsOf(cell)) options.push({ slot, j: null });
+    return options;
+  };
+
+  // Phase 1: steepest-first descent — take any improving move until none is left.
+  const improving = (delta: number) => delta < 0;
+  while (Date.now() < deadline) {
+    let improved = false;
+    for (const i of shuffle(cells.map((_, k) => k).filter(isHot))) {
+      if (Date.now() >= deadline) break;
+      if (!isHot(i)) continue; // an earlier move this pass may have fixed it
+      for (const { slot, j } of shuffle(moveOptions(i))) {
+        if (attemptMove(i, slot, j, improving) !== null) {
+          improved = true;
+          break;
+        }
+      }
+    }
+    if (!improved) break;
   }
 
-  return { commonCells, beforeCount, afterCount, moves };
+  // Phase 2: simulated annealing for the rest of the budget, to climb out of
+  // the local optimum phase 1 stops in. Sideways and mildly worse moves are
+  // accepted with a probability that cools over time; the best arrangement
+  // seen is what gets returned.
+  let current = 0;
+  for (const key of teacherDays.keys()) current += teacherDayPenalty(key);
+  for (const key of classDays.keys()) {
+    current += classDayPenalty(Number(key.split("|")[0]) as Grade, key);
+  }
+  let best = current;
+  let bestCells = cells.map((c) => ({ ...c }));
+  const start = Date.now();
+  const span = Math.max(1, deadline - start);
+  let hot: number[] = [];
+  for (let iter = 0; current > 0 && Date.now() < deadline; iter++) {
+    if (iter % 200 === 0) hot = cells.map((_, k) => k).filter(isHot);
+    if (hot.length === 0) break;
+    // Mostly work on cells involved in a penalty, sometimes on any cell so
+    // the search can rearrange around them.
+    const i =
+      Math.random() < 0.8
+        ? hot[Math.floor(Math.random() * hot.length)]
+        : Math.floor(Math.random() * cells.length);
+    const options = moveOptions(i);
+    if (options.length === 0) continue;
+    const { slot, j } = options[Math.floor(Math.random() * options.length)];
+    const temperature = 2.5 * (1 - (Date.now() - start) / span) + 0.05;
+    const delta = attemptMove(
+      i,
+      slot,
+      j,
+      (d) => d <= 0 || Math.random() < Math.exp(-d / temperature),
+    );
+    if (delta === null) continue;
+    current += delta;
+    if (current < best) {
+      best = current;
+      bestCells = cells.map((c) => ({ ...c }));
+    }
+  }
+
+  return bestCells;
 }
 
 /**
@@ -828,7 +934,7 @@ export function listTeacherTripleRuns(
     }
   }
   out.sort((a, b) => {
-    if (a.day !== b.day) return a.day.localeCompare(b.day);
+    if (a.day !== b.day) return weekdayIndex(a.day) - weekdayIndex(b.day);
     if (a.startPeriod !== b.startPeriod) return a.startPeriod - b.startPeriod;
     return a.teacherName.localeCompare(b.teacherName, "ko");
   });
@@ -858,6 +964,12 @@ function softPreferenceScore(
   }
   if (preferences.avoidTriplePeriod) {
     score += countTeacherTripleRuns(cells, preferences.lunchAfterPeriod);
+  }
+  const sameDayWeight = sameDaySubjectWeight(preferences);
+  if (sameDayWeight > 0) {
+    score +=
+      listSameDaySubjectViolations(cells, preferences.sameDaySubjectBans).length *
+      sameDayWeight;
   }
   return score;
 }
@@ -930,6 +1042,8 @@ type PlaceState = {
   cellsByLessonId: Map<number, TimetableCell>;
   /** teacherSlotKey set for placed cells, for O(1) teacherHasLessonAt checks. */
   teacherLessons: Set<string>;
+  /** Fixed + placed (class, day, subject) counts for the 동일 교과 penalty. */
+  classDaySubjects: ClassDaySubjectCounts;
 };
 
 function placeLesson(
@@ -947,6 +1061,7 @@ function placeLesson(
     teacherSlotKey(lesson.teacherName.trim(), slot.day, slot.period),
   );
   state.assignment.set(lesson.id, slot);
+  bumpClassDaySubject(state.classDaySubjects, { ...lesson, ...slot }, 1);
   state.cellsByLessonId.set(lesson.id, {
     grade: lesson.grade,
     classNo: lesson.classNo,
@@ -969,11 +1084,88 @@ function unplaceLesson(state: PlaceState, lesson: CommonLesson, slot: Slot) {
     teacherSlotKey(lesson.teacherName.trim(), slot.day, slot.period),
   );
   state.assignment.delete(lesson.id);
+  bumpClassDaySubject(state.classDaySubjects, { ...lesson, ...slot }, -1);
   state.cellsByLessonId.delete(lesson.id);
 }
 
 function placedCellsArray(state: PlaceState): TimetableCell[] {
   return [...state.cellsByLessonId.values()];
+}
+
+/**
+ * Per-class view of the remaining lessons: how many still need a slot, and
+ * the union of slots any of them could take. Lessons of the same
+ * (teacher, class, subject) share one domain, so each such group's slots are
+ * added once.
+ */
+type ClassCoverage = Map<
+  string,
+  { need: number; slots: Set<string>; groups: Set<string> }
+>;
+
+function addToClassCoverage(
+  coverage: ClassCoverage,
+  lesson: CommonLesson,
+  slots: Slot[],
+) {
+  const classKey = `${lesson.grade}:${lesson.classNo}`;
+  let entry = coverage.get(classKey);
+  if (!entry) {
+    entry = { need: 0, slots: new Set(), groups: new Set() };
+    coverage.set(classKey, entry);
+  }
+  entry.need += 1;
+  const group = unplacedKey(lesson);
+  if (entry.groups.has(group)) return;
+  entry.groups.add(group);
+  for (const slot of slots) entry.slots.add(`${slot.day}:${slot.period}`);
+}
+
+/**
+ * Each lesson needs its own class slot, so a class whose candidate slots are
+ * fewer than its pending lessons can't be completed. This catches what the
+ * per-lesson MRV check never sees: in a tight timetable (as many lessons as
+ * free slots) a single class slot that no remaining lesson can take — e.g. a
+ * lunch-adjacent slot under the hard lunch rule — dooms the whole branch.
+ */
+function classCoverageShort(coverage: ClassCoverage): boolean {
+  for (const entry of coverage.values()) {
+    if (entry.slots.size < entry.need) return true;
+  }
+  return false;
+}
+
+/**
+ * True when the hard lunch rule leaves some class unable to place all its
+ * lessons even before anything is placed — the hard pass can then never
+ * succeed and its budget is better spent on the soft pass.
+ */
+function hardLunchInfeasibleAtRoot(
+  lessons: CommonLesson[],
+  schedules: GradeDaySchedules,
+  classBusySeed: Set<string>,
+  teacherBusySeed: Set<string>,
+  fixedCells: TimetableCell[],
+  lunchAfterPeriod: number,
+): boolean {
+  const fixedTeacherLessons = buildTeacherLessonSet(fixedCells);
+  const placed = new Set<string>();
+  const coverage: ClassCoverage = new Map();
+  for (const lesson of lessons) {
+    const slots = slotsForLessonSearch(
+      lesson,
+      schedules,
+      classBusySeed,
+      teacherBusySeed,
+      true,
+      lunchAfterPeriod,
+      fixedTeacherLessons,
+      placed,
+    );
+    if (slots.length === 0) return true;
+    addToClassCoverage(coverage, lesson, slots);
+  }
+  return classCoverageShort(coverage);
 }
 
 /**
@@ -1034,6 +1226,9 @@ function solveBacktracking(
   // Fixed cells never change across restarts/nodes, so index them once
   // instead of letting every slot check scan the fixedCells array.
   const fixedTeacherLessons = buildTeacherLessonSet(fixedCells);
+  const fixedClassDaySubjects: ClassDaySubjectCounts = new Map();
+  for (const cell of fixedCells) bumpClassDaySubject(fixedClassDaySubjects, cell, 1);
+  const banKeys = sameDayBanKeys(preferences);
 
   const degrees = new Map<number, number>();
   for (const lesson of lessons) {
@@ -1068,13 +1263,20 @@ function solveBacktracking(
       assignment: new Map(),
       cellsByLessonId: new Map(),
       teacherLessons: new Set(),
+      classDaySubjects: new Map(fixedClassDaySubjects),
     };
     const remaining = new Set(lessons.map((l) => l.id));
     const byId = new Map(lessons.map((l) => [l.id, l]));
+    // Per-restart budget, like the lunch/same-day solvers — a shared counter
+    // would make every restart after the first exhaustion abort immediately.
+    let restartNodes = 0;
+    const outOfBudget = () =>
+      restartNodes > options.nodeLimit || Date.now() > restartDeadline;
 
     const search = (): boolean => {
       nodes += 1;
-      if (nodes > options.nodeLimit || Date.now() > restartDeadline) {
+      restartNodes += 1;
+      if (outOfBudget()) {
         considerBest(state, remaining, byId);
         return false;
       }
@@ -1084,6 +1286,7 @@ function solveBacktracking(
       let bestSlots: Slot[] = [];
       let bestCount = Infinity;
       let bestDeg = -1;
+      const coverage: ClassCoverage = new Map();
 
       for (const id of remaining) {
         const lesson = byId.get(id)!;
@@ -1097,6 +1300,7 @@ function solveBacktracking(
           fixedTeacherLessons,
           state.teacherLessons,
         );
+        addToClassCoverage(coverage, lesson, slots);
         const deg = degrees.get(id) ?? 0;
         if (
           slots.length < bestCount ||
@@ -1110,7 +1314,7 @@ function solveBacktracking(
         }
       }
 
-      if (bestId === null || bestCount === 0) {
+      if (bestId === null || bestCount === 0 || classCoverageShort(coverage)) {
         considerBest(state, remaining, byId);
         return false;
       }
@@ -1123,6 +1327,8 @@ function solveBacktracking(
         bestSlots,
         fixedTeacherLessons,
         state.teacherLessons,
+        state.classDaySubjects,
+        banKeys,
         preferences,
       );
 
@@ -1130,7 +1336,7 @@ function solveBacktracking(
         placeLesson(state, lesson, slot);
         if (search()) return true;
         unplaceLesson(state, lesson, slot);
-        if (nodes > options.nodeLimit || Date.now() > restartDeadline) {
+        if (outOfBudget()) {
           remaining.add(bestId);
           considerBest(state, remaining, byId);
           return false;
@@ -1217,6 +1423,7 @@ function repairUnplaced(
     assignment: new Map(),
     cellsByLessonId: new Map(),
     teacherLessons: new Set(),
+    classDaySubjects: new Map(),
   };
 
   // Rebuild state from initial common cells (approximate: match lessons
@@ -1531,40 +1738,20 @@ export function generateTimetable(
   const preferences =
     preferencesInput ?? createDefaultGenerationPreferences();
 
-  const catalog = catalogGradeSets(subjects, classCounts);
-  const setCells = buildSetCells({
-    wholeCells,
-    partialCells,
-    subjects,
-    classCounts,
-    teachers,
-    catalog,
-    teacherAssignments,
-  });
-
-  const lockedBlocks = filterSubjectBlocksToAssignments(
-    subjectBlocks,
-    teachers,
-    subjects,
-    classCounts,
-    schedules,
-  );
+  const { setCells, classBusySeed, teacherBusySeed, lockedBlocks } =
+    prepareBusySeeds({
+      teachers,
+      subjects,
+      classCounts,
+      schedules,
+      wholeCells,
+      partialCells,
+      teacherAssignments,
+      subjectBlocks,
+      forbiddenSlots,
+    });
   const blockCells = subjectBlocksToTimetableCells(lockedBlocks);
   const fixedCells = [...setCells, ...blockCells];
-
-  const classBusySeed = new Set<string>();
-  const teacherBusySeed = new Set<string>();
-  markBusyFromSetCells(setCells, classBusySeed, teacherBusySeed);
-  markTeacherBusyFromBlocks(
-    wholeCells,
-    partialCells,
-    teachers,
-    catalog,
-    teacherBusySeed,
-    teacherAssignments,
-  );
-  markBusyFromSubjectBlocks(lockedBlocks, classBusySeed, teacherBusySeed);
-  markTeacherBusyFromForbidden(forbiddenSlots, teacherBusySeed);
 
   const allLessons = expandCommonLessons(teachers, subjects, classCounts);
   const { remaining: lessons } = consumeLessonsForSubjectBlocks(
@@ -1586,9 +1773,22 @@ export function generateTimetable(
   // solution found is guaranteed to have zero teacher lunch doubles. Only if
   // that proves infeasible within its budget do we fall back to the soft
   // (deprioritize-only) search below, which can still tolerate fixed-block-
-  // induced or otherwise unavoidable doubles.
+  // induced or otherwise unavoidable doubles. When the hard rule already
+  // leaves some class short of slots before anything is placed (typically a
+  // lunch slot 점심시간 우선 배치 had to leave empty), the hard pass can never
+  // succeed, so skip it and give the whole budget to the soft pass.
+  const tryHardLunchPass =
+    preferences.avoidLunchDouble &&
+    !hardLunchInfeasibleAtRoot(
+      lessons,
+      schedules,
+      classBusySeed,
+      teacherBusySeed,
+      fixedCells,
+      preferences.lunchAfterPeriod,
+    );
   let solved: ReturnType<typeof solveBacktracking>;
-  if (preferences.avoidLunchDouble) {
+  if (tryHardLunchPass) {
     const hardRestarts = Math.max(1, Math.round(restarts * 0.7));
     const hardTimeLimitMs = Math.max(1500, Math.round(searchBudget * 0.7));
 
@@ -1685,18 +1885,19 @@ export function generateTimetable(
 
   if (unplacedCount === 0) {
     let finalCommon = commonCells;
-    if (preferences.avoidLunchDouble) {
-      // Repair budget is unused on complete solves — spend it on lunch cleanup.
-      // The before/after counts are reflected in the dedicated lunch-double
-      // diagnostic panel, so no separate message note is needed here.
-      const improved = improveLunchTeacherDoubles({
+    if (hasSoftPreferences(preferences)) {
+      // Repair budget is unused on complete solves — spend it on local
+      // search over the soft preferences. The results show up in the
+      // dedicated diagnostic panels, so no separate message note is needed.
+      finalCommon = improveSoftPreferences({
         fixedCells,
         commonCells: finalCommon,
         schedules,
-        lunchAfterPeriod: preferences.lunchAfterPeriod,
+        classBusySeed,
+        teacherBusySeed,
+        preferences,
         timeLimitMs: Math.max(1500, repairBudget),
       });
-      finalCommon = improved.commonCells;
     }
 
     const allCells = [...setCells, ...blockCells, ...finalCommon];
@@ -1847,32 +2048,93 @@ function buildLunchLessonGroups(
 }
 
 /**
- * Slot-centric MRV backtracking: unlike `solveBacktracking` (lesson -> slot),
- * here the targets (lunch-adjacent periods) are fixed and known up front, and
- * we pick which lesson fills each one. Any complete fill is guaranteed to
- * have zero teacher lunch doubles, since a candidate is rejected outright if
- * its teacher already has a lesson on the opposite side of lunch that day.
+ * Group keys whose teacher can fill `target` without creating a lunch
+ * double: still has hours for that class, is free at the target period (not
+ * teaching and not 배정 불가), and is not *teaching* at the partner period.
+ * 배정 불가 on the partner period is fine — the teacher simply won't teach
+ * then, so no double can form.
+ */
+function lunchCandidateKeys(
+  target: LunchSlotTarget,
+  classGroupKeys: Map<string, string[]>,
+  groups: Map<string, LunchLessonGroup>,
+  teacherBusySeed: Set<string>,
+  teacherLessonSeed: Set<string>,
+  lunchAfterPeriod: number,
+): string[] {
+  const [before, after] = lunchPairPeriods(lunchAfterPeriod);
+  const partner = target.period === before ? after : before;
+  const out: string[] = [];
+  for (const key of classGroupKeys.get(`${target.grade}|${target.classNo}`) ?? []) {
+    const g = groups.get(key)!;
+    if (g.count <= 0) continue;
+    if (teacherBusySeed.has(teacherSlotKey(g.teacherName, target.day, target.period))) {
+      continue;
+    }
+    if (teacherLessonSeed.has(teacherSlotKey(g.teacherName, target.day, partner))) {
+      continue;
+    }
+    out.push(key);
+  }
+  return out;
+}
+
+/**
+ * Maximum bipartite matching (Kuhn's augmenting paths) of one day's lunch
+ * targets to teachers. A teacher can take at most one lunch-adjacent slot per
+ * day — two slots would either straddle lunch (a double) or overlap in the
+ * same period — so per day this is exactly a matching problem, and augmenting
+ * paths re-route earlier choices instead of getting stuck on them the way
+ * chronological backtracking does. Returns the chosen group key per target.
+ */
+function matchLunchDay(
+  candidates: string[][],
+  groups: Map<string, LunchLessonGroup>,
+): (string | null)[] {
+  const owner = new Map<string, { target: number; key: string }>();
+  const tryAssign = (i: number, seen: Set<string>): boolean => {
+    for (const key of candidates[i]) {
+      const teacher = groups.get(key)!.teacherName;
+      if (seen.has(teacher)) continue;
+      seen.add(teacher);
+      const current = owner.get(teacher);
+      if (!current || tryAssign(current.target, seen)) {
+        owner.set(teacher, { target: i, key });
+        return true;
+      }
+    }
+    return false;
+  };
+  for (let i = 0; i < candidates.length; i++) tryAssign(i, new Set());
+
+  const chosen: (string | null)[] = candidates.map(() => null);
+  for (const { target, key } of owner.values()) chosen[target] = key;
+  return chosen;
+}
+
+type LunchDayBound = { day: Weekday; targets: number; max: number };
+
+/**
+ * Fills lunch-adjacent targets day by day with a maximum matching per day.
+ * Days only interact through each (teacher, class, subject)'s remaining
+ * hours, so the tightest days (least spare teachers) go first and later
+ * attempts perturb the day/candidate order, keeping the best total.
+ *
+ * Also returns each day's matching size with full hours available — an
+ * upper bound no placement can beat, used to tell structural shortfalls
+ * (not enough teachers that day) apart from cross-day hour contention.
  */
 function solveLunchSlots(
   targets: LunchSlotTarget[],
   groupsSeed: Map<string, LunchLessonGroup>,
-  classBusySeed: Set<string>,
   teacherBusySeed: Set<string>,
+  teacherLessonSeed: Set<string>,
   lunchAfterPeriod: number,
   timeLimitMs: number,
   restarts: number,
-): { cells: TimetableCell[]; attemptsUsed: number } {
-  const [before, after] = lunchPairPeriods(lunchAfterPeriod);
-  const globalDeadline = Date.now() + Math.max(0, timeLimitMs);
-  const sliceMs = Math.max(
-    300,
-    Math.floor(timeLimitMs / Math.max(1, restarts)),
-  );
-  const nodeLimit = 200_000;
+): { cells: TimetableCell[]; attemptsUsed: number; dayBounds: LunchDayBound[] } {
+  const deadline = Date.now() + Math.max(0, timeLimitMs);
 
-  // Which group keys are even eligible for a given class — stable across
-  // restarts, so this index is built once instead of rescanning every group
-  // (231+ entries) on every single candidate check.
   const classGroupKeys = new Map<string, string[]>();
   for (const [key, g] of groupsSeed) {
     const classKey = `${g.grade}|${g.classNo}`;
@@ -1880,266 +2142,90 @@ function solveLunchSlots(
     if (list) list.push(key);
     else classGroupKeys.set(classKey, [key]);
   }
+
+  const byDay = new Map<Weekday, number[]>();
+  targets.forEach((t, i) => {
+    const list = byDay.get(t.day);
+    if (list) list.push(i);
+    else byDay.set(t.day, [i]);
+  });
+
+  const candidatesFor = (idx: number[], groups: Map<string, LunchLessonGroup>) =>
+    idx.map((i) =>
+      lunchCandidateKeys(
+        targets[i],
+        classGroupKeys,
+        groups,
+        teacherBusySeed,
+        teacherLessonSeed,
+        lunchAfterPeriod,
+      ),
+    );
+
+  const dayBounds: LunchDayBound[] = [];
+  const slack = new Map<Weekday, number>();
+  for (const [day, idx] of byDay) {
+    const candidates = candidatesFor(idx, groupsSeed);
+    const max = matchLunchDay(candidates, groupsSeed).filter(Boolean).length;
+    dayBounds.push({ day, targets: idx.length, max });
+    const pool = new Set(
+      candidates.flat().map((key) => groupsSeed.get(key)!.teacherName),
+    );
+    slack.set(day, pool.size - idx.length);
+  }
+  const upperBound = dayBounds.reduce((s, d) => s + d.max, 0);
 
   let bestCells: TimetableCell[] = [];
   let attemptsUsed = 0;
 
-  for (let restart = 0; restart < restarts; restart++) {
-    if (Date.now() > globalDeadline) break;
-    attemptsUsed = restart + 1;
-    const restartDeadline = Math.min(globalDeadline, Date.now() + sliceMs);
+  for (let attempt = 0; attempt < Math.max(1, restarts); attempt++) {
+    if (attempt > 0 && Date.now() > deadline) break;
+    attemptsUsed = attempt + 1;
+    // Every attempt (including the first) shuffles target and candidate
+    // order, so pressing 점심시간 우선 배치 again yields a different — equally
+    // full — arrangement. The first attempt keeps the strict tightest-day-
+    // first order (noise < 1 only breaks ties); later attempts perturb it so
+    // a different day gets first pick of shared hours.
+    const dayNoise = attempt === 0 ? 0.9 : 3;
+    const days = [...byDay.keys()]
+      .map((day) => ({
+        day,
+        score: slack.get(day)! + Math.random() * dayNoise,
+      }))
+      .sort((a, b) => a.score - b.score)
+      .map((d) => d.day);
 
-    const classBusy = new Set(classBusySeed);
-    const teacherBusy = new Set(teacherBusySeed);
     const groups = new Map<string, LunchLessonGroup>();
     for (const [key, g] of groupsSeed) groups.set(key, { ...g });
-    const placed: TimetableCell[] = [];
-    const remaining = new Set(targets.map((_, i) => i));
-    let nodes = 0;
-    let bestPartial: TimetableCell[] = [];
+    const cells: TimetableCell[] = [];
 
-    const considerBest = () => {
-      if (placed.length > bestPartial.length) {
-        bestPartial = [...placed];
-      }
-    };
-
-    const candidateKeysFor = (target: LunchSlotTarget): string[] => {
-      const partner = target.period === before ? after : before;
-      const keys = classGroupKeys.get(`${target.grade}|${target.classNo}`);
-      if (!keys) return [];
-      const out: string[] = [];
-      for (const key of keys) {
+    for (const day of days) {
+      const idx = shuffle(byDay.get(day)!);
+      const candidates = candidatesFor(idx, groups).map((c) => shuffle(c));
+      const chosen = matchLunchDay(candidates, groups);
+      chosen.forEach((key, j) => {
+        if (!key) return;
         const g = groups.get(key)!;
-        if (g.count <= 0) continue;
-        // `teacherBusy` already tracks every seed + placed-so-far commitment
-        // for this restart, so both checks below are O(1) set lookups
-        // equivalent to (but far cheaper than) scanning fixedCells + placed.
-        if (
-          teacherBusy.has(
-            teacherSlotKey(g.teacherName, target.day, target.period),
-          )
-        ) {
-          continue;
-        }
-        if (teacherBusy.has(teacherSlotKey(g.teacherName, target.day, partner))) {
-          continue;
-        }
-        out.push(key);
-      }
-      return out;
-    };
-
-    const search = (): boolean => {
-      nodes += 1;
-      if (nodes > nodeLimit || Date.now() > restartDeadline) {
-        considerBest();
-        return false;
-      }
-      if (remaining.size === 0) return true;
-
-      let bestIdx = -1;
-      let bestCandidates: string[] = [];
-      let bestCount = Infinity;
-      for (const idx of remaining) {
-        const cands = candidateKeysFor(targets[idx]);
-        if (cands.length < bestCount) {
-          bestCount = cands.length;
-          bestIdx = idx;
-          bestCandidates = cands;
-          if (bestCount === 0) break;
-        }
-      }
-
-      if (bestIdx < 0 || bestCount === 0) {
-        considerBest();
-        return false;
-      }
-
-      const target = targets[bestIdx];
-      remaining.delete(bestIdx);
-
-      for (const key of shuffle(bestCandidates)) {
-        const group = groups.get(key)!;
-        group.count -= 1;
-        classBusy.add(
-          classSlotKey(target.grade, target.classNo, target.day, target.period),
-        );
-        teacherBusy.add(
-          teacherSlotKey(group.teacherName, target.day, target.period),
-        );
-        const cell: TimetableCell = {
+        g.count -= 1;
+        const target = targets[idx[j]];
+        cells.push({
           grade: target.grade,
           classNo: target.classNo,
           day: target.day,
           period: target.period,
-          subjectName: group.subjectName,
-          teacherName: group.teacherName,
+          subjectName: g.subjectName,
+          teacherName: g.teacherName,
           kind: "common",
-        };
-        placed.push(cell);
-
-        if (search()) return true;
-
-        placed.pop();
-        classBusy.delete(
-          classSlotKey(target.grade, target.classNo, target.day, target.period),
-        );
-        teacherBusy.delete(
-          teacherSlotKey(group.teacherName, target.day, target.period),
-        );
-        group.count += 1;
-
-        if (nodes > nodeLimit || Date.now() > restartDeadline) {
-          remaining.add(bestIdx);
-          considerBest();
-          return false;
-        }
-      }
-
-      remaining.add(bestIdx);
-      considerBest();
-      return false;
-    };
-
-    const restartCells = search() ? placed : bestPartial;
-    // Each restart's backtracking commits to a different set of "hard"
-    // targets, which in turn leaves a different residual for the greedy
-    // top-up — so top up per restart and compare combined totals, rather
-    // than only keeping the raw backtracked best and topping up once.
-    const toppedUp = greedyFillRemainingLunchSlots(
-      targets,
-      restartCells,
-      groupsSeed,
-      classBusySeed,
-      teacherBusySeed,
-      lunchAfterPeriod,
-    );
-    if (toppedUp.length > bestCells.length) {
-      bestCells = toppedUp;
-    }
-    if (bestCells.length === targets.length) break;
-  }
-
-  return { cells: bestCells, attemptsUsed };
-}
-
-/**
- * Greedy, no-backtrack sweep over whatever `solveLunchSlots` left unfilled.
- * MRV backtracking spends its whole budget wrestling with the few genuinely
- * tight targets (e.g. classes whose electives leave only 1-2 usable
- * teachers) and, under a tight time budget, may never even attempt the
- * (usually much larger) set of targets with plenty of valid candidates. This
- * pass mops those up with simple greedy (most-constrained-first, no undo)
- * placement — safe since by construction only abundant-candidate targets
- * are likely to remain.
- */
-function greedyFillRemainingLunchSlots(
-  targets: LunchSlotTarget[],
-  placedSoFar: TimetableCell[],
-  groupsSeed: Map<string, LunchLessonGroup>,
-  classBusySeed: Set<string>,
-  teacherBusySeed: Set<string>,
-  lunchAfterPeriod: number,
-): TimetableCell[] {
-  const [before, after] = lunchPairPeriods(lunchAfterPeriod);
-  const classBusy = new Set(classBusySeed);
-  const teacherBusy = new Set(teacherBusySeed);
-  const groups = new Map<string, LunchLessonGroup>();
-  for (const [key, g] of groupsSeed) groups.set(key, { ...g });
-  const classGroupKeys = new Map<string, string[]>();
-  for (const [key, g] of groupsSeed) {
-    const classKey = `${g.grade}|${g.classNo}`;
-    const list = classGroupKeys.get(classKey);
-    if (list) list.push(key);
-    else classGroupKeys.set(classKey, [key]);
-  }
-
-  const placed = [...placedSoFar];
-  for (const cell of placed) {
-    classBusy.add(
-      classSlotKey(cell.grade, cell.classNo, cell.day, cell.period),
-    );
-    teacherBusy.add(
-      teacherSlotKey(cell.teacherName, cell.day, cell.period),
-    );
-    const key = unplacedKey({
-      teacherName: cell.teacherName,
-      grade: cell.grade,
-      classNo: cell.classNo,
-      subjectName: cell.subjectName,
-    });
-    const g = groups.get(key);
-    if (g && g.count > 0) g.count -= 1;
-  }
-
-  const filled = new Set(
-    placed.map((c) => classSlotKey(c.grade, c.classNo, c.day, c.period)),
-  );
-  const remaining = targets.filter(
-    (t) => !filled.has(classSlotKey(t.grade, t.classNo, t.day, t.period)),
-  );
-
-  let progressed = true;
-  while (progressed) {
-    progressed = false;
-    let bestIdx = -1;
-    let bestCandidates: string[] = [];
-    let bestCount = Infinity;
-
-    for (let i = 0; i < remaining.length; i++) {
-      const target = remaining[i];
-      const partner = target.period === before ? after : before;
-      const keys = classGroupKeys.get(`${target.grade}|${target.classNo}`);
-      const candidates: string[] = [];
-      for (const key of keys ?? []) {
-        const g = groups.get(key)!;
-        if (g.count <= 0) continue;
-        if (
-          teacherBusy.has(
-            teacherSlotKey(g.teacherName, target.day, target.period),
-          )
-        ) {
-          continue;
-        }
-        if (teacherBusy.has(teacherSlotKey(g.teacherName, target.day, partner))) {
-          continue;
-        }
-        candidates.push(key);
-      }
-      if (candidates.length > 0 && candidates.length < bestCount) {
-        bestCount = candidates.length;
-        bestIdx = i;
-        bestCandidates = candidates;
-      }
+        });
+      });
     }
 
-    if (bestIdx < 0) break;
-
-    const target = remaining[bestIdx];
-    const key = shuffle(bestCandidates)[0];
-    const group = groups.get(key)!;
-    group.count -= 1;
-    classBusy.add(
-      classSlotKey(target.grade, target.classNo, target.day, target.period),
-    );
-    teacherBusy.add(
-      teacherSlotKey(group.teacherName, target.day, target.period),
-    );
-    placed.push({
-      grade: target.grade,
-      classNo: target.classNo,
-      day: target.day,
-      period: target.period,
-      subjectName: group.subjectName,
-      teacherName: group.teacherName,
-      kind: "common",
-    });
-    remaining.splice(bestIdx, 1);
-    progressed = true;
+    if (cells.length > bestCells.length) bestCells = cells;
+    if (bestCells.length >= upperBound) break;
   }
 
-  return placed;
+  dayBounds.sort((a, b) => weekdayIndex(a.day) - weekdayIndex(b.day));
+  return { cells: bestCells, attemptsUsed, dayBounds };
 }
 
 export type LunchPriorityInput = {
@@ -2157,6 +2243,8 @@ export type LunchPriorityInput = {
   lunchAfterPeriod?: number;
   timeLimitMs?: number;
   restarts?: number;
+  /** Previous run's lunch cells, so the message can say what changed. */
+  previousLunchCells?: SubjectBlockCell[];
 };
 
 export type LunchPriorityResult = {
@@ -2197,20 +2285,26 @@ export function solveLunchPriority(
     lunchAfterPeriod = DEFAULT_LUNCH_AFTER_PERIOD,
     timeLimitMs = 8_000,
     restarts = 15,
+    previousLunchCells = [],
   } = input;
 
-  const { setCells, classBusySeed, teacherBusySeed, lockedBlocks } =
-    prepareBusySeeds({
-      teachers,
-      subjects,
-      classCounts,
-      schedules,
-      wholeCells,
-      partialCells,
-      teacherAssignments,
-      subjectBlocks,
-      forbiddenSlots,
-    });
+  const {
+    setCells,
+    classBusySeed,
+    teacherBusySeed,
+    teacherLessonSeed,
+    lockedBlocks,
+  } = prepareBusySeeds({
+    teachers,
+    subjects,
+    classCounts,
+    schedules,
+    wholeCells,
+    partialCells,
+    teacherAssignments,
+    subjectBlocks,
+    forbiddenSlots,
+  });
   const blockCells = subjectBlocksToTimetableCells(lockedBlocks);
   const fixedCells = [...setCells, ...blockCells];
 
@@ -2240,13 +2334,15 @@ export function solveLunchPriority(
   );
   const groups = buildLunchLessonGroups(lessons);
 
-  // `solveLunchSlots` already tops up each restart's backtracked result with
-  // a greedy sweep internally and returns the best combined total.
-  const { cells: placedCells, attemptsUsed } = solveLunchSlots(
+  const {
+    cells: placedCells,
+    attemptsUsed,
+    dayBounds,
+  } = solveLunchSlots(
     targets,
     groups,
-    classBusySeed,
     teacherBusySeed,
+    teacherLessonSeed,
     lunchAfterPeriod,
     timeLimitMs,
     restarts,
@@ -2264,14 +2360,7 @@ export function solveLunchPriority(
   const targetCount = targets.length;
   const filledCount = placedCells.length;
   const allCells = [...fixedCells, ...placedCells];
-
-  const structuralGap = countStructurallyImpossibleLunchTargets(
-    targets,
-    placedCells,
-    groups,
-    teacherBusySeed,
-    lunchAfterPeriod,
-  );
+  const changeNote = describeLunchChange(targets, previousLunchCells, lunchCells);
 
   if (filledCount === targetCount) {
     // This stage guarantees it never *adds* a double, but cells it inherited
@@ -2290,17 +2379,26 @@ export function solveLunchPriority(
       targetCount,
       filledCount,
       status: "ready",
-      message: `점심 전후 교시 ${targetCount}칸을 모두 배치했습니다. (재시도 ${attemptsUsed}회)${guaranteeNote}`,
+      message: `점심 전후 교시 ${targetCount}칸을 모두 배치했습니다. (시도 ${attemptsUsed}회)${guaranteeNote}${changeNote}`,
     };
   }
 
   const unfilled = targetCount - filledCount;
-  const hint =
-    structuralGap >= unfilled
-      ? " 미배치 칸은 재시도 횟수·시간과 무관하게 해당 시간대에 배정 가능한 교사가 근본적으로 없는 경우로 보입니다. 교사 배정이나 시간표 구조 조정이 필요합니다."
-      : structuralGap > 0
-        ? ` 미배치 ${unfilled}칸 중 최소 ${structuralGap}칸은 해당 시간대에 배정 가능한 교사가 근본적으로 없어 재시도로는 해결되지 않습니다. 나머지는 다시 시도하면 배치될 수 있습니다.`
-        : " 각 칸은 개별적으로는 배정 가능한 교사가 있지만, 여러 반이 점심 전후로 비는 같은 교사를 동시에 필요로 해 전체적으로 자리가 부족합니다(자리 경합). 이 경우 재시도·대기 시간을 늘려도 결과가 거의 같을 수 있습니다 — 점심 전후 시간대에 배치 가능한 교사 수를 늘리거나 시간표 구조를 조정해야 개선됩니다.";
+  // Per-day matching size is an exact upper bound: a teacher can take only
+  // one lunch-adjacent slot per day, so any gap below it is structural.
+  const shortDays = dayBounds.filter((d) => d.max < d.targets);
+  const structuralGap = shortDays.reduce((s, d) => s + d.targets - d.max, 0);
+  const contentionGap = unfilled - structuralGap;
+  let hint = "";
+  if (structuralGap > 0) {
+    const detail = shortDays
+      .map((d) => `${dayLabel(d.day)}요일은 ${d.targets}칸 중 최대 ${d.max}칸`)
+      .join(", ");
+    hint += `\n${detail}까지만 채울 수 있습니다. 교사 한 명은 하루에 점심 전후 중 한 칸만 맡을 수 있는데, 그날 점심 전후 수업을 맡을 수 있는 교사가 부족하기 때문입니다. 이 ${structuralGap}칸은 다시 시도해도 채워지지 않으니, 해당 요일 점심 전후에 SET·선 수업을 배치하거나 교사 배정을 조정해 주세요.`;
+  }
+  if (contentionGap > 0) {
+    hint += `\n${structuralGap > 0 ? "나머지 " : ""}${contentionGap}칸은 같은 반·교사의 남은 시수를 여러 요일이 나눠 써야 해서 함께 채울 수 없는 칸입니다. 여러 번 시도한 결과 중 가장 많이 채운 배치라 다시 눌러도 거의 줄지 않습니다. 선택한 교과의 우선 배치(동일 교과 우선 배치 등)가 시수를 많이 차지했다면 그 범위를 줄이면 나아질 수 있습니다.`;
+  }
 
   return {
     lunchCells,
@@ -2308,56 +2406,70 @@ export function solveLunchPriority(
     targetCount,
     filledCount,
     status: "failed",
-    message: `점심 전후 교시 중 ${filledCount}/${targetCount}칸만 배치했습니다. (재시도 ${attemptsUsed}회)${hint}`,
+    message: `점심 전후 교시 중 ${filledCount}/${targetCount}칸만 배치했습니다. (시도 ${attemptsUsed}회)${changeNote}${describeEmptyLunchTargets(targets, lunchCells)}${hint}`,
   };
 }
 
+function lunchTargetLabel(t: Pick<LunchSlotTarget, "grade" | "classNo" | "day" | "period">): string {
+  return `${dayLabel(t.day)} ${t.grade}-${t.classNo}반 ${t.period}교시`;
+}
+
 /**
- * Among still-unfilled lunch targets, count how many have zero candidate
- * teachers even measured against just the seed busy state (SET/blocks only,
- * ignoring contention from other lunch placements). Those are impossible to
- * fill no matter how much search time or how many restarts are spent — the
- * class simply has no teacher free on both sides of lunch that day.
+ * Re-running lunch priority usually yields the same counts, so without this
+ * the result message reads identically every press even though the
+ * arrangement changed. Compare slot by slot against the previous run.
  */
-function countStructurallyImpossibleLunchTargets(
+function describeLunchChange(
   targets: LunchSlotTarget[],
-  placedCells: TimetableCell[],
-  groups: Map<string, LunchLessonGroup>,
-  teacherBusySeed: Set<string>,
-  lunchAfterPeriod: number,
-): number {
-  const [before, after] = lunchPairPeriods(lunchAfterPeriod);
-  const filled = new Set(
-    placedCells.map((c) => classSlotKey(c.grade, c.classNo, c.day, c.period)),
-  );
-  const unfilled = targets.filter(
-    (t) => !filled.has(classSlotKey(t.grade, t.classNo, t.day, t.period)),
-  );
-  let count = 0;
-  for (const target of unfilled) {
-    const partner = target.period === before ? after : before;
-    let hasCandidate = false;
-    for (const g of groups.values()) {
-      if (g.grade !== target.grade || g.classNo !== target.classNo) continue;
-      if (g.count <= 0) continue;
-      if (
-        teacherBusySeed.has(
-          teacherSlotKey(g.teacherName, target.day, target.period),
-        )
-      ) {
-        continue;
-      }
-      if (
-        teacherBusySeed.has(teacherSlotKey(g.teacherName, target.day, partner))
-      ) {
-        continue;
-      }
-      hasCandidate = true;
-      break;
-    }
-    if (!hasCandidate) count += 1;
+  previous: SubjectBlockCell[],
+  next: SubjectBlockCell[],
+): string {
+  if (previous.length === 0) return "";
+  const assigned = (cells: SubjectBlockCell[]) =>
+    new Map(
+      cells.map((c) => [
+        classSlotKey(c.grade, c.classNo, c.day, c.period),
+        `${c.teacherName}|${c.subjectName}`,
+      ]),
+    );
+  const before = assigned(previous);
+  const after = assigned(next);
+  let changed = 0;
+  for (const t of targets) {
+    const key = classSlotKey(t.grade, t.classNo, t.day, t.period);
+    if (before.get(key) !== after.get(key)) changed += 1;
   }
-  return count;
+  return changed === 0
+    ? "\n이전 배치와 같은 결과입니다. 이 조건에서 가능한 배치가 매우 적은 것으로 보입니다."
+    : `\n이전 배치와 비교해 ${changed}칸이 바뀌었습니다.`;
+}
+
+const EMPTY_LUNCH_LIST_LIMIT = 15;
+
+/** Which lunch targets stayed empty — these differ from run to run. */
+function describeEmptyLunchTargets(
+  targets: LunchSlotTarget[],
+  lunchCells: SubjectBlockCell[],
+): string {
+  const filled = new Set(
+    lunchCells.map((c) => classSlotKey(c.grade, c.classNo, c.day, c.period)),
+  );
+  const empty = targets
+    .filter((t) => !filled.has(classSlotKey(t.grade, t.classNo, t.day, t.period)))
+    .sort(
+      (a, b) =>
+        weekdayIndex(a.day) - weekdayIndex(b.day) ||
+        a.grade - b.grade ||
+        a.classNo - b.classNo ||
+        a.period - b.period,
+    );
+  if (empty.length === 0) return "";
+  const shown = empty.slice(0, EMPTY_LUNCH_LIST_LIMIT).map(lunchTargetLabel);
+  const more =
+    empty.length > EMPTY_LUNCH_LIST_LIMIT
+      ? ` 외 ${empty.length - EMPTY_LUNCH_LIST_LIMIT}칸`
+      : "";
+  return `\n비어 있는 칸: ${shown.join(", ")}${more}`;
 }
 
 /**
@@ -2412,7 +2524,7 @@ export function listSameDaySubjectViolations(
     out.push({ ...g, periods: [...g.periods].sort((a, b) => a - b) });
   }
   out.sort((a, b) => {
-    if (a.day !== b.day) return a.day.localeCompare(b.day);
+    if (a.day !== b.day) return weekdayIndex(a.day) - weekdayIndex(b.day);
     if (a.grade !== b.grade) return a.grade - b.grade;
     if (a.classNo !== b.classNo) return a.classNo - b.classNo;
     return a.subjectName.localeCompare(b.subjectName, "ko");
@@ -2798,6 +2910,26 @@ export function solveSameDaySubjectPriority(
   };
 }
 
+/**
+ * Fields that reset the working full-generation result to "not generated".
+ * Used when a priority stage re-locks cells, since any previously generated
+ * full timetable was built on the old locks and must not be confirmed.
+ */
+export function clearedWorkingResult() {
+  return {
+    status: "idle" as const,
+    cells: [] as TimetableCell[],
+    unplaced: [] as TimetableUnplaced[],
+    message: "",
+    lunchDoubleCount: 0,
+    lunchDoubles: [] as SoftRunDetail[],
+    tripleRunCount: 0,
+    tripleRuns: [] as SoftRunDetail[],
+    sameDaySubjectViolationCount: 0,
+    sameDaySubjectViolations: [] as SameDaySubjectViolation[],
+  };
+}
+
 export function cellsForClass(
   cells: TimetableCell[],
   grade: Grade,
@@ -2835,6 +2967,32 @@ export function anyGradeHasPeriod(
   return GRADES.some((grade) => (schedules[grade][day] ?? 0) >= period);
 }
 
+/**
+ * Fixed common cells (교과 블록 + 우선 배치 잠금) are merged from several
+ * independently saved sources, so they can collide with SET cells or with
+ * each other (e.g. 동일 교과 우선 배치 re-run after 점심시간 우선 배치, or SET
+ * blocks moved after locking). Keep them in input order — earlier sources win
+ * — and drop any cell whose class or teacher slot is already taken, marking
+ * the kept ones busy as we go. Dropped cells' lessons fall back to the normal
+ * search since `consumeLessonsForSubjectBlocks` only consumes kept blocks.
+ */
+function keepNonConflictingBlocks(
+  blocks: SubjectBlockCell[],
+  classBusy: Set<string>,
+  teacherBusy: Set<string>,
+): SubjectBlockCell[] {
+  const kept: SubjectBlockCell[] = [];
+  for (const cell of blocks) {
+    const classKey = classSlotKey(cell.grade, cell.classNo, cell.day, cell.period);
+    const teacherKey = teacherSlotKey(cell.teacherName, cell.day, cell.period);
+    if (classBusy.has(classKey) || teacherBusy.has(teacherKey)) continue;
+    classBusy.add(classKey);
+    teacherBusy.add(teacherKey);
+    kept.push(cell);
+  }
+  return kept;
+}
+
 function prepareBusySeeds(input: {
   teachers: Teacher[];
   subjects: GradeSubjects;
@@ -2850,6 +3008,8 @@ function prepareBusySeeds(input: {
   setCells: TimetableCell[];
   classBusySeed: Set<string>;
   teacherBusySeed: Set<string>;
+  /** Teacher slots with an actual fixed lesson (teacherBusySeed minus 배정 불가). */
+  teacherLessonSeed: Set<string>;
   lockedBlocks: SubjectBlockCell[];
 } {
   const catalog = catalogGradeSets(input.subjects, input.classCounts);
@@ -2862,13 +3022,6 @@ function prepareBusySeeds(input: {
     catalog,
     teacherAssignments: input.teacherAssignments ?? [],
   });
-  const lockedBlocks = filterSubjectBlocksToAssignments(
-    input.subjectBlocks ?? [],
-    input.teachers,
-    input.subjects,
-    input.classCounts,
-    input.schedules,
-  );
   const classBusySeed = new Set<string>();
   const teacherBusySeed = new Set<string>();
   markBusyFromSetCells(setCells, classBusySeed, teacherBusySeed);
@@ -2880,9 +3033,27 @@ function prepareBusySeeds(input: {
     teacherBusySeed,
     input.teacherAssignments ?? [],
   );
-  markBusyFromSubjectBlocks(lockedBlocks, classBusySeed, teacherBusySeed);
+  const lockedBlocks = keepNonConflictingBlocks(
+    filterSubjectBlocksToAssignments(
+      input.subjectBlocks ?? [],
+      input.teachers,
+      input.subjects,
+      input.classCounts,
+      input.schedules,
+    ),
+    classBusySeed,
+    teacherBusySeed,
+  );
+  const teacherLessonSeed = new Set(teacherBusySeed);
   markTeacherBusyFromForbidden(input.forbiddenSlots ?? [], teacherBusySeed);
-  return { catalog, setCells, classBusySeed, teacherBusySeed, lockedBlocks };
+  return {
+    catalog,
+    setCells,
+    classBusySeed,
+    teacherBusySeed,
+    teacherLessonSeed,
+    lockedBlocks,
+  };
 }
 
 /** SET + 선 수업만으로 만든 미리보기 칸. 생성 결과 DB에는 쓰지 않는다. */

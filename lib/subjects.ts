@@ -487,3 +487,23 @@ export function applyClassCountsFromClipboard(
     return index < values.length ? { ...row, classCount: values[index] } : row;
   });
 }
+
+/** 4 Korean characters is what fits a 2.75rem column at the 9px cell font. */
+const SHORT_SUBJECT_MAX = 4;
+
+/**
+ * Compact label for a narrow cell; the full name stays in the tooltip.
+ * Drops spaces, then keeps the head of the name plus a trailing level marker
+ * (2, Ⅱ …) so e.g. "E중국어회화Ⅱ" → "E중국Ⅱ", "공통국어2" → "공통국2",
+ * "디지털과 직업 생활" → "디지털과".
+ */
+export function shortSubjectName(name: string): string {
+  const compact = name.replace(/\s+/g, "");
+  const chars = [...compact];
+  if (chars.length <= SHORT_SUBJECT_MAX) return compact;
+  const last = chars[chars.length - 1];
+  const isLevel = /[0-9Ⅰ-Ⅻ]/.test(last);
+  return isLevel
+    ? chars.slice(0, SHORT_SUBJECT_MAX - 1).join("") + last
+    : chars.slice(0, SHORT_SUBJECT_MAX).join("");
+}

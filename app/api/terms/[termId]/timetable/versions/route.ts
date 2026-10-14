@@ -117,6 +117,23 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
+    // 전체 배치 이후에 우선 배치 잠금이 다시 만들어졌다면, 작업본은 예전
+    // 잠금 기준이라 현재 상태와 맞지 않는다.
+    const generatedAt = working.generatedAt?.getTime() ?? 0;
+    const lockedAt = Math.max(
+      working.lunchGeneratedAt?.getTime() ?? 0,
+      working.sameDaySubjectGeneratedAt?.getTime() ?? 0,
+    );
+    if (lockedAt > generatedAt) {
+      return NextResponse.json(
+        {
+          error:
+            "우선 배치를 다시 실행한 뒤 시간표를 배치하지 않았습니다. 시간표 배치를 다시 실행한 뒤 확정해 주세요.",
+        },
+        { status: 400 },
+      );
+    }
+
     const count = await versions.countDocuments({ termId });
     if (count >= MAX_TIMETABLE_VERSIONS) {
       return NextResponse.json(

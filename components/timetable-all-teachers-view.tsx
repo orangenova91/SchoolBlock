@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { subjectSetBadgeClass } from "@/lib/subjects";
+import { shortSubjectName, subjectSetBadgeClass } from "@/lib/subjects";
 import {
   isSameClassSwapTarget,
   swapSameClassCommonCells,
@@ -31,6 +31,11 @@ type TimetableAllTeachersViewProps = {
 
 const EDGE_PX = 48;
 const MAX_SCROLL_PER_FRAME = 3;
+
+/** Fixed column widths: without a width cap, `truncate` can't kick in and
+ * long subject names stretch the 35 period columns to ~3x the screen. */
+const TEACHER_COL_REM = 4.5;
+const PERIOD_COL_REM = 2.75;
 
 function cellsAt(
   cells: TimetableCell[],
@@ -94,7 +99,19 @@ export function TimetableAllTeachersView({
   const [picked, setPicked] = useState<TimetableCellRef | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const dayHeaderRefs = useRef(new Map<Weekday, HTMLTableCellElement>());
   const pointerRef = useRef({ x: 0, y: 0 });
+
+  function scrollToDay(day: Weekday) {
+    const box = scrollRef.current;
+    const header = dayHeaderRefs.current.get(day);
+    if (!box || !header) return;
+    // Land the day's first column just right of the sticky teacher column.
+    const teacherColPx =
+      TEACHER_COL_REM *
+      parseFloat(getComputedStyle(document.documentElement).fontSize);
+    box.scrollTo({ left: header.offsetLeft - teacherColPx });
+  }
 
   const teacherNames = useMemo(
     () =>
@@ -221,8 +238,8 @@ export function TimetableAllTeachersView({
     <section
       className={
         fullscreen
-          ? "fixed inset-0 z-[60] flex flex-col bg-white p-4"
-          : "rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm"
+          ? "fixed inset-0 z-[60] flex flex-col bg-white p-4 text-zinc-900"
+          : "rounded-2xl border border-zinc-200 bg-white p-4 text-zinc-900 shadow-sm"
       }
     >
       <div className="mb-3 flex items-start justify-end gap-3">
@@ -253,6 +270,19 @@ export function TimetableAllTeachersView({
         </p>
       ) : (
         <>
+          <div className="mb-2 flex items-center justify-center gap-1.5">
+            <span className="text-xs text-zinc-500">요일로 이동</span>
+            {WEEKDAYS.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => scrollToDay(key)}
+                className="rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
           <div
             ref={scrollRef}
             className={
@@ -261,7 +291,23 @@ export function TimetableAllTeachersView({
                 : "max-h-[75vh] overflow-auto rounded-lg border border-zinc-200"
             }
           >
-            <table className="min-w-full border-collapse text-center">
+            <table
+              className="min-w-full table-fixed border-collapse text-center"
+              style={{
+                width: `${TEACHER_COL_REM + PERIOD_COL_REM * periodCols * WEEKDAYS.length}rem`,
+              }}
+            >
+              <colgroup>
+                <col style={{ width: `${TEACHER_COL_REM}rem` }} />
+                {WEEKDAYS.map(({ key }) =>
+                  periods.map((period) => (
+                    <col
+                      key={`${key}-${period}`}
+                      style={{ width: `${PERIOD_COL_REM}rem` }}
+                    />
+                  )),
+                )}
+              </colgroup>
               <thead className="sticky top-0 z-20 bg-white">
                 <tr>
                   <th
@@ -273,6 +319,10 @@ export function TimetableAllTeachersView({
                   {WEEKDAYS.map(({ key, label }, dayIndex) => (
                     <th
                       key={key}
+                      ref={(el) => {
+                        if (el) dayHeaderRefs.current.set(key, el);
+                        else dayHeaderRefs.current.delete(key);
+                      }}
                       colSpan={periodCols}
                       className={`border border-zinc-200 px-1 py-1 text-xs font-medium text-zinc-700 ${
                         dayIndex % 2 === 0 ? "bg-zinc-100" : "bg-zinc-50"
@@ -287,7 +337,6 @@ export function TimetableAllTeachersView({
                     periods.map((period) => (
                       <th
                         key={`${key}-${period}`}
-                        style={{ minWidth: "2.75rem" }}
                         className={`border border-zinc-200 px-1 py-0.5 text-[10px] font-normal text-zinc-500 ${
                           dayIndex % 2 === 0 ? "bg-zinc-100" : "bg-zinc-50"
                         } ${dayStartBorder(period === periods[0])}`}
@@ -303,7 +352,10 @@ export function TimetableAllTeachersView({
                   const teacherCells = cellsByTeacher.get(name) ?? [];
                   return (
                     <tr key={name}>
-                      <td className="sticky left-0 z-10 whitespace-nowrap border border-zinc-200 bg-white px-2 py-1 text-left text-xs font-medium text-zinc-800">
+                      <td
+                        title={name}
+                        className="sticky left-0 z-10 truncate whitespace-nowrap border border-zinc-200 bg-white px-2 py-1 text-left text-xs font-medium text-zinc-800"
+                      >
                         {name}
                       </td>
                       {WEEKDAYS.map(({ key: day }, dayIndex) =>
@@ -365,7 +417,7 @@ export function TimetableAllTeachersView({
                                     title={
                                       blockedReason
                                         ? `조정 불가 · ${blockedReason}`
-                                        : undefined
+                                        : `${c.grade}학년 ${c.classNo}반 ${c.subjectName} · ${name}`
                                     }
                                     onClick={() => handlePick(c)}
                                     onKeyDown={(event) => {
@@ -391,7 +443,12 @@ export function TimetableAllTeachersView({
                                         : ""
                                     }`}
                                   >
-                                    {c.grade}-{c.classNo} {c.subjectName}
+                                    <span className="block font-medium">
+                                      {c.grade}-{c.classNo}
+                                    </span>
+                                    <span className="block truncate">
+                                      {shortSubjectName(c.subjectName)}
+                                    </span>
                                   </div>
                                 );
                               })}

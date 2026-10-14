@@ -16,7 +16,7 @@ import { getAccountId } from "@/lib/session";
 import { filterForbiddenSlots } from "@/lib/teacher-constraints";
 import { ensureTeachers, sanitizeTeachers } from "@/lib/teachers";
 import { findOwnedTerm } from "@/lib/term-access";
-import { solveLunchPriority } from "@/lib/timetable";
+import { clearedWorkingResult, solveLunchPriority } from "@/lib/timetable";
 import {
   createDefaultClassCounts,
   createDefaultGradeDaySchedules,
@@ -158,14 +158,17 @@ export async function POST(request: Request, context: RouteContext) {
       lunchAfterPeriod: preferences.lunchAfterPeriod,
       timeLimitMs: 15_000,
       restarts: 25,
+      previousLunchCells: existingTimetableDoc?.lunchLockCells ?? [],
     });
 
     const now = new Date();
+    // 이전 전체 배치 결과는 예전 점심 잠금 기준이므로 무효화한다.
     await db.collection<TimetableDocument>("timetables").updateOne(
       { termId },
       {
         $set: {
           termId,
+          ...clearedWorkingResult(),
           lunchLockCells: result.lunchCells,
           lunchStatus: result.status,
           lunchMessage: result.message,
@@ -180,6 +183,7 @@ export async function POST(request: Request, context: RouteContext) {
       termId,
       lunchStatus: result.status,
       lunchMessage: result.message,
+      lunchGeneratedAt: now,
       targetCount: result.targetCount,
       filledCount: result.filledCount,
       cells: result.cells,

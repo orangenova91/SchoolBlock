@@ -1,0 +1,5 @@
+{"id":"real-small","kind":"meta","axis":"현실 조합","label":"작은 학교: 학년당 4반, 교사 평균 18, 오전만 30%","buildMs":26,"classes":12,"teachers":25,"loadMin":11,"loadAvg":15.4,"loadMax":22,"commonLessons":256,"setShare":[0,38,63],"setCells":32,"forbidden":25,"pins":0,"bans":8,"setPlaced":true}
+{"id":"real-small","kind":"check","totalMs":250,"quickMs":11,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":238,"lessons":256,"log10Estimate":136}
+{"id":"real-small","kind":"run","run":0,"sec":16,"unplaced":0,"lunch":4,"triple":0,"sameDay":0,"stop":"stall"}
+{"id":"real-small","kind":"run","run":1,"sec":24,"unplaced":0,"lunch":3,"triple":0,"sameDay":0,"stop":"stall"}
+{"id":"real-small","kind":"run","run":2,"sec":16,"unplaced":0,"lunch":5,"triple":0,"sameDay":0,"stop":"stall"}

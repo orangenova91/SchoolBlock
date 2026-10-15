@@ -1,0 +1,5 @@
+{"id":"set-concentrated","kind":"meta","axis":"SET","label":"SET 배치: 특정 요일에 몰림","buildMs":5,"classes":21,"teachers":46,"loadMin":12,"loadAvg":14.6,"loadMax":18,"commonLessons":448,"setShare":[0,38,63],"setCells":32,"forbidden":0,"pins":0,"bans":8,"setPlaced":true}
+{"id":"set-concentrated","kind":"check","totalMs":184,"quickMs":16,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":167,"lessons":448,"log10Estimate":254}
+{"id":"set-concentrated","kind":"run","run":0,"sec":16,"unplaced":0,"lunch":1,"triple":5,"sameDay":0,"stop":"stall"}
+{"id":"set-concentrated","kind":"run","run":1,"sec":16,"unplaced":0,"lunch":1,"triple":5,"sameDay":0,"stop":"stall"}
+{"id":"set-concentrated","kind":"run","run":2,"sec":16,"unplaced":0,"lunch":1,"triple":5,"sameDay":0,"stop":"stall"}

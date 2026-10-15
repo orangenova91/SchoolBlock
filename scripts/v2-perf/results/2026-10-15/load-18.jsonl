@@ -1,0 +1,5 @@
+{"id":"load-18","kind":"meta","axis":"교사 수","label":"교사 평균 18시간","buildMs":45,"classes":21,"teachers":44,"loadMin":13,"loadAvg":15.3,"loadMax":19,"commonLessons":448,"setShare":[0,38,63],"setCells":32,"forbidden":0,"pins":0,"bans":8,"setPlaced":true}
+{"id":"load-18","kind":"check","totalMs":339,"quickMs":15,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":322,"lessons":448,"log10Estimate":250}
+{"id":"load-18","kind":"run","run":0,"sec":24,"unplaced":0,"lunch":1,"triple":2,"sameDay":0,"stop":"stall"}
+{"id":"load-18","kind":"run","run":1,"sec":24,"unplaced":0,"lunch":2,"triple":0,"sameDay":0,"stop":"stall"}
+{"id":"load-18","kind":"run","run":2,"sec":16,"unplaced":0,"lunch":3,"triple":0,"sameDay":0,"stop":"stall"}

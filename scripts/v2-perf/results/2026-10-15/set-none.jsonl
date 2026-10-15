@@ -1,0 +1,5 @@
+{"id":"set-none","kind":"meta","axis":"SET","label":"SET 없음 (전부 공통)","buildMs":1,"classes":21,"teachers":43,"loadMin":14,"loadAvg":15.6,"loadMax":17,"commonLessons":672,"setShare":[0,0,0],"setCells":0,"forbidden":0,"pins":0,"bans":9,"setPlaced":true}
+{"id":"set-none","kind":"check","totalMs":548,"quickMs":16,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":531,"lessons":672,"log10Estimate":476}
+{"id":"set-none","kind":"run","run":0,"sec":4.1,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}
+{"id":"set-none","kind":"run","run":1,"sec":4.1,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}
+{"id":"set-none","kind":"run","run":2,"sec":3.9,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}

@@ -1,0 +1,2 @@
+{"id":"hard-1","kind":"meta","axis":"극단 조합","label":"학년당 10반, 교사 평균 20, 무작위 불가 20%, 전 교과 금지, SET 높음","buildMs":104,"classes":30,"teachers":55,"loadMin":13,"loadAvg":17.5,"loadMax":21,"commonLessons":560,"setShare":[0,50,75],"setCells":40,"forbidden":179,"pins":0,"bans":16,"setPlaced":true}
+{"id":"hard-1","kind":"check","totalMs":548,"quickMs":13,"quickMin":8,"exactStatus":"infeasible","exactMin":8,"exactMs":534,"lessons":560,"log10Estimate":null}

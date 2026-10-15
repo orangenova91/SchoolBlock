@@ -1,0 +1,5 @@
+{"id":"halfday-30","kind":"meta","axis":"제약","label":"교사 30%가 이틀은 오전만 가능","buildMs":44,"classes":21,"teachers":46,"loadMin":12,"loadAvg":14.6,"loadMax":18,"commonLessons":448,"setShare":[0,38,63],"setCells":32,"forbidden":55,"pins":0,"bans":8,"setPlaced":true}
+{"id":"halfday-30","kind":"check","totalMs":185,"quickMs":15,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":170,"lessons":448,"log10Estimate":241}
+{"id":"halfday-30","kind":"run","run":0,"sec":16,"unplaced":0,"lunch":1,"triple":0,"sameDay":0,"stop":"stall"}
+{"id":"halfday-30","kind":"run","run":1,"sec":16,"unplaced":0,"lunch":1,"triple":0,"sameDay":0,"stop":"stall"}
+{"id":"halfday-30","kind":"run","run":2,"sec":24,"unplaced":0,"lunch":1,"triple":0,"sameDay":0,"stop":"stall"}

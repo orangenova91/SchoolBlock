@@ -1,0 +1,5 @@
+{"id":"slack-2","kind":"meta","axis":"제약","label":"반마다 빈 칸 2개 (여유 있음)","buildMs":47,"classes":21,"teachers":46,"loadMin":12,"loadAvg":14.6,"loadMax":18,"commonLessons":448,"setShare":[0,38,63],"setCells":32,"forbidden":0,"pins":0,"bans":8,"setPlaced":true}
+{"id":"slack-2","kind":"check","totalMs":198,"quickMs":16,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":182,"lessons":448,"log10Estimate":305}
+{"id":"slack-2","kind":"run","run":0,"sec":3.5,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}
+{"id":"slack-2","kind":"run","run":1,"sec":3.5,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}
+{"id":"slack-2","kind":"run","run":2,"sec":3.7,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}

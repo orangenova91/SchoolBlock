@@ -1,0 +1,5 @@
+{"id":"real-elective","kind":"meta","axis":"현실 조합","label":"선택 중심: SET 비중 높음, 부분 SET, 요일 분산, 무작위 불가 10%","buildMs":6,"classes":21,"teachers":45,"loadMin":13,"loadAvg":14.9,"loadMax":18,"commonLessons":392,"setShare":[0,50,75],"setCells":44,"forbidden":99,"pins":0,"bans":7,"setPlaced":true}
+{"id":"real-elective","kind":"check","totalMs":234,"quickMs":16,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":217,"lessons":392,"log10Estimate":187}
+{"id":"real-elective","kind":"run","run":0,"sec":16,"unplaced":0,"lunch":9,"triple":0,"sameDay":0,"stop":"stall"}
+{"id":"real-elective","kind":"run","run":1,"sec":16,"unplaced":0,"lunch":9,"triple":0,"sameDay":0,"stop":"stall"}
+{"id":"real-elective","kind":"run","run":2,"sec":24,"unplaced":0,"lunch":9,"triple":0,"sameDay":0,"stop":"stall"}

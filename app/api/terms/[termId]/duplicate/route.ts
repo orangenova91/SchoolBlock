@@ -69,6 +69,7 @@ export async function POST(request: Request, context: RouteContext) {
       timetableName,
       academicYear: sourceTerm.academicYear,
       semester: sourceTerm.semester,
+      logicVersion: sourceTerm.logicVersion,
     });
 
     return NextResponse.json(
@@ -79,6 +80,7 @@ export async function POST(request: Request, context: RouteContext) {
         academicYear: created.academicYear,
         semester: created.semester,
         createdAt: created.createdAt,
+        logicVersion: created.logicVersion ?? null,
       },
       { status: 201 },
     );

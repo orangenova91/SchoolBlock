@@ -1,10 +1,23 @@
+import type { V2Weights } from "@/lib/v2-weights";
+
 export type Semester = 1 | 2;
+
+/**
+ * 시간표 생성 로직 버전. 필드가 없으면 기존 로직(v1)으로 처리한다.
+ * "v2"는 비교 검토용 개선 로직(lib/timetable-improved.ts)을 쓴다.
+ */
+export type LogicVersion = "v2";
+
+export function parseLogicVersion(value: unknown): LogicVersion | undefined {
+  return value === "v2" ? "v2" : undefined;
+}
 
 export type TermInput = {
   timetableName: string;
   school: string;
   academicYear: number;
   semester: Semester;
+  logicVersion?: LogicVersion;
 };
 
 export type TermDocument = TermInput & {
@@ -454,4 +467,6 @@ export type GenerationPreferences = {
 export type GenerationPreferencesDocument = GenerationPreferences & {
   termId: string;
   updatedAt: Date;
+  /** v2 시간표 전용 선호 조건 가중치. v1은 읽지 않는다. */
+  v2Weights?: V2Weights;
 };

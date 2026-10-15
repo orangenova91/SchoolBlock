@@ -63,6 +63,14 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
+    // v2 시간표는 우선 배치를 쓰지 않고 추가 조건을 생성 안에서 자동 반영한다.
+    if (term.logicVersion === "v2") {
+      return NextResponse.json(
+        { error: "v2 시간표는 우선 배치를 쓰지 않습니다. 시간표 배치를 눌러 주세요." },
+        { status: 400 },
+      );
+    }
+
     const db = await getDb();
     const [
       teachersDoc,

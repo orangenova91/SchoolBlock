@@ -11,6 +11,8 @@ export const TERM_CHILD_COLLECTIONS = [
   "teacherConstraints",
   "timetables",
   "timetableVersions",
+  // v2 사전 검사 결과 저장 (lib/timetable-check-cache.ts)
+  "v2PlacementChecks",
 ] as const;
 
 export async function deleteTermChildren(

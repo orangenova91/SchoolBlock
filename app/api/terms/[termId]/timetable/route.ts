@@ -19,6 +19,13 @@ import { filterForbiddenSlots } from "@/lib/teacher-constraints";
 import { ensureTeachers, sanitizeTeachers } from "@/lib/teachers";
 import { findOwnedTerm } from "@/lib/term-access";
 import { buildSeedTimetableCells, generateTimetable } from "@/lib/timetable";
+import { runPlacementCheckCached } from "@/lib/timetable-check-cache";
+import {
+  effectiveMinUnplaced,
+  isPlacementBlocked,
+} from "@/lib/timetable-exact-check";
+import { explainUnplaced } from "@/lib/timetable-feasibility";
+import { generateTimetableV2 } from "@/lib/timetable-improved";
 import {
   createDefaultClassCounts,
   createDefaultGradeDaySchedules,
@@ -33,6 +40,13 @@ import {
   type TeachersDocument,
   type TimetableDocument,
 } from "@/lib/types";
+import { normalizeV2Weights } from "@/lib/v2-weights";
+
+/**
+ * v2 생성은 정확 판정(최대 20초, 보통 저장값 재사용) + 교환 개선(최대 30초)이라 배포 플랫폼의
+ * 기본 실행 시간 제한보다 길 수 있다. v1에는 상한만 넓어질 뿐 동작 변화가 없다.
+ */
+export const maxDuration = 60;
 
 type RouteContext = {
   params: Promise<{ termId: string }>;
@@ -66,6 +80,7 @@ export async function GET(request: Request, context: RouteContext) {
     }
 
     const db = await getDb();
+    const isV2 = term.logicVersion === "v2";
     const [
       doc,
       teachersDoc,
@@ -73,6 +88,7 @@ export async function GET(request: Request, context: RouteContext) {
       scheduleDoc,
       setBlocksDoc,
       subjectBlocksDoc,
+      v2PreferencesDoc,
     ] = await Promise.all([
       db.collection<TimetableDocument>("timetables").findOne({ termId }),
       db.collection<TeachersDocument>("teachers").findOne({ termId }),
@@ -82,6 +98,11 @@ export async function GET(request: Request, context: RouteContext) {
       db
         .collection<SubjectBlocksDocument>("subjectBlocks")
         .findOne({ termId }),
+      isV2
+        ? db
+            .collection<GenerationPreferencesDocument>("generationPreferences")
+            .findOne({ termId })
+        : null,
     ]);
 
     // Structural check, independent of whether a timetable has been
@@ -136,7 +157,10 @@ export async function GET(request: Request, context: RouteContext) {
         school: term.school,
         academicYear: term.academicYear,
         semester: term.semester,
+        logicVersion: term.logicVersion ?? null,
       },
+      // v2 사전 검사는 화면이 열린 뒤 브라우저가 /timetable/feasibility로 요청한다.
+      v2Weights: isV2 ? normalizeV2Weights(v2PreferencesDoc?.v2Weights) : null,
       status: doc?.status ?? "idle",
       cells: doc?.cells ?? [],
       seedCells,
@@ -308,7 +332,7 @@ export async function POST(request: Request, context: RouteContext) {
       );
     }
 
-    const result = generateTimetable({
+    const generateInput = {
       teachers,
       subjects,
       classCounts,
@@ -321,7 +345,81 @@ export async function POST(request: Request, context: RouteContext) {
       preferences,
       timeLimitMs: 15_000,
       restarts: 24,
-    });
+    };
+    // v2 시간표(비교 검토용)는 우선 배치 버튼을 쓰지 않는다. 저장된 우선 배치
+    // 잠금은 무시하고, 사용자가 칠한 선 수업만 고정한 채 추가 조건을 생성
+    // 안에서 자동으로 반영한다.
+    const isV2 = term.logicVersion === "v2";
+    const pinnedSubjectBlocks = filterSubjectBlocksToAssignments(
+      subjectBlocksDoc?.cells ?? [],
+      teachers,
+      subjects,
+      classCounts,
+      schedules,
+    );
+    // v2: 모든 수업이 배치될 수 없는 조건이면 배치 자체를 진행하지 않는다.
+    // 저장된 이전 결과도 건드리지 않는다. 배치 가능하면 판정이 찾은 미배치
+    // 0 배치안을 초기 배치로 쓴다.
+    // 사전 검사와 같은 입력이면 저장된 판정을 다시 쓴다 (조건이 그대로면 한 번만 판정).
+    const check = isV2
+      ? await runPlacementCheckCached(db, termId, {
+          teachers,
+          subjects,
+          classCounts,
+          schedules,
+          wholeCells,
+          partialCells,
+          teacherAssignments: setBlocksDoc?.teacherAssignments ?? [],
+          subjectBlocks: pinnedSubjectBlocks,
+          forbiddenSlots,
+        })
+      : null;
+    const feasibility = check
+      ? {
+          ...check.report,
+          checkedAt: check.checkedAt.toISOString(),
+          cached: check.cached,
+        }
+      : null;
+    if (feasibility && isPlacementBlocked(feasibility)) {
+      return NextResponse.json(
+        {
+          error: `사전 검사를 통과하지 못해 배치하지 않았습니다. 현재 조건에서는 최소 ${effectiveMinUnplaced(feasibility)}교시가 배치될 수 없습니다. 선 수업·배정 불가·SET 배치를 조정한 뒤 다시 검사해 주세요.`,
+          feasibility,
+        },
+        { status: 409 },
+      );
+    }
+    const generated = isV2
+      ? generateTimetableV2({
+          ...generateInput,
+          // v2: 점수가 더 내려가지 않을 때까지 반복하되 최대 30초.
+          timeLimitMs: 30_000,
+          subjectBlocks: pinnedSubjectBlocks,
+          pinnedSubjectBlocks,
+          v2: {
+            weights: normalizeV2Weights(preferencesDoc?.v2Weights),
+            initialCommonCells:
+              feasibility?.exact.status === "feasible"
+                ? check?.solutionCells
+                : undefined,
+          },
+        })
+      : generateTimetable(generateInput);
+    const unplacedCount = generated.unplaced.reduce(
+      (sum, u) => sum + u.remaining,
+      0,
+    );
+    const result =
+      feasibility && unplacedCount > 0
+        ? {
+            ...generated,
+            message: `${generated.message}\n${explainUnplaced(unplacedCount, {
+              ...feasibility,
+              minUnplaced: effectiveMinUnplaced(feasibility),
+            })}`,
+          }
+        : generated;
 
     const now = new Date();
     const doc: TimetableDocument = {
@@ -363,6 +461,7 @@ export async function POST(request: Request, context: RouteContext) {
         (existingTimetableDoc?.sameDaySubjectLockCells?.length ?? 0) > 0,
       sameDaySubjectViolationCount: doc.sameDaySubjectViolationCount,
       sameDaySubjectViolations: doc.sameDaySubjectViolations,
+      feasibility,
     });
   } catch (error) {
     console.error("timetable POST generate failed:", error);

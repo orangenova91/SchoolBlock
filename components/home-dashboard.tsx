@@ -9,7 +9,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import type { Semester } from "@/lib/types";
+import type { LogicVersion, Semester } from "@/lib/types";
 
 type TermListItem = {
   id: string;
@@ -18,6 +18,7 @@ type TermListItem = {
   academicYear: number;
   semester: number;
   createdAt: string;
+  logicVersion?: LogicVersion | null;
 };
 
 type EditDraft = {
@@ -182,6 +183,7 @@ export function HomeDashboard() {
         academicYear: data.academicYear ?? term.academicYear,
         semester: data.semester ?? term.semester,
         createdAt: data.createdAt ?? new Date().toISOString(),
+        logicVersion: data.logicVersion ?? null,
       };
 
       setTerms((prev) => [created, ...prev]);
@@ -239,6 +241,7 @@ export function HomeDashboard() {
         academicYear: data.academicYear ?? new Date().getFullYear(),
         semester: data.semester ?? 1,
         createdAt: data.createdAt ?? new Date().toISOString(),
+        logicVersion: data.logicVersion ?? null,
       };
 
       setTerms((prev) => [created, ...prev]);
@@ -349,6 +352,15 @@ export function HomeDashboard() {
         >
           새 시간표 작성
         </Link>
+        <Link
+          href="/new?logic=v2"
+          className="mt-2 inline-flex w-full items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 transition hover:bg-zinc-100"
+        >
+          새 시간표 작성(v2)
+        </Link>
+        <p className="mt-2 text-xs text-zinc-500">
+          v2는 개선된 시간표 생성 로직을 비교 검토하기 위한 시간표입니다.
+        </p>
       </section>
 
       <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -509,8 +521,15 @@ export function HomeDashboard() {
                         href={`/terms/${term.id}/days`}
                         className="min-w-0 flex-1"
                       >
-                        <p className="font-medium text-zinc-900">
-                          {term.timetableName || "(이름 없음)"}
+                        <p className="flex items-center gap-2 font-medium text-zinc-900">
+                          <span className="truncate">
+                            {term.timetableName || "(이름 없음)"}
+                          </span>
+                          {term.logicVersion === "v2" ? (
+                            <span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200">
+                              v2
+                            </span>
+                          ) : null}
                         </p>
                         <p className="mt-1 text-sm text-zinc-600">
                           {term.school} · {term.academicYear}학년도 ·{" "}

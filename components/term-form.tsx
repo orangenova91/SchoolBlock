@@ -2,11 +2,17 @@
 
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
-import type { Semester } from "@/lib/types";
+import type { LogicVersion, Semester } from "@/lib/types";
 
 const currentYear = new Date().getFullYear();
 
-export function TermForm({ school }: { school: string }) {
+export function TermForm({
+  school,
+  logicVersion,
+}: {
+  school: string;
+  logicVersion?: LogicVersion;
+}) {
   const router = useRouter();
   const [timetableName, setTimetableName] = useState("");
   const [academicYear, setAcademicYear] = useState(String(currentYear));
@@ -42,6 +48,7 @@ export function TermForm({ school }: { school: string }) {
           timetableName: trimmedName,
           academicYear: year,
           semester,
+          ...(logicVersion ? { logicVersion } : {}),
         }),
       });
 

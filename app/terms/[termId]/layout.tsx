@@ -15,9 +15,11 @@ function formatTermLabel(term: {
   school: string;
   academicYear: number;
   semester: number;
+  logicVersion?: string;
 }): string {
   return [
     term.timetableName?.trim() || null,
+    term.logicVersion === "v2" ? "v2" : null,
     term.school,
     `${term.academicYear}학년도`,
     `${term.semester}학기`,

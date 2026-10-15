@@ -11,6 +11,17 @@ import {
   type TimetableVersionSummary,
 } from "@/components/timetable-version-panel";
 import { subjectSetBadgeClass } from "@/lib/subjects";
+import {
+  V2CheckProgress,
+  V2PlacementCheckPanel,
+  V2WeightsPanel,
+  minUnplacedOf,
+  runPlacementCheckFlow,
+  type CheckPhase,
+} from "@/components/v2-placement-panel";
+import type { FeasibilityReport } from "@/lib/timetable-feasibility";
+import type { PlacementCheckReport } from "@/lib/timetable-exact-check";
+import { DEFAULT_V2_WEIGHTS, type V2Weights } from "@/lib/v2-weights";
 import type { TimetableCellRef } from "@/lib/timetable-swap";
 import { cellsForClass, maxPeriods } from "@/lib/timetable";
 import {
@@ -96,6 +107,7 @@ type TermSummary = {
   school: string;
   academicYear: number;
   semester: Semester;
+  logicVersion?: string | null;
 };
 
 type TimetableFormProps = {
@@ -190,11 +202,25 @@ export function TimetableForm({ termId }: TimetableFormProps) {
   );
   const [versionMessage, setVersionMessage] = useState("");
   const [swapping, setSwapping] = useState(false);
+  /** v2 전용: 미배치가 수학적으로 불가피한지 사전 검사한 결과. */
+  const [feasibility, setFeasibility] = useState<PlacementCheckReport | null>(
+    null,
+  );
+  /** v2 사전 검사 진행 상태 (빠른 검사 → 정확 판정). */
+  const [checkPhase, setCheckPhase] = useState<CheckPhase>("idle");
+  const [quickReport, setQuickReport] = useState<FeasibilityReport | null>(
+    null,
+  );
+  const [checkStartedAt, setCheckStartedAt] = useState(0);
+  /** v2 전용: 선호 조건 가중치. */
+  const [v2Weights, setV2Weights] = useState<V2Weights>(DEFAULT_V2_WEIGHTS);
+  const [savingWeights, setSavingWeights] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
+      let startV2Check = false;
       setLoading(true);
       setError("");
       try {
@@ -208,6 +234,8 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           ]);
         const tt = (await ttRes.json()) as PlacementDiagnostics & {
           term?: TermSummary;
+          feasibility?: PlacementCheckReport | null;
+          v2Weights?: V2Weights | null;
           status?: "idle" | "ready" | "failed";
           cells?: TimetableCell[];
           seedCells?: TimetableCell[];
@@ -252,6 +280,9 @@ export function TimetableForm({ termId }: TimetableFormProps) {
 
         if (!cancelled) {
           setTerm(tt.term ?? null);
+          setFeasibility(tt.feasibility ?? null);
+          setV2Weights(tt.v2Weights ?? DEFAULT_V2_WEIGHTS);
+          startV2Check = tt.term?.logicVersion === "v2";
           setStatus(tt.status ?? "idle");
           setCells(asArray(tt.cells));
           setSeedCells(asArray(tt.seedCells));
@@ -310,6 +341,22 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           setVersionsLoading(false);
         }
       }
+      // v2: 화면이 다 열린 뒤 사전 검사를 시작한다 (진행 상황을 화면에 표시).
+      if (!cancelled && startV2Check) {
+        void runPlacementCheckFlow(
+          termId,
+          {
+            setPhase: setCheckPhase,
+            setQuick: setQuickReport,
+            setReport: setFeasibility,
+            setStartedAt: setCheckStartedAt,
+            setError,
+          },
+          () => cancelled,
+          // 조건이 그대로면 저장된 판정을 보여주고 다시 판정하지 않는다.
+          { reuseIfUnchanged: true },
+        );
+      }
     }
 
     void load();
@@ -345,7 +392,15 @@ export function TimetableForm({ termId }: TimetableFormProps) {
     cells.length > 0 &&
     unplaced.length === 0;
 
+  // v2는 우선 배치 버튼 없이, 추가 조건을 생성 한 번에 자동 반영한다.
+  const isV2 = term?.logicVersion === "v2";
+  const showPriorityStages = !isV2 && (avoidSameDaySubject || avoidLunchDouble);
+  /** v2: 미배치가 수학적으로 불가피하면 배치 버튼을 막는다. */
+  const generationBlocked =
+    isV2 && feasibility !== null && minUnplacedOf(feasibility) > 0;
+
   const actionsBusy =
+    checkPhase !== "idle" ||
     generating ||
     lunchGenerating ||
     sameDayGenerating ||
@@ -505,6 +560,41 @@ export function TimetableForm({ termId }: TimetableFormProps) {
     }
   }
 
+  async function handleWeightsChange(next: V2Weights) {
+    const previous = v2Weights;
+    setV2Weights(next);
+    setSavingWeights(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/terms/${termId}/timetable/weights`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setV2Weights(previous);
+        setError(data.error ?? "가중치를 저장하지 못했습니다.");
+      }
+    } catch {
+      setV2Weights(previous);
+      setError("서버에 연결할 수 없습니다.");
+    } finally {
+      setSavingWeights(false);
+    }
+  }
+
+  async function handleCheckFeasibility() {
+    setError("");
+    await runPlacementCheckFlow(termId, {
+      setPhase: setCheckPhase,
+      setQuick: setQuickReport,
+      setReport: setFeasibility,
+      setStartedAt: setCheckStartedAt,
+      setError,
+    });
+  }
+
   async function handleGenerate() {
     clearVersionView();
     setGenerating(true);
@@ -521,7 +611,10 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         unplaced?: TimetableUnplaced[];
         message?: string;
         error?: string;
+        feasibility?: PlacementCheckReport | null;
       };
+      // v2: 사전 검사를 통과하지 못하면 서버가 배치하지 않고 검사 결과를 돌려준다.
+      if (data.feasibility) setFeasibility(data.feasibility);
       if (!response.ok) {
         setError(data.error ?? "시간표 생성에 실패했습니다.");
         return;
@@ -699,7 +792,9 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           </p>
         ) : null}
         <p className="mt-1 text-xs text-zinc-500">
-          {avoidSameDaySubject && avoidLunchDouble
+          {isV2
+            ? "v2: 추가 조건에서 켠 기능(점심 연강·3연강·동일 교과 같은 날 금지)을 시간표 배치 한 번에 자동으로 반영합니다. 사전 검사를 통과해야 배치할 수 있고, 점수가 더 내려가지 않을 때까지 반복합니다. (최대 30초)"
+            : avoidSameDaySubject && avoidLunchDouble
             ? "테스트 단계: 동일 교과 우선 배치 → 점심시간 우선 배치 → 남은 시간 시간표 배치 순서로 진행합니다. (둘 다 여러 번 가능)"
             : avoidSameDaySubject
               ? "테스트 단계: 동일 교과 우선 배치(여러 번 가능)로 먼저 선택한 교과를 배치한 뒤, 남은 시간 시간표 배치로 나머지를 채웁니다."
@@ -733,7 +828,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         >
           이전
         </button>
-        {avoidSameDaySubject ? (
+        {!isV2 && avoidSameDaySubject ? (
           <button
             type="button"
             onClick={() => {
@@ -747,7 +842,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
               : "동일 교과 우선 배치"}
           </button>
         ) : null}
-        {avoidLunchDouble ? (
+        {!isV2 && avoidLunchDouble ? (
           <button
             type="button"
             onClick={() => {
@@ -763,17 +858,36 @@ export function TimetableForm({ termId }: TimetableFormProps) {
                 : "점심시간 우선 배치"}
           </button>
         ) : null}
+        {isV2 ? (
+          <button
+            type="button"
+            onClick={() => {
+              void handleCheckFeasibility();
+            }}
+            disabled={actionsBusy}
+            className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {checkPhase !== "idle" ? "검사 중…" : "사전 검사"}
+          </button>
+        ) : null}
         <button
           type="button"
           onClick={() => {
             void handleGenerate();
           }}
-          disabled={actionsBusy}
+          disabled={actionsBusy || generationBlocked}
+          title={
+            generationBlocked
+              ? "사전 검사를 통과하지 못해 배치할 수 없습니다."
+              : undefined
+          }
           className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {generating
-            ? "생성 중… (최대 약 15초)"
-            : avoidSameDaySubject || avoidLunchDouble
+            ? isV2
+              ? "생성 중… (최대 30초)"
+              : "생성 중… (최대 약 15초)"
+            : showPriorityStages
               ? "남은 시간 시간표 배치"
               : "시간표 배치"}
         </button>
@@ -794,6 +908,30 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         </button>
       </div>
 
+      {isV2 && checkPhase !== "idle" ? (
+        <V2CheckProgress
+          phase={checkPhase}
+          quick={quickReport}
+          startedAt={checkStartedAt}
+        />
+      ) : isV2 && feasibility ? (
+        <V2PlacementCheckPanel report={feasibility} />
+      ) : null}
+
+      {isV2 ? (
+        <V2WeightsPanel
+          weights={v2Weights}
+          enabled={{
+            lunch: avoidLunchDouble,
+            triple: avoidTriplePeriod,
+            sameDay: avoidSameDaySubject,
+          }}
+          saving={savingWeights}
+          disabled={actionsBusy || savingWeights}
+          onChange={(next) => void handleWeightsChange(next)}
+        />
+      ) : null}
+
       {versionMessage ? (
         <p className="text-center text-sm text-emerald-700" role="status">
           {versionMessage}
@@ -803,7 +941,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       {message && !selectedVersionId ? (
         <div>
           <p className="mb-1 text-center text-xs font-medium text-zinc-500">
-            {avoidSameDaySubject || avoidLunchDouble
+            {showPriorityStages
               ? "남은 시간 시간표 배치 결과"
               : "시간표 배치 결과"}
           </p>
@@ -1010,7 +1148,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         />
       )}
 
-      {avoidSameDaySubject || avoidLunchDouble ? (
+      {showPriorityStages ? (
         <div className="grid grid-cols-1 gap-1 text-center text-xs text-zinc-500 lg:grid-cols-3">
           {avoidSameDaySubject ? (
             <p>
@@ -1039,8 +1177,9 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         </div>
       ) : null}
 
-      {(avoidSameDaySubject && sameDaySubjectMessage) ||
-      (avoidLunchDouble && lunchMessage) ? (
+      {!isV2 &&
+      ((avoidSameDaySubject && sameDaySubjectMessage) ||
+        (avoidLunchDouble && lunchMessage)) ? (
         <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
           {avoidSameDaySubject && sameDaySubjectMessage ? (
             <div>

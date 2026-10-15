@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getAccountId, getSessionFromRequest } from "@/lib/session";
-import type { Semester, TermDocument } from "@/lib/types";
+import { parseLogicVersion, type Semester, type TermDocument } from "@/lib/types";
 
 function isSemester(value: unknown): value is Semester {
   return value === 1 || value === 2;
@@ -42,6 +42,7 @@ export async function GET(request: Request) {
         academicYear: term.academicYear,
         semester: term.semester,
         createdAt: term.createdAt,
+        logicVersion: term.logicVersion ?? null,
       })),
     });
   } catch (error) {
@@ -83,10 +84,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const { timetableName, academicYear, semester } = body as Record<
-    string,
-    unknown
-  >;
+  const { timetableName, academicYear, semester, logicVersion } =
+    body as Record<string, unknown>;
 
   if (typeof timetableName !== "string" || timetableName.trim().length === 0) {
     return NextResponse.json(
@@ -135,6 +134,8 @@ export async function POST(request: Request) {
     ownerId: accountId,
     createdAt: new Date(),
   };
+  const version = parseLogicVersion(logicVersion);
+  if (version) doc.logicVersion = version;
 
   try {
     const db = await getDb();

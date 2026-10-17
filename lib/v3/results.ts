@@ -47,7 +47,10 @@ export class TopResults<T> {
     return this.items;
   }
 
-  /** 상위 목록이 바뀌었으면 true */
+  /**
+   * 상위 목록이 "나아졌으면" true: 새로 다른 결과가 들어왔거나, 비슷한 결과보다 점수가 좋아졌을 때.
+   * 같은 점수의 비슷한 결과로 바꿔 끼운 것은 나아진 것이 아니므로 false (조기 종료의 "30초 동안 변화 없음" 판단용).
+   */
   offer(r: RankedResult<T>): boolean {
     const similar = this.items.filter((x) => !isDistinct(x.signature, r.signature));
     // 비슷한 결과 중 하나라도 더 좋으면 버린다 (더 좋은 결과를 잃지 않게)
@@ -58,7 +61,7 @@ export class TopResults<T> {
       .slice(0, MAX_RESULTS);
     if (!next.includes(r)) return false;
     this.items = next;
-    return true;
+    return similar.length === 0 || similar.every((x) => r.score < x.score);
   }
 
   best(): RankedResult<T> | undefined {

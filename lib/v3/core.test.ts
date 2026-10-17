@@ -96,7 +96,8 @@ describe("상위 3개 결과", () => {
     const top = new TopResults<string>();
     top.offer({ score: 30, signature: base, foundAtMs: 1, payload: "A" });
     assert.equal(top.offer({ score: 31, signature: variant(10, "a"), foundAtMs: 2, payload: "A-worse" }), false);
-    assert.equal(top.offer({ score: 30, signature: variant(10, "b"), foundAtMs: 3, payload: "A-same" }), true);
+    // 같은 점수의 비슷한 결과는 바꿔 끼우지만 "나아짐"은 아니다
+    assert.equal(top.offer({ score: 30, signature: variant(10, "b"), foundAtMs: 3, payload: "A-same" }), false);
     assert.deepEqual(top.list.map((r) => r.payload), ["A-same"]);
     top.offer({ score: 35, signature: variant(60, "c"), foundAtMs: 4, payload: "B" });
     top.offer({ score: 40, signature: variant(120, "d"), foundAtMs: 5, payload: "C" });

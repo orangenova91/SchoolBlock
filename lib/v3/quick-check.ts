@@ -5,7 +5,7 @@
  * - error: 확정 부족. 그만큼은 어떻게 해도 배치할 수 없다 (minUnplaced 하한).
  * - warn : 여유 없음. 지금은 가능하지만 조건을 하나 더하면 막힐 수 있다.
  */
-import { GRADES, type Grade } from "@/lib/types";
+import { GRADES, dayLabel, type Grade } from "@/lib/types";
 import { gradeSlots, slotKey, type V3Instance, type V3Set } from "@/lib/v3/instance";
 
 export type QuickRule =
@@ -36,6 +36,13 @@ export type QuickCheckResult = {
   ms: number;
 };
 
+/** 받침이 있으면 "과", 없으면 "와" (한글이 아니면 "과": "SET과") */
+function withGwa(word: string): string {
+  const code = word.charCodeAt(word.length - 1);
+  const hangul = code >= 0xac00 && code <= 0xd7a3;
+  return `${word}${hangul && (code - 0xac00) % 28 === 0 ? "와" : "과"}`;
+}
+
 const setName = (s: V3Set) => `${s.grade}학년 ${s.set} SET`;
 
 export function quickCheck(inst: V3Instance): QuickCheckResult {
@@ -44,7 +51,7 @@ export function quickCheck(inst: V3Instance): QuickCheckResult {
   const push = (w: Omit<QuickWarning, "severity">, tight = false) => out.push({ ...w, severity: tight ? "warn" : "error" });
 
   for (const p of inst.pinConflicts) {
-    push({ rule: "pinConflict", who: `${p.grade}학년 ${p.classNo}반 ${p.subject}`, need: 1, have: 0, message: `${p.day} ${p.period}교시 선 수업이 ${p.reason}과 겹칩니다. 선 수업이나 SET 위치를 고쳐 주세요` });
+    push({ rule: "pinConflict", who: `${p.grade}학년 ${p.classNo}반 ${p.subject}`, need: 1, have: 0, message: `${dayLabel(p.day)}요일 ${p.period}교시 선 수업이 ${withGwa(p.reason)} 겹칩니다. 선 수업이나 SET 위치를 고쳐 주세요` });
   }
 
   // 공통 수업(선 수업 포함) 시간: 반별·교사별·교사×학년별
@@ -110,7 +117,7 @@ export function quickCheck(inst: V3Instance): QuickCheckResult {
     };
     for (const f of s.fixed) {
       const why = blockedBy(f.day, f.period);
-      if (why) { blocking = true; push({ rule: "fixedConflict", who: setName(s), need: 1, have: 0, message: `고정한 ${f.day} ${f.period}교시가 ${why}와 겹칩니다` }); }
+      if (why) { blocking = true; push({ rule: "fixedConflict", who: setName(s), need: 1, have: 0, message: `고정한 ${dayLabel(f.day)}요일 ${f.period}교시가 ${withGwa(why)} 겹칩니다` }); }
     }
     const ok = gradeSlots(inst, s.grade).filter((sl) => !blockedBy(sl.day, sl.period));
     const days = new Set(ok.map((sl) => sl.day)).size;

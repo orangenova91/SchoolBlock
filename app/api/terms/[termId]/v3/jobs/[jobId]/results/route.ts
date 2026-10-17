@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { findTermJob, jobNotFound, requireV3Term, serverError } from "@/lib/v3/api";
-import { JOB_RESULTS, type V3JobResultDocument } from "@/lib/v3/jobs";
+import { JOB_RESULTS, knownLowerBound, type V3JobResultDocument } from "@/lib/v3/jobs";
 import { cellSignature, diffCells } from "@/lib/v3/results";
 import { judge } from "@/lib/v3/score";
 
@@ -15,13 +15,15 @@ export async function GET(request: Request, context: RouteContext) {
     const job = await findTermJob(ctx.db, termId, jobId);
     if (!job) return jobNotFound();
     const docs = await ctx.db.collection<V3JobResultDocument>(JOB_RESULTS).find({ jobId: String(job._id) }).sort({ rank: 1 }).toArray();
+    const known = await knownLowerBound(ctx.db, termId, job.inputHash);
+    const lower = job.lowerBound === null ? known : known === null ? job.lowerBound : Math.max(job.lowerBound, known);
     const top = docs[0] ? cellSignature(docs[0].solution.cells) : null;
     return NextResponse.json({
       results: docs.map((d) => ({
         rank: d.rank,
         metrics: d.metrics,
         foundAtMs: d.foundAtMs,
-        judgement: judge(d.metrics, { lower: job.lowerBound, proven: false }),
+        judgement: judge(d.metrics, { lower, proven: false }),
         diffFromTop: top ? diffCells(top, cellSignature(d.solution.cells)) : 0,
         cells: d.solution.cells,
         occurrences: d.solution.occurrences,

@@ -65,6 +65,10 @@ export async function POST(request: Request, context: RouteContext) {
         { status: 404 },
       );
     }
+    // v3 시간표는 v3 생성 화면(작업 대기열)에서 만든다
+    if (term.logicVersion === "v3") {
+      return NextResponse.json({ error: "v3 시간표는 v3 생성 화면에서 만들어 주세요." }, { status: 400 });
+    }
 
     // v2 시간표는 우선 배치를 쓰지 않고 추가 조건을 생성 안에서 자동 반영한다.
     if (term.logicVersion === "v2") {

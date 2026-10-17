@@ -86,6 +86,10 @@ async function main() {
     const made = await call("POST", `/api/terms/${term}/v3/jobs`, { kind: "search" });
     check("생성 작업 만들기 (201)", made.status === 201);
     const jobId = (made.json.job as Job).id;
+    const boundId = made.json.boundJobId as string | null;
+    check("이론상 최선(하한) 계산 작업이 함께 추가됨", typeof boundId === "string");
+    // 하한 계산은 같은 학기의 생성 작업 뒤에 돈다. 이 확인에서는 시간을 줄이려고 바로 멈춘다
+    if (boundId) await call("POST", `/api/terms/${term}/v3/jobs/${boundId}/stop`);
     const run = await waitJob(term, jobId, (j) => j.status === "running" && (j.progress?.segmentMs ?? 0) > 3000, 60_000);
     check("작업자가 작업을 가져가 실행", run.ms >= 0, `대기열 → 실행 ${run.ms}ms`);
     const lat: number[] = [];
@@ -118,7 +122,9 @@ async function main() {
     await waitJob(term, jobId, (j) => j.status === "running", 30_000);
     const extra: number[] = [];
     for (let i = 0; i < 4; i++) extra.push((await call("POST", `/api/terms/${term}/v3/jobs`, { kind: "hybrid" })).status);
-    check("학기당 대기 3개 제한 (4번째는 409)", extra.join(",") === "201,201,201,409", extra.join(","));
+    const queuedNow = ((await call("GET", `/api/terms/${term}/v3/jobs`)).json.jobs as Job[]).filter((j) => j.status === "queued").length;
+    // 첫 생성 작업이 하한 계산 작업을 함께 넣으므로 (하한 작업이 멈춰 있었음) 생성 2개 + 하한 1개 = 대기 3개에서 막힌다
+    check("학기당 대기 3개 제한 (넘치면 409)", extra.join(",") === "201,201,409,409" && queuedNow === 3, `${extra.join(",")} · 대기 ${queuedNow}개`);
     const all = await call("GET", `/api/terms/${term}/v3/jobs`);
     for (const j of all.json.jobs as Job[]) if (["queued", "running", "awaiting"].includes(j.status)) await call("POST", `/api/terms/${term}/v3/jobs/${j.id}/stop`);
     await waitJob(term, jobId, (j) => j.status === "stopped", 20_000);

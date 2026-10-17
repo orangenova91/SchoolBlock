@@ -6,10 +6,11 @@ import loadHighs, { type Highs } from "highs";
 import type { V3Model } from "@/lib/v3/model";
 
 let highsPromise: Promise<Highs> | null = null;
+let loaded: Highs | null = null;
 
 export function getHighs(): Promise<Highs> {
   if (!highsPromise) {
-    highsPromise = loadHighs().catch((error) => {
+    highsPromise = loadHighs().then((h) => (loaded = h)).catch((error) => {
       highsPromise = null;
       throw error;
     });
@@ -57,10 +58,13 @@ export function dualBound(model: HighsModel): number | null {
   }
 }
 
-/** 계산기 메모리가 이 값을 넘으면 정수계획 구간을 끝내고 중단점을 저장한다 */
-export const MEMORY_LIMIT_BYTES = 1_200_000_000;
+/**
+ * 계산기(WebAssembly) 메모리가 이 값을 넘으면 정수계획 구간을 끝내고 중단점을 저장한다.
+ * 프로세스 전체 메모리(rss)가 아니라 계산기 자신의 메모리를 본다: 개발 서버 안에서 돌면 서버 자체가 이미 수백 MB를 쓰기 때문.
+ * (따로 돌린 측정에서 rss 1,056MB일 때 계산기 메모리는 약 0.9GB)
+ */
+export const MEMORY_LIMIT_BYTES = 1_000_000_000;
 
 export function overMemory(): boolean {
-  const mu = process.memoryUsage();
-  return mu.rss > MEMORY_LIMIT_BYTES;
+  return (loaded?.memoryBytes ?? 0) > MEMORY_LIMIT_BYTES;
 }

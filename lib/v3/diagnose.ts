@@ -27,6 +27,8 @@ export type DiagnoseRun = {
   shouldStop?: () => boolean;
   /** 진행 문구 (예: "완성본 찾는 중") */
   onProgress?: (message: string) => void;
+  /** 이론상 최선 계산 중 증명된 하한이 오를 때마다 (정수로 올림). 하한은 계산 도중에도 이미 증명된 값이다 */
+  onBound?: (lowerBound: number) => void;
 };
 
 /** 정수 범위: lo = 증명된 하한, hi = 찾은 값 (같으면 확정) */
@@ -173,6 +175,42 @@ export async function diagnoseFixedLoss(run: DiagnoseRun): Promise<FixedLossRepo
   const lossLo = withoutFixed.hi === null ? 0 : Math.max(0, withFixed.lo - withoutFixed.hi);
   const lossHi = withFixed.hi === null ? null : Math.max(0, withFixed.hi - withoutFixed.lo);
   return { withFixed, withoutFixed, loss: range(lossLo, lossHi), nothingFixed, elapsedMs: Date.now() - t0 };
+}
+
+// ── 이론상 최선 (하한) ──
+
+export type BoundReport = {
+  /** 증명된 하한 (점수, 정수로 올림) */
+  lowerBound: number | null;
+  /** 계산 중 찾은 가장 좋은 점수 */
+  best: number | null;
+  /** 하한 = 최선 (최적 증명) */
+  proven: boolean;
+  elapsedMs: number;
+};
+
+export async function diagnoseBound(run: DiagnoseRun): Promise<BoundReport> {
+  const t0 = Date.now();
+  run.onProgress?.("이론상 최선 계산 중");
+  let shown: number | null = null;
+  const r = await runMilp({
+    input: run.input,
+    inst: run.inst,
+    budgetMs: run.budgetMs,
+    seed: run.seed,
+    shouldStop: run.shouldStop,
+    progressEveryMs: 3000,
+    onProgress: (p) => {
+      if (p.lowerBound === null) return;
+      const lb = Math.max(0, Math.ceil(p.lowerBound - 1e-6));
+      if (shown !== null && lb <= shown) return;
+      shown = lb;
+      run.onBound?.(lb);
+    },
+  });
+  const lb = r.lowerBound === null ? null : Math.max(0, Math.ceil(r.lowerBound - 1e-6));
+  const best = r.results[0]?.metrics.score ?? null;
+  return { lowerBound: lb, best, proven: lb !== null && best !== null && best <= lb, elapsedMs: Date.now() - t0 };
 }
 
 // ── 4) 데이터 한계 ──

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTermHref } from "@/lib/use-term-href";
 import { useRouter } from "next/navigation";
 import { TimetableAllTeachersView } from "@/components/timetable-all-teachers-view";
 import { TimetableGrid } from "@/components/timetable-grid";
@@ -132,6 +133,7 @@ function cellAt(
 
 export function TimetableForm({ termId }: TimetableFormProps) {
   const router = useRouter();
+  const termHref = useTermHref();
   const [term, setTerm] = useState<TermSummary | null>(null);
   const [schedules, setSchedules] = useState<GradeDaySchedules>(
     createDefaultGradeDaySchedules(),
@@ -823,7 +825,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       <div className="flex flex-wrap items-center justify-center gap-2">
         <button
           type="button"
-          onClick={() => router.push(`/terms/${termId}/preferences`)}
+          onClick={() => router.push(termHref(termId, `preferences`))}
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
         >
           이전

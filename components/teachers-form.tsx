@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useTermHref } from "@/lib/use-term-href";
 import { useRouter } from "next/navigation";
 import {
   alignAssignmentToSubject,
@@ -984,6 +985,7 @@ function AssignmentHoursEditor({
 
 export function TeachersForm({ termId }: TeachersFormProps) {
   const router = useRouter();
+  const termHref = useTermHref();
   const [term, setTerm] = useState<TermSummary | null>(null);
   const [teachers, setTeachers] = useState<Teacher[]>(createDefaultTeachers());
   const [subjects, setSubjects] = useState<GradeSubjects>(
@@ -1470,7 +1472,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
       return;
     }
     const ok = await saveTeachers("교사 명단이 저장되었습니다.");
-    if (ok) router.push(`/terms/${termId}/sets`);
+    if (ok) router.push(termHref(termId, `sets`));
   }
 
   const hoursBySubject = useMemo(() => assignedHoursMap(teachers), [teachers]);
@@ -1832,7 +1834,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
       <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
         <button
           type="button"
-          onClick={() => router.push(`/terms/${termId}/subjects?step=2`)}
+          onClick={() => router.push(termHref(termId, `subjects?step=2`))}
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
         >
           이전

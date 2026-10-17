@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useTermHref } from "@/lib/use-term-href";
 import { useRouter } from "next/navigation";
 import { SubjectBlockGrid } from "@/components/subject-block-grid";
 import {
@@ -80,6 +81,7 @@ function paintErrorMessage(
 
 export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
   const router = useRouter();
+  const termHref = useTermHref();
   const [term, setTerm] = useState<TermSummary | null>(null);
   const [teachers, setTeachers] = useState<Teacher[]>(createDefaultTeachers());
   const [subjects, setSubjects] = useState<GradeSubjects>(
@@ -417,7 +419,7 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const ok = await saveCells("선 수업 배치가 저장되었습니다.", true);
-    if (ok) router.push(`/terms/${termId}/constraints`);
+    if (ok) router.push(termHref(termId, `constraints`));
   }
 
   function handlePaint(day: Weekday, period: number) {
@@ -764,7 +766,7 @@ export function SubjectBlocksForm({ termId }: SubjectBlocksFormProps) {
       <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
         <button
           type="button"
-          onClick={() => router.push(`/terms/${termId}/sets/partial`)}
+          onClick={() => router.push(termHref(termId, `sets/partial`))}
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
         >
           이전

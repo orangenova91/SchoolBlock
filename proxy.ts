@@ -72,6 +72,13 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/admin", request.url));
   }
 
+  // 학기 화면: 요청 주소를 레이아웃에 넘긴다. v3 학기를 v1 주소로 열면 같은 단계의 v3 화면으로 보내는 데 쓴다.
+  if (pathname.startsWith("/terms/") || pathname.startsWith("/v3/terms/")) {
+    const headers = new Headers(request.headers);
+    headers.set("x-sb-path", pathname + request.nextUrl.search);
+    return NextResponse.next({ request: { headers } });
+  }
+
   return NextResponse.next();
 }
 

@@ -60,7 +60,7 @@ export function TermForm({
         return;
       }
 
-      router.push(`/terms/${data.id}/days`);
+      router.push(`${logicVersion === "v3" ? "/v3" : ""}/terms/${data.id}/days`);
     } catch {
       setStatus("error");
       setMessage("서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");

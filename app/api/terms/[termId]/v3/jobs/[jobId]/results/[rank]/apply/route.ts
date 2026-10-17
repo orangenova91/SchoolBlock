@@ -4,7 +4,7 @@ import { MAX_TIMETABLE_VERSIONS, type TimetableDocument, type TimetableVersionDo
 import { findTermJob, jobNotFound, requireV3Term, serverError } from "@/lib/v3/api";
 import { loadV3Input, v3InputHash } from "@/lib/v3/input";
 import { buildInstance } from "@/lib/v3/instance";
-import { JOB_RESULTS, type V3JobResultDocument } from "@/lib/v3/jobs";
+import { JOB_RESULTS, knownLowerBound, type V3JobResultDocument } from "@/lib/v3/jobs";
 import { judge } from "@/lib/v3/score";
 import { validateSolution } from "@/lib/v3/validate";
 
@@ -39,8 +39,10 @@ export async function POST(request: Request, context: RouteContext) {
     const cells = result.solution.cells;
     const now = new Date();
     const lap = input.preferences.lunchAfterPeriod;
-    const lb = job.lowerBound === null ? null : Math.max(0, Math.ceil(job.lowerBound - 1e-6));
-    const j = judge(v.metrics, { lower: job.lowerBound, proven: false });
+    const known = await knownLowerBound(ctx.db, termId, job.inputHash);
+    const lower = job.lowerBound === null ? known : known === null ? job.lowerBound : Math.max(job.lowerBound, known);
+    const lb = lower === null ? null : Math.max(0, Math.ceil(lower - 1e-6));
+    const j = judge(v.metrics, { lower, proven: false });
     const note = `v3 · ${KIND_LABEL[job.kind] ?? job.kind} · ${v.metrics.score}점 (${lb === null ? "최선 미계산" : `최선 ${lb}, ${j.near ? "달성" : "미달"}`})`;
     const working: Partial<TimetableDocument> = {
       termId,

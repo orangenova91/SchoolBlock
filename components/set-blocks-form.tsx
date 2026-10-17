@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useTermHref } from "@/lib/use-term-href";
 import { useRouter } from "next/navigation";
 import { SetBlockGrid } from "@/components/set-block-grid";
 import {
@@ -66,6 +67,8 @@ type TermSummary = {
 
 type SetBlocksFormProps = {
   termId: string;
+  /** v3: 칠한 SET = 고정, 비우면 생성 단계에서 자동 배치 → 자동 배치 버튼 없음, 모두 칠하지 않아도 다음으로 */
+  variant?: "v3";
 };
 
 function kindLabel(kind: GradeSetInfo["kind"]): string {
@@ -74,8 +77,10 @@ function kindLabel(kind: GradeSetInfo["kind"]): string {
   return "단위 불일치";
 }
 
-export function SetBlocksForm({ termId }: SetBlocksFormProps) {
+export function SetBlocksForm({ termId, variant }: SetBlocksFormProps) {
+  const isV3 = variant === "v3";
   const router = useRouter();
+  const termHref = useTermHref();
   const [term, setTerm] = useState<TermSummary | null>(null);
   const [teachers, setTeachers] = useState<Teacher[]>(createDefaultTeachers());
   const [subjects, setSubjects] = useState<GradeSubjects>(
@@ -230,7 +235,7 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
   const invalidSets = catalogHasInvalidSets(catalog);
   const placementComplete = wholeSetsPlacementComplete(cells, catalog);
   const canProceed =
-    capacityIssues.length === 0 && !invalidSets && placementComplete;
+    capacityIssues.length === 0 && !invalidSets && (isV3 || placementComplete);
 
   const blockedByGrade = useMemo(() => {
     const next = {} as Record<Grade, Map<string, string[]>>;
@@ -504,7 +509,7 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const ok = await saveCells("SET 블록이 저장되었습니다.", true);
-    if (ok) router.push(`/terms/${termId}/sets/partial`);
+    if (ok) router.push(termHref(termId, `sets/partial`));
   }
 
   if (loading) {
@@ -527,12 +532,12 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
     <form onSubmit={handleSubmit} className="flex w-full flex-col gap-6">
       <header className="text-center">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          SET 블록 배치(1/2)
+          {isV3 ? "SET 고정 배치(1/2)" : "SET 블록 배치(1/2)"}
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
-          전학년 SET를 요일·교시에 배치하세요. 이미 부분 SET가 배치된 칸은
-          잠겨 있고, 다른 학년의 전학년·부분 SET와 교사가 겹치는 시간은
-          자동으로 막힙니다. 다음에서 부분 SET를 배치합니다.
+          {isV3
+            ? "학교 사정으로 시간이 정해진 전학년 SET만 칠하세요. 칠한 회차는 고정되고, 비워 둔 회차는 시간표 생성 단계에서 가장 좋은 위치로 자동 배치됩니다. 같은 SET은 하루 한 번만 자동 배치합니다."
+            : "전학년 SET를 요일·교시에 배치하세요. 이미 부분 SET가 배치된 칸은 잠겨 있고, 다른 학년의 전학년·부분 SET와 교사가 겹치는 시간은 자동으로 막힙니다. 다음에서 부분 SET를 배치합니다."}
         </p>
       </header>
 
@@ -671,7 +676,7 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
       <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
         <button
           type="button"
-          onClick={() => router.push(`/terms/${termId}/teachers`)}
+          onClick={() => router.push(termHref(termId, `teachers`))}
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
         >
           이전
@@ -688,26 +693,28 @@ export function SetBlocksForm({ termId }: SetBlocksFormProps) {
         >
           초기화
         </button>
-        <button
-          type="button"
-          onClick={handleAutoPlace}
-          disabled={
-            status === "saving" ||
-            autoPlacing ||
-            invalidSets ||
-            capacityIssues.length > 0
-          }
-          title={
-            capacityIssues.length > 0
-              ? "학반 시수가 주간 교시를 넘습니다."
-              : invalidSets
-                ? "SET 단위가 일치하지 않습니다."
-                : "전학년 SET를 가능한 칸에 자동으로 채웁니다."
-          }
-          className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {autoPlacing ? "배치 중…" : "자동 배치"}
-        </button>
+        {isV3 ? null : (
+          <button
+            type="button"
+            onClick={handleAutoPlace}
+            disabled={
+              status === "saving" ||
+              autoPlacing ||
+              invalidSets ||
+              capacityIssues.length > 0
+            }
+            title={
+              capacityIssues.length > 0
+                ? "학반 시수가 주간 교시를 넘습니다."
+                : invalidSets
+                  ? "SET 단위가 일치하지 않습니다."
+                  : "전학년 SET를 가능한 칸에 자동으로 채웁니다."
+            }
+            className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {autoPlacing ? "배치 중…" : "자동 배치"}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => {

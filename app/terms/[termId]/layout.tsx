@@ -1,3 +1,5 @@
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { TermFlowStepper } from "@/components/term-flow-stepper";
 import { getDb } from "@/lib/mongodb";
@@ -19,7 +21,7 @@ function formatTermLabel(term: {
 }): string {
   return [
     term.timetableName?.trim() || null,
-    term.logicVersion === "v2" ? "v2" : null,
+    term.logicVersion === "v2" ? "v2" : term.logicVersion === "v3" ? "v3" : null,
     term.school,
     `${term.academicYear}학년도`,
     `${term.semester}학기`,
@@ -36,10 +38,12 @@ export default async function TermFlowLayout({
 
   let termLabel: string | undefined;
   let maxReachedChapter = 0;
+  let isV3 = false;
   try {
     const session = await getServerSession();
     if (session) {
       const term = await findOwnedTerm(termId, session.accountId);
+      isV3 = term?.logicVersion === "v3";
       if (term) {
         termLabel = formatTermLabel(term);
         if (
@@ -65,6 +69,12 @@ export default async function TermFlowLayout({
     }
   } catch {
     termLabel = undefined;
+  }
+
+  // v3 시간표는 v3 화면에서 연다 (같은 단계로). 입력 화면을 공유하므로 v1 주소로 이동해 와도 여기서 되돌린다.
+  if (isV3) {
+    const path = (await headers()).get("x-sb-path") ?? `/terms/${termId}/days`;
+    redirect(`/v3${path}`);
   }
 
   return (

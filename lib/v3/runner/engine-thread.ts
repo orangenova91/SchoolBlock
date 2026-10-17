@@ -6,7 +6,7 @@
  * - 구간이 끝나면 스레드도 끝난다 → 계산기(WebAssembly) 메모리가 함께 풀린다.
  */
 import { parentPort, workerData } from "node:worker_threads";
-import { diagnoseDataLimit, diagnoseFeasibility, diagnoseFixedLoss, diagnoseRelax } from "@/lib/v3/diagnose";
+import { diagnoseBound, diagnoseDataLimit, diagnoseFeasibility, diagnoseFixedLoss, diagnoseRelax } from "@/lib/v3/diagnose";
 import { runHybrid } from "@/lib/v3/engines/hybrid";
 import { runMilp } from "@/lib/v3/engines/milp";
 import { runSearch } from "@/lib/v3/engines/search";
@@ -39,11 +39,16 @@ async function main() {
   const inst = buildInstance(data.input);
   const base = { input: data.input, inst, budgetMs: data.budgetMs, seed: data.seed, shouldStop };
   if (data.kind === "diagnose") {
-    const run = { ...base, onProgress: (message: string) => post({ type: "progress", progress: { phase: "diagnose", message } }) };
+    const run = {
+      ...base,
+      onProgress: (message: string) => post({ type: "progress", progress: { phase: "diagnose", message } }),
+      onBound: (lowerBound: number) => post({ type: "progress", progress: { phase: "diagnose", message: `이론상 최선 계산 중 (지금까지 ${lowerBound}점 이상으로 증명)`, lowerBound } }),
+    };
     const report =
       data.diagnose === "relax" ? await diagnoseRelax(run)
       : data.diagnose === "fixedLoss" ? await diagnoseFixedLoss(run)
       : data.diagnose === "dataLimit" ? await diagnoseDataLimit(run)
+      : data.diagnose === "bound" ? await diagnoseBound(run)
       : await diagnoseFeasibility(run);
     post({ type: "done", report, stopped: shouldStop() });
     return;

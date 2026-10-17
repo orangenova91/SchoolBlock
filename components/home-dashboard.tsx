@@ -358,8 +358,16 @@ export function HomeDashboard() {
         >
           새 시간표 작성(v2)
         </Link>
+        <Link
+          href="/new?logic=v3"
+          className="mt-2 inline-flex w-full items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 transition hover:bg-zinc-100"
+        >
+          새 시간표 작성(v3)
+        </Link>
         <p className="mt-2 text-xs text-zinc-500">
           v2는 개선된 시간표 생성 로직을 비교 검토하기 위한 시간표입니다.
+          v3는 SET 수업도 자동으로 배치하고, 여러 방법으로 오래 계산해 가장
+          좋은 결과 3개를 보여 줍니다.
         </p>
       </section>
 
@@ -518,7 +526,7 @@ export function HomeDashboard() {
                       </form>
                     ) : (
                       <Link
-                        href={`/terms/${term.id}/days`}
+                        href={`${term.logicVersion === "v3" ? "/v3" : ""}/terms/${term.id}/days`}
                         className="min-w-0 flex-1"
                       >
                         <p className="flex items-center gap-2 font-medium text-zinc-900">
@@ -528,6 +536,10 @@ export function HomeDashboard() {
                           {term.logicVersion === "v2" ? (
                             <span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200">
                               v2
+                            </span>
+                          ) : term.logicVersion === "v3" ? (
+                            <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
+                              v3
                             </span>
                           ) : null}
                         </p>

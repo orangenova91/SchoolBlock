@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useTermHref } from "@/lib/use-term-href";
 import { useRouter } from "next/navigation";
 import { PartialSetBlockGrid } from "@/components/partial-set-block-grid";
 import {
@@ -68,6 +69,8 @@ type TermSummary = {
 
 type PartialSetBlocksFormProps = {
   termId: string;
+  /** v3: 칠한 SET = 고정, 비우면 생성 단계에서 자동 배치 → 자동 배치 버튼 없음, 모두 칠하지 않아도 다음으로 */
+  variant?: "v3";
 };
 
 function roomsSummary(
@@ -80,8 +83,10 @@ function roomsSummary(
   return parts.length > 0 ? parts.join("·") : "학반 미지정";
 }
 
-export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
+export function PartialSetBlocksForm({ termId, variant }: PartialSetBlocksFormProps) {
+  const isV3 = variant === "v3";
   const router = useRouter();
+  const termHref = useTermHref();
   const [term, setTerm] = useState<TermSummary | null>(null);
   const [teachers, setTeachers] = useState<Teacher[]>(createDefaultTeachers());
   const [subjects, setSubjects] = useState<GradeSubjects>(
@@ -242,7 +247,7 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
   const canProceed =
     missingClassNos === null &&
     capacityIssues.length === 0 &&
-    placementComplete;
+    (isV3 || placementComplete);
 
   const wholeByGrade = useMemo(() => {
     const next = {} as Record<Grade, Map<string, ElectiveSet>>;
@@ -498,7 +503,7 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
     const ok = await savePartial("부분 SET 블록이 저장되었습니다.", true);
     // Full navigation so a stale client bundle cannot skip to /constraints.
     if (ok) {
-      window.location.assign(`/terms/${termId}/blocks`);
+      window.location.assign(termHref(termId, `blocks`));
     }
   }
 
@@ -522,12 +527,12 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
     <form onSubmit={handleSubmit} className="flex w-full flex-col gap-6">
       <header className="text-center">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">
-          SET 블록 배치(2/2)
+          {isV3 ? "SET 고정 배치(2/2)" : "SET 블록 배치(2/2)"}
         </h1>
         <p className="mt-2 text-sm text-zinc-600">
-          부분 SET를 요일·교시에 배치하세요. 전학년 SET 칸은 잠겨 있습니다.
-          원학반이 겹치지 않으면 같은 시간에 여러 부분 SET를 둘 수 있고, +α는
-          원학반을 잠그지 않습니다.
+          {isV3
+            ? "학교 사정으로 시간이 정해진 부분 SET만 칠하세요. 칠한 회차는 고정되고, 비워 둔 회차는 시간표 생성 단계에서 자동 배치됩니다. 원학반이 겹치지 않으면 같은 시간에 여러 부분 SET를 둘 수 있고, +α는 원학반을 잠그지 않습니다."
+            : "부분 SET를 요일·교시에 배치하세요. 전학년 SET 칸은 잠겨 있습니다. 원학반이 겹치지 않으면 같은 시간에 여러 부분 SET를 둘 수 있고, +α는 원학반을 잠그지 않습니다."}
         </p>
       </header>
 
@@ -675,7 +680,7 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
       <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
         <button
           type="button"
-          onClick={() => router.push(`/terms/${termId}/sets`)}
+          onClick={() => router.push(termHref(termId, `sets`))}
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
         >
           이전
@@ -690,29 +695,31 @@ export function PartialSetBlocksForm({ termId }: PartialSetBlocksFormProps) {
         >
           초기화
         </button>
-        <button
-          type="button"
-          onClick={handleAutoPlace}
-          disabled={
-            status === "saving" ||
-            autoPlacing ||
-            missingClassNos !== null ||
-            capacityIssues.length > 0 ||
-            partials.length === 0
-          }
-          title={
-            missingClassNos
-              ? missingClassNos
-              : capacityIssues.length > 0
-                ? "학반 시수가 주간 교시를 넘습니다."
-                : partials.length === 0
-                  ? "부분 SET가 없습니다."
-                  : "부분 SET를 가능한 칸에 자동으로 채웁니다."
-          }
-          className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {autoPlacing ? "배치 중…" : "자동 배치"}
-        </button>
+        {isV3 ? null : (
+          <button
+            type="button"
+            onClick={handleAutoPlace}
+            disabled={
+              status === "saving" ||
+              autoPlacing ||
+              missingClassNos !== null ||
+              capacityIssues.length > 0 ||
+              partials.length === 0
+            }
+            title={
+              missingClassNos
+                ? missingClassNos
+                : capacityIssues.length > 0
+                  ? "학반 시수가 주간 교시를 넘습니다."
+                  : partials.length === 0
+                    ? "부분 SET가 없습니다."
+                    : "부분 SET를 가능한 칸에 자동으로 채웁니다."
+            }
+            className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {autoPlacing ? "배치 중…" : "자동 배치"}
+          </button>
+        )}
         <button
           type="button"
           onClick={() => {

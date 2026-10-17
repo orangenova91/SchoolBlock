@@ -19,6 +19,7 @@ import {
   finishDiagnosis,
   finishSegment,
   heartbeat,
+  knownLowerBound,
   loadCheckpoint,
   type V3JobDocument,
   type V3JobProgress,
@@ -106,7 +107,8 @@ export class Coordinator {
       input,
       checkpoint,
       budgetMs,
-      lowerBound: job.lowerBound,
+      // 같은 입력의 다른 작업(하한 계산 등)이 증명한 하한도 함께 써서 조기 종료·근접 판정에 쓴다
+      lowerBound: maxOrNull(job.lowerBound, await knownLowerBound(db, job.termId, job.inputHash)),
       seed: job.seed + job.segments * 7919,
       stopBuffer,
     };
@@ -166,3 +168,4 @@ export class Coordinator {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const maxOrNull = (a: number | null, b: number | null) => (a === null ? b : b === null ? a : Math.max(a, b));

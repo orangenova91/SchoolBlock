@@ -2,13 +2,13 @@ import { NextResponse } from "next/server";
 import { jobView, requireV3Term, serverError } from "@/lib/v3/api";
 import { loadV3Input, v3InputHash } from "@/lib/v3/input";
 import { buildInstance } from "@/lib/v3/instance";
-import { createJob, JobLimitError, JOBS, type DiagnoseKind, type V3JobDocument, type V3JobKind } from "@/lib/v3/jobs";
+import { AUTO_BOUND_MS, createJob, hasBoundJob, JobLimitError, JOBS, MAX_QUEUED_PER_TERM, type DiagnoseKind, type V3JobDocument, type V3JobKind } from "@/lib/v3/jobs";
 import { quickCheck } from "@/lib/v3/quick-check";
 
 type RouteContext = { params: Promise<{ termId: string }> };
 
 const KINDS: V3JobKind[] = ["search", "milp", "hybrid", "diagnose"];
-const DIAGNOSES: DiagnoseKind[] = ["feasibility", "relax", "fixedLoss", "dataLimit"];
+const DIAGNOSES: DiagnoseKind[] = ["feasibility", "relax", "fixedLoss", "dataLimit", "bound"];
 
 /** 이 학기의 최근 작업 목록 */
 export async function GET(request: Request, context: RouteContext) {
@@ -50,7 +50,16 @@ export async function POST(request: Request, context: RouteContext) {
     }
     const inputHash = v3InputHash(input);
     const job = await createJob(ctx.db, { termId, accountId: ctx.accountId, kind, diagnose, inputHash, autoContinue: body?.autoContinue === true });
-    return NextResponse.json({ job: await jobView(ctx.db, job, inputHash) }, { status: 201 });
+    // 같은 입력의 이론상 최선(하한)이 없으면 하한 계산 작업도 함께 넣는다 (근접 판정·조기 종료에 필요). 대기 자리가 남을 때만
+    let boundJobId: string | null = null;
+    if (kind !== "diagnose" && !(await hasBoundJob(ctx.db, termId, inputHash))) {
+      const waiting = await ctx.db.collection(JOBS).countDocuments({ termId, status: "queued" });
+      if (waiting < MAX_QUEUED_PER_TERM) {
+        const bound = await createJob(ctx.db, { termId, accountId: ctx.accountId, kind: "diagnose", diagnose: "bound", inputHash, budgetMs: AUTO_BOUND_MS });
+        boundJobId = String(bound._id);
+      }
+    }
+    return NextResponse.json({ job: await jobView(ctx.db, job, inputHash), boundJobId }, { status: 201 });
   } catch (error) {
     if (error instanceof JobLimitError) return NextResponse.json({ error: error.message }, { status: 409 });
     return serverError("jobs POST", error);

@@ -60,11 +60,17 @@ export function TermFlowStepper({
   termId,
   termLabel,
   maxReachedChapter = 0,
+  basePath = "/terms",
+  labels,
 }: {
   termId: string;
   termLabel?: string;
   /** 한 번이라도 연 가장 먼 장. 이 값 이하로는 스테퍼로 이동할 수 있다. */
   maxReachedChapter?: number;
+  /** 단계 링크의 앞부분 (v3: "/v3/terms") */
+  basePath?: string;
+  /** 단계 이름 바꾸기 (v3: SET 고정 배치) */
+  labels?: Partial<Record<string, string>>;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -115,7 +121,12 @@ export function TermFlowStepper({
         }`}
       >
         <ol className="flex min-w-max items-start justify-center gap-1.5">
-          {CHAPTERS.map((chapter, i) => {
+          {CHAPTERS.map((base, i) => {
+            const chapter = {
+              ...base,
+              label: labels?.[base.key] ?? base.label,
+              href: (id: string) => base.href(id).replace(/^\/terms/, basePath),
+            };
             const status =
               i < chapterIndex ? "done" : i === chapterIndex ? "current" : "upcoming";
             const isLast = i === CHAPTERS.length - 1;

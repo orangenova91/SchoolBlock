@@ -1,5 +1,6 @@
 "use client";
 
+import { useTermHref } from "@/lib/use-term-href";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent, type MouseEvent } from "react";
 import { SubjectGradeTable } from "@/components/subject-grade-table";
@@ -428,6 +429,7 @@ export function SubjectsForm({
   initialStep = "edit",
 }: SubjectsFormProps) {
   const router = useRouter();
+  const termHref = useTermHref();
   const [term, setTerm] = useState<TermSummary | null>(null);
   const [subjects, setSubjects] = useState<GradeSubjects>(
     createDefaultGradeSubjects(),
@@ -705,7 +707,7 @@ export function SubjectsForm({
       classCounts: gradeClassCounts,
       requireSetClassNos: true,
     });
-    if (ok) router.push(`/terms/${termId}/teachers`);
+    if (ok) router.push(termHref(termId, `teachers`));
   }
 
   if (loading) {
@@ -825,7 +827,7 @@ export function SubjectsForm({
           <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
             <button
               type="button"
-              onClick={() => router.push(`/terms/${termId}/days`)}
+              onClick={() => router.push(termHref(termId, `days`))}
               className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
             >
               이전

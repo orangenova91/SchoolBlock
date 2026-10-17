@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getAccountId } from "@/lib/session";
 import { findOwnedTerm } from "@/lib/term-access";
-import { JOBS, type V3JobDocument } from "@/lib/v3/jobs";
+import { JOBS, knownLowerBound, type V3JobDocument } from "@/lib/v3/jobs";
 import { judge, nearThreshold, strictThreshold } from "@/lib/v3/score";
 
 export type V3TermContext = { accountId: string; termId: string; db: Db };
@@ -50,7 +50,9 @@ export async function jobView(db: Db, job: V3JobDocument, currentInputHash?: str
     ? (await db.collection<V3JobDocument>(JOBS).countDocuments({ status: "queued", queuedAt: { $lt: job.queuedAt } })) + 1
     : null;
   const best = job.summary.results[0]?.metrics ?? null;
-  const lb = job.lowerBound;
+  // 이 작업의 하한과, 같은 입력의 다른 작업(하한 계산)이 증명한 하한 중 높은 것
+  const known = await knownLowerBound(db, job.termId, job.inputHash);
+  const lb = job.lowerBound === null ? known : known === null ? job.lowerBound : Math.max(job.lowerBound, known);
   const judgement = best ? judge(best, { lower: lb, proven: false }) : null;
   const finished = ["awaiting", "stopped", "done"].includes(job.status);
   const inputChanged = currentInputHash !== undefined && currentInputHash !== job.inputHash;

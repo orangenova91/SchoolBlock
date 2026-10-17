@@ -17,12 +17,15 @@ export const SEGMENT_MS = 5 * 60_000;
 export const MAX_MS = 30 * 60_000;
 export const EXTEND_MS = 5 * 60_000;
 export const DIAGNOSE_BUDGET_MS = 10 * 60_000;
+/** 생성할 때 자동으로 넣는 하한 계산의 시간 (하한은 보통 1분 안에 거의 다 오르고 그 뒤로는 거의 그대로) */
+export const AUTO_BOUND_MS = 2 * 60_000;
 // 작업자가 이 시간 동안 소식이 없으면 끊긴 것으로 보고 다른 작업자가 이어 받는다 (시험용으로 V3_LEASE_MS 로 줄일 수 있음)
 export const LEASE_MS = Number(process.env.V3_LEASE_MS ?? 60_000);
 export const CHECKPOINT_TTL_DAYS = 30;
 export const MAX_QUEUED_PER_TERM = 3;
 
-export type DiagnoseKind = "feasibility" | "relax" | "fixedLoss" | "dataLimit";
+/** bound: 이론상 최선(하한) 계산 — 생성 작업을 만들면 같은 입력의 하한이 없을 때 함께 대기열에 넣는다 */
+export type DiagnoseKind = "feasibility" | "relax" | "fixedLoss" | "dataLimit" | "bound";
 export type V3JobKind = EngineKind | "diagnose";
 export type V3JobStatus = "queued" | "running" | "stopping" | "awaiting" | "stopped" | "done" | "infeasible" | "error";
 
@@ -95,7 +98,7 @@ export async function ensureJobIndexes(db: Db) {
 
 export async function createJob(
   db: Db,
-  a: { termId: string; accountId: string; kind: V3JobKind; diagnose?: DiagnoseKind; inputHash: string; autoContinue?: boolean; seed?: number },
+  a: { termId: string; accountId: string; kind: V3JobKind; diagnose?: DiagnoseKind; inputHash: string; autoContinue?: boolean; seed?: number; budgetMs?: number },
 ): Promise<V3JobDocument> {
   const waiting = await jobs(db).countDocuments({ termId: a.termId, status: "queued" });
   if (waiting >= MAX_QUEUED_PER_TERM) throw new JobLimitError(`이 시간표는 이미 대기 중인 작업이 ${waiting}개입니다 (최대 ${MAX_QUEUED_PER_TERM}개).`);
@@ -111,8 +114,8 @@ export async function createJob(
     inputHash: a.inputHash,
     status: "queued",
     autoContinue: a.autoContinue ?? false,
-    segmentMs: a.kind === "diagnose" ? DIAGNOSE_BUDGET_MS : SEGMENT_MS,
-    maxMs: a.kind === "diagnose" ? DIAGNOSE_BUDGET_MS : MAX_MS,
+    segmentMs: a.kind === "diagnose" ? a.budgetMs ?? DIAGNOSE_BUDGET_MS : SEGMENT_MS,
+    maxMs: a.kind === "diagnose" ? a.budgetMs ?? DIAGNOSE_BUDGET_MS : MAX_MS,
     elapsedMs: 0,
     segments: 0,
     seed: a.seed ?? Math.floor(Math.random() * 1e9),
@@ -230,10 +233,37 @@ export async function finishSegment(db: Db, job: V3JobDocument, workerId: string
 /** 진단 작업 끝: 보고서 저장 */
 export async function finishDiagnosis(db: Db, job: V3JobDocument, workerId: string, report: unknown, stopped: boolean): Promise<void> {
   const now = new Date();
+  const lb = (report as { lowerBound?: unknown } | null)?.lowerBound;
   await jobs(db).updateOne(
     { _id: job._id, "lease.workerId": workerId },
-    { $set: { status: stopped ? "stopped" : "done", lease: null, diagnosis: report, updatedAt: now, finishedAt: now, stopRequested: false }, $inc: { segments: 1 } },
+    {
+      $set: {
+        status: stopped ? "stopped" : "done", lease: null, diagnosis: report, updatedAt: now, finishedAt: now, stopRequested: false,
+        ...(typeof lb === "number" ? { lowerBound: lb } : {}),
+      },
+      $inc: { segments: 1 },
+    },
   );
+}
+
+/** 같은 학기·같은 입력에서 지금까지 증명된 가장 높은 하한 (없으면 null). 모든 작업의 하한은 같은 문제의 하한이라 서로 나눠 쓸 수 있다 */
+export async function knownLowerBound(db: Db, termId: string, inputHash: string): Promise<number | null> {
+  const best = await jobs(db).find({ termId, inputHash, lowerBound: { $ne: null } }, { projection: { lowerBound: 1 } }).sort({ lowerBound: -1 }).limit(1).next();
+  // 하한 계산 작업은 도중에 증명한 하한도 진행 상황에 남긴다 (끝까지 기다리지 않고 바로 쓴다)
+  const live = await jobs(db)
+    .find({ termId, inputHash, kind: "diagnose", diagnose: "bound", "progress.lowerBound": { $ne: null } }, { projection: { progress: 1 } })
+    .sort({ "progress.lowerBound": -1 })
+    .limit(1)
+    .next();
+  const values = [best?.lowerBound, live?.progress?.lowerBound].filter((v): v is number => typeof v === "number");
+  return values.length ? Math.max(...values) : null;
+}
+
+/** 같은 입력의 하한 계산이 진행 중이거나 하한을 얻고 끝났는가 */
+export async function hasBoundJob(db: Db, termId: string, inputHash: string): Promise<boolean> {
+  const base = { termId, inputHash, kind: "diagnose" as const, diagnose: "bound" as const };
+  // 끝났지만 하한을 못 얻은 작업(중지·메모리 등)은 없는 것으로 본다
+  return (await jobs(db).countDocuments({ $or: [{ ...base, status: { $in: ["queued", "running", "stopping"] } }, { ...base, status: "done", lowerBound: { $ne: null } }] })) > 0;
 }
 
 export async function failJob(db: Db, jobId: ObjectId, workerId: string | null, error: string, status: V3JobStatus = "error") {

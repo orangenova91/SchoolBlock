@@ -11,7 +11,7 @@
     "start": "next start",
     "lint": "eslint",
     "create-account": "tsx scripts/create-account.ts",
-    "test": "tsx --test lib/*.test.ts"
+    "test": "tsx --test lib/*.test.ts lib/v3/*.test.ts"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

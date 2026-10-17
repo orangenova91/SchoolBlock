@@ -414,6 +414,8 @@ export type TimetableVersionDocument = {
   lunchDoubleCount: number;
   tripleRunCount: number;
   sameDaySubjectViolationCount: number;
+  /** 버전 설명 (선택). 비교용 샘플 등에 조건을 적어 둔다. */
+  note?: string;
 };
 
 export const MAX_TIMETABLE_VERSIONS = 20;

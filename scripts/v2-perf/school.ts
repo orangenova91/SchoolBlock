@@ -43,7 +43,16 @@ const BASE_PERIODS: Record<Weekday, number> = { mon: 7, tue: 7, wed: 6, thu: 6, 
 const LUNCH_AFTER = 4;
 
 export type SetProfile = "none" | "low" | "base" | "high";
-export type SetPlacement = "auto" | "spread" | "lunch" | "avoidLunch" | "concentrated";
+export type SetPlacement =
+  | "auto"
+  | "spread"
+  | "lunch"
+  | "avoidLunch"
+  | "concentrated"
+  /** 무작위 (교사·반 겹침과 같은 날 중복만 피함) */
+  | "random"
+  /** 요일마다 교시가 한 칸씩 밀리는 대각선 순환 (실제 학교 예시와 유사) */
+  | "diagonal";
 export type ForbiddenRule =
   | { kind: "random"; rate: number }
   /** 교사 비율 share가 요일 하나를 통째로 못 들어옴 (시간강사·겸임 등) */
@@ -64,6 +73,11 @@ export type SchoolSpec = {
   setPlacement: SetPlacement;
   /** 반마다 남는 빈 칸 수 (교시를 늘린다). */
   slack?: number;
+  /**
+   * 학년별 요일 교시를 직접 지정한다 (예: 실제 시간표의 1단계 설정).
+   * 이때 학년 수업 시수를 그 교시 수에 맞춰 공통 과목 시수로 조정한다.
+   */
+  schedules?: GradeDaySchedules;
   forbidden?: ForbiddenRule[];
   /** 공통 수업 중 선 수업으로 고정할 비율. */
   pinRate?: number;
@@ -177,13 +191,45 @@ export function buildSchool(spec: SchoolSpec): BuiltSchool {
   for (let extra = spec.slack ?? 0, i = 0; extra > 0; extra--, i++) {
     periods[DAYS[(i + 2) % 5]] += 1; // 수·목·금부터 1교시씩
   }
-  const schedules: GradeDaySchedules = { 1: { ...periods }, 2: { ...periods }, 3: { ...periods } };
+  const schedules: GradeDaySchedules = spec.schedules
+    ? { 1: { ...spec.schedules[1] }, 2: { ...spec.schedules[2] }, 3: { ...spec.schedules[3] } }
+    : { 1: { ...periods }, 2: { ...periods }, 3: { ...periods } };
+  if (spec.schedules) {
+    for (const day of DAYS) periods[day] = Math.max(...GRADES.map((g) => schedules[g][day]));
+  }
 
   // ── 과목과 수업 단위 ──
   const subjects: GradeSubjects = { 1: [], 2: [], 3: [] };
   const units: WorkUnit[] = [];
   const setShare: number[] = [0, 0, 0];
-  const commonsOf = (g: Grade): Course[] => (g === 1 ? GRADE1 : COMMONS[g][spec.setProfile]);
+  const commonsBase = (g: Grade): Course[] => (g === 1 ? GRADE1 : COMMONS[g][spec.setProfile]);
+  const weekly = (g: Grade) => DAYS.reduce((sum, d) => sum + schedules[g][d], 0);
+  const setHoursOf = (g: Grade) => (g === 1 ? 0 : SET_LAYOUT[g][spec.setProfile].count * SET_LAYOUT[g][spec.setProfile].units);
+  /** 학년 주당 교시에 맞춰 공통 과목 시수를 늘리거나 줄인다. */
+  const fitted = new Map<Grade, Course[]>();
+  for (const g of GRADES) {
+    const courses = commonsBase(g).map((x) => ({ ...x }));
+    let diff = weekly(g) - setHoursOf(g) - courses.reduce((sum, x) => sum + x.hours, 0);
+    // 늘릴 때: 국·수·영 → 교양 순, 줄일 때: 창체(최소 1) → 교양·정보·예술 순
+    const growOrder = ["국어", "수학", "영어", "담임"];
+    const shrinkOrder = ["창체", "교양", "정보", "예술", "기술가정"];
+    for (let guard = 0; diff !== 0 && guard < 100; guard++) {
+      if (diff > 0) {
+        const target = courses.find((x) => x.dept === growOrder[guard % growOrder.length]) ?? courses[0];
+        target.hours += 1;
+        diff -= 1;
+      } else {
+        const target = shrinkOrder
+          .map((name) => courses.find((x) => (x.name === name || x.name.startsWith(name)) && x.hours > 1))
+          .find(Boolean);
+        if (!target) break;
+        target.hours -= 1;
+        diff += 1;
+      }
+    }
+    fitted.set(g, courses);
+  }
+  const commonsOf = (g: Grade): Course[] => fitted.get(g)!;
 
   for (const g of GRADES) {
     const n = classCounts[g];
@@ -404,7 +450,7 @@ export function buildSchool(spec: SchoolSpec): BuiltSchool {
 }
 
 /** 전략별 SET 배치 (무작위 탐욕 + 재시도). 교사 겹침·반 겹침은 항상 피한다. */
-function placeSetsByStrategy(
+export function placeSetsByStrategy(
   strategy: Exclude<SetPlacement, "auto">,
   catalog: ReturnType<typeof catalogGradeSets>,
   teachers: Teacher[],
@@ -428,8 +474,11 @@ function placeSetsByStrategy(
     const roomBusy = new Set<string>();
     const gradeDayCount = new Map<string, number>();
     let ok = true;
+    const setIndex = new Map<string, number>();
     for (const { item, teachers: names, rooms } of info) {
       const usedDays = new Set<Weekday>();
+      const indexInGrade = setIndex.get(`${item.grade}`) ?? 0;
+      setIndex.set(`${item.grade}`, indexInGrade + 1);
       for (let k = 0; k < (item.units ?? 0); k++) {
         const options: { day: Weekday; period: number; score: number }[] = [];
         for (const day of DAYS) {
@@ -444,6 +493,13 @@ function placeSetsByStrategy(
             if (strategy === "lunch") score += lunch ? -6 : 0;
             if (strategy === "avoidLunch") score += lunch ? 6 : 0;
             if (strategy === "concentrated") score += -dayLoad * 3 + period * 0.5;
+            if (strategy === "random") score += rand() * 20;
+            if (strategy === "diagonal") {
+              // SET마다 시작 요일을 하루씩 밀고, 회차마다 요일·교시를 한 칸씩 민다.
+              const prefDay = (indexInGrade + k) % DAYS.length;
+              const prefPeriod = 2 + (k % 3);
+              score += (DAYS.indexOf(day) === prefDay ? 0 : 4) + Math.abs(period - prefPeriod) * 2;
+            }
             options.push({ day, period, score });
           }
         }

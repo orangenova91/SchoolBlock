@@ -13,6 +13,10 @@ export const TERM_CHILD_COLLECTIONS = [
   "timetableVersions",
   // v2 사전 검사 결과 저장 (lib/timetable-check-cache.ts)
   "v2PlacementChecks",
+  // v3 작업·결과·중단점 (lib/v3/jobs.ts)
+  "v3Jobs",
+  "v3JobResults",
+  "v3Checkpoints",
 ] as const;
 
 export async function deleteTermChildren(

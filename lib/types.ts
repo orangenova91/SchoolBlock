@@ -6,10 +6,10 @@ export type Semester = 1 | 2;
  * 시간표 생성 로직 버전. 필드가 없으면 기존 로직(v1)으로 처리한다.
  * "v2"는 비교 검토용 개선 로직(lib/timetable-improved.ts)을 쓴다.
  */
-export type LogicVersion = "v2";
+export type LogicVersion = "v2" | "v3";
 
 export function parseLogicVersion(value: unknown): LogicVersion | undefined {
-  return value === "v2" ? "v2" : undefined;
+  return value === "v2" || value === "v3" ? value : undefined;
 }
 
 export type TermInput = {

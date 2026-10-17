@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { V3DiagnosisReport, V3QuickCheckBox, DIAGNOSE_HINT, DIAGNOSE_LABEL, type V3DiagnoseKind } from "@/components/v3/v3-diagnosis";
 import { V3TimetableView } from "@/components/v3/v3-timetable-view";
+import { V3Versions } from "@/components/v3/v3-versions";
 import {
   createDefaultClassCounts,
   createDefaultGradeDaySchedules,
@@ -137,6 +138,7 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [current, setCurrent] = useState<{ message: string; cellCount: number } | null>(null);
   const [fixedSetKeys, setFixedSetKeys] = useState<Set<string>>(new Set());
+  const [versionsKey, setVersionsKey] = useState(0);
   const finishedDiagnoses = useRef<string | null>(null);
 
   const loadChecks = useCallback(async () => {
@@ -329,6 +331,7 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
         data.warning ?? `${rank + 1}번 결과를 현재 시간표로 적용하고 확정 버전 ${data.version}로 저장했습니다. (${data.note})`,
       );
       await loadCurrent();
+      setVersionsKey((k) => k + 1);
     }).finally(() => setApplying(null));
   };
 
@@ -578,6 +581,8 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
         </section>
       ) : null}
 
+      <V3Versions termId={termId} refreshKey={versionsKey} schedules={schedules} classCounts={classCounts} teachers={teachers} />
+
       <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
         <h2 className="text-base font-semibold text-zinc-900">진단</h2>
         <p className="mt-1 text-sm text-zinc-600">필요할 때만 실행합니다. 결과는 입력이 바뀌기 전까지 다시 계산하지 않고 보여 줍니다.</p>
@@ -680,6 +685,8 @@ function JobDetail({
   const liveScore = running ? job.progress?.bestScore ?? null : null;
   const liveUnplaced = running ? job.progress?.bestUnplaced ?? null : null;
   const failed = !active && job.results.length === 0;
+  // 완성본이 하나도 없으면(미배치만 남음) 점수 목표는 뜻이 없으므로 미배치를 앞세운다
+  const unplacedOnly = job.results.length === 0 && ((running ? liveUnplaced : job.bestUnplaced) ?? 0) > 0;
 
   return (
     <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
@@ -724,16 +731,24 @@ function JobDetail({
         <div className="rounded-lg bg-zinc-50 px-3 py-2">
           <dt className="text-xs text-zinc-500">지금까지 최고</dt>
           <dd className="font-semibold text-zinc-900">
-            {liveScore !== null ? `${liveScore}점` : best ? `${best.score}점` : liveUnplaced ? `미배치 ${liveUnplaced}시간` : "-"}
+            {liveScore !== null
+              ? `${liveScore}점`
+              : best
+                ? `${best.score}점`
+                : liveUnplaced
+                  ? `미배치 ${liveUnplaced}시간`
+                  : job.bestUnplaced
+                    ? `미배치 ${job.bestUnplaced}시간`
+                    : "-"}
           </dd>
         </div>
         <div className="rounded-lg bg-zinc-50 px-3 py-2">
           <dt className="text-xs text-zinc-500">이론상 최선</dt>
-          <dd className="font-semibold text-zinc-900">{job.lowerBound === null ? "계산 중" : `${job.lowerBound}점`}</dd>
+          <dd className="font-semibold text-zinc-900">{unplacedOnly ? "-" : job.lowerBound === null ? "계산 중" : `${job.lowerBound}점`}</dd>
         </div>
         <div className="rounded-lg bg-zinc-50 px-3 py-2">
           <dt className="text-xs text-zinc-500">목표 (근접 기준)</dt>
-          <dd className="font-semibold text-zinc-900">{job.nearThreshold === null ? "-" : `${job.nearThreshold}점 이하`}</dd>
+          <dd className="font-semibold text-zinc-900">{unplacedOnly ? "미배치 0" : job.nearThreshold === null ? "-" : `${job.nearThreshold}점 이하`}</dd>
         </div>
         <div className="rounded-lg bg-zinc-50 px-3 py-2">
           <dt className="text-xs text-zinc-500">모은 결과</dt>
@@ -747,14 +762,16 @@ function JobDetail({
           : running
             ? `${PHASE_LABEL[job.progress?.phase ?? "start"] ?? "계산 중"}${job.progress?.message ? ` — ${job.progress.message}` : ""}`
             : job.status === "awaiting"
-              ? "5분 계산이 끝났습니다. 아래 결과를 보고, 더 계산하려면 “5분 더 계산”을 눌러 주세요. (중단점은 30일 동안 보관합니다)"
+              ? job.results.length
+                ? "5분 계산이 끝났습니다. 아래 결과를 보고, 더 계산하려면 “5분 더 계산”을 눌러 주세요. (중단점은 30일 동안 보관합니다)"
+                : "5분 계산이 끝났지만 아직 모든 수업을 놓은 시간표가 없습니다. 더 계산하려면 “5분 더 계산”을 눌러 주세요. (중단점은 30일 동안 보관합니다)"
               : job.status === "error"
                 ? `오류로 멈췄습니다: ${job.error ?? ""}`
                 : job.stopReason
                   ? STOP_REASON[job.stopReason] ?? ""
                   : job.error ?? ""}
       </p>
-      {job.lowerBound !== null && job.strictThreshold !== null ? (
+      {!unplacedOnly && job.lowerBound !== null && job.strictThreshold !== null ? (
         <p className="mt-1 text-xs text-zinc-500">
           목표: 이론상 최선 {job.lowerBound}점의 1.1배 또는 +6점 중 넉넉한 쪽({job.nearThreshold}점)까지는 달성으로 봅니다. 엄격 기준은{" "}
           {job.strictThreshold}점입니다.

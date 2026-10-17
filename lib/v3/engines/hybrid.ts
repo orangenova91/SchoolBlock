@@ -15,6 +15,7 @@ import type { Weekday } from "@/lib/types";
 import { Collector } from "@/lib/v3/engines/collector";
 import { createHighsModel, getHighs, hasSolution, overMemory, type HighsModel } from "@/lib/v3/engines/highs";
 import { completeVector } from "@/lib/v3/engines/milp";
+import { solveModel } from "@/lib/v3/engines/solve";
 import { rng, runSearch } from "@/lib/v3/engines/search";
 import { StopRules } from "@/lib/v3/engines/stop-rules";
 import type { EngineOutcome, EngineRun, StopReason } from "@/lib/v3/engines/types";
@@ -44,9 +45,14 @@ function solveWith(model: HighsModel, m: V3Model, x: Float64Array, free: (c: num
   return { x: Float64Array.from(model.getSolution().colValue), cost: model.getObjectiveValue() };
 }
 
-/** 묶은 결정 변수로 필수 조건을 어기는 행에 걸린 요일 */
-function violatedDays(m: V3Model, x: Float64Array): Set<Weekday> {
+/**
+ * 묶은 결정 변수로 필수 조건을 어기는 행에 걸린 요일과 학년.
+ * SET 회차(y·z)가 걸린 행을 어기면 그 학년 전체를 비워야 고칠 수 있다
+ * (예: 같은 SET이 하루 2회 → 한 회차를 다른 요일로 옮겨야 하는데, 그 요일이 묶여 있으면 못 옮김).
+ */
+function violatedArea(m: V3Model, x: Float64Array): { days: Set<Weekday>; grades: Set<number> } {
   const days = new Set<Weekday>();
+  const grades = new Set<number>();
   for (let r = 0; r < m.numRows; r++) {
     let s = 0;
     for (let k = m.starts[r]; k < m.starts[r + 1]; k++) {
@@ -58,10 +64,16 @@ function violatedDays(m: V3Model, x: Float64Array): Set<Weekday> {
     for (let k = m.starts[r]; k < m.starts[r + 1]; k++) { const kind = m.kind[m.indices[k]]; if (kind === "L" || kind === "T" || kind === "S") hasSoft = true; }
     if (hasSoft) continue;
     if (s > m.rowUpper[r] + 1e-6 || s < m.rowLower[r] - 1e-6) {
-      for (let k = m.starts[r]; k < m.starts[r + 1]; k++) { const d = m.day[m.indices[k]]; if (d) days.add(d); }
+      for (let k = m.starts[r]; k < m.starts[r + 1]; k++) {
+        const c = m.indices[k];
+        const d = m.day[c];
+        if (d) days.add(d);
+        const g = m.grade[c];
+        if ((m.kind[c] === "y" || m.kind[c] === "z") && g !== null) grades.add(g);
+      }
     }
   }
-  return days;
+  return { days, grades };
 }
 
 export async function runHybrid(run: EngineRun): Promise<EngineOutcome> {
@@ -83,6 +95,8 @@ export async function runHybrid(run: EngineRun): Promise<EngineOutcome> {
     const warm = runSearch({ ...run, budgetMs: Math.max(10_000, run.budgetMs * 0.25), checkpoint: null, onProgress: run.onProgress });
     for (const r of warm.results) collector.offer(r.solution, now());
     startSol = warm.results[0]?.solution ?? warm.checkpoint.best;
+    // 완성본이 없어도 "가장 적게 남는 배치"를 기록해 둔다 (화면의 미배치 안내에 쓰임)
+    if (!warm.results.length && startSol) collector.offer(startSol, now());
     if (warm.stopReason === "user") reason = "user";
   }
 
@@ -100,10 +114,24 @@ export async function runHybrid(run: EngineRun): Promise<EngineOutcome> {
       cur = completeVector(model, m, x0, 60);
       if (!cur) {
         // 시작 해가 필수 조건을 어김 → 어긴 요일을 비우고 고친다
-        const days = violatedDays(m, x0);
+        const { days, grades } = violatedArea(m, x0);
         run.onProgress?.({ phase: "repair", elapsedMs: now(), segmentMs: Date.now() - t0, bestScore: null, bestUnplaced: null, lowerBound, results: collector.results.length, iterations });
-        const r = solveWith(model, m, x0, (c) => m.day[c] !== null && days.has(m.day[c]!), Math.min(120, left() / 1000));
+        const r = solveWith(model, m, x0, (c) => (m.day[c] !== null && days.has(m.day[c]!)) || (m.grade[c] !== null && grades.has(m.grade[c]!)), Math.min(120, left() / 1000));
         cur = r?.x ?? null;
+        // 요일과 상관없는 조건(주당 시수 등)을 어기면 요일만 비워서는 못 고친다 → 전체를 다시 푼다.
+        // 미배치를 허용하는 모델이라 늘 답이 있다 (배치 불가 조건에서도 "가장 적게 남는 배치"로 이어 간다)
+        if (!cur && left() > 5000) {
+          // 그래도 안 되면 점수는 잠시 잊고 "가장 적게 남는 배치"부터 찾는다 (배치 가능 판정과 같은 계산).
+          // 그 배치는 필수 조건을 모두 지키므로 여기서부터 부분 재계산으로 점수·미배치를 줄여 간다
+          run.onProgress?.({ phase: "repair", elapsedMs: now(), segmentMs: Date.now() - t0, bestScore: null, bestUnplaced: null, lowerBound, results: collector.results.length, iterations });
+          const mu = buildModel(inst, { slack: true, weights: { lunch: 0, triple: 0, sameDay: 0 } });
+          const r = await solveModel(mu, { budgetMs: Math.min(150_000, left() * 0.6), warm: encodeSolution(inst, mu, startSol), shouldStop: run.shouldStop });
+          if (r.x) {
+            const sol = decodeSolution(inst, mu, r.x);
+            collector.offer(sol, now());
+            cur = completeVector(model, m, encodeSolution(inst, m, sol), 60);
+          }
+        }
       }
     }
     if (cur) {

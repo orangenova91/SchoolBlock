@@ -33,7 +33,7 @@ export type EngineCheckpoint = {
   seed: number;
 };
 
-export type EnginePhase = "start" | "repair" | "improve" | "collect";
+export type EnginePhase = "start" | "repair" | "improve" | "collect" | "diagnose";
 
 export type EngineProgress = {
   phase: EnginePhase;

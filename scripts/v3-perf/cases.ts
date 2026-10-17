@@ -15,6 +15,16 @@ export const NAMED: Record<string, string> = {
   K3: "demo:bans=all,forbid=0.05,pin=0.05|half",
   K4: "school:cls=16,load=20,set=base,partial=1,forbid=0.05,pin=0.05,seed=1|none",
   K5: "school:cls=16,load=19,set=high,partial=1,forbid=0.05,pin=0.05,seed=1|none",
+  // 진단 (docs/v3-diagnosis-design.md)
+  F1: "demo:bans=all|none",
+  F2: "demo:bans=all,forbid=0.05,pin=0.05|none",
+  F3: "demo:bans=all,forbid=0.05,pin=0.05|half",
+  F4: "school:cls=16,load=20,set=base,partial=1,forbid=0.05,pin=0.05,seed=1|none",
+  F5: "school:cls=16,load=19,set=high,partial=1,forbid=0.05,pin=0.05,seed=1|none",
+  F6: "demo:bans=all,forbid=0.1,pin=0.05|none",
+  F7: "demo:bans=all,forbid=0.15,pin=0.05|none",
+  F8: "demo:bans=all,pin=0.2|none",
+  F9: "school:cls=16,load=21,set=high,partial=1,forbid=0.1,pin=0.05,seed=2|none",
 };
 
 export function loadV3Case(spec: string): V3Input {

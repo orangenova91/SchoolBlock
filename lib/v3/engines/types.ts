@@ -62,6 +62,8 @@ export type EngineRun = {
   shouldStop?: () => boolean;
   onProgress?: (p: EngineProgress) => void;
   progressEveryMs?: number;
+  /** 첫 완성본을 찾으면 바로 끝낸다 (배치 가능 판정용: 예시 하나면 증명됨) */
+  stopOnFirstComplete?: boolean;
 };
 
 export type StopReason = "budget" | "user" | "early" | "memory" | "infeasible";

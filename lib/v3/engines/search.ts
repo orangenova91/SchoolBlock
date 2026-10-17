@@ -430,6 +430,7 @@ export function runSearch(run: EngineRun): EngineOutcome {
       // 다른 좋은 결과도 모은다: 지금 상태가 필수 위반이 없고 상위 3개에 들 만하면
       if (t - lastAlt > 500 && cur < H && cur <= collector.admissionScore()) { collector.offer(st.decode(false), now()); lastAlt = t; }
       if (stop.shouldStop(now(), lowerBound, collector, it)) { reason = "early"; break; }
+      if (run.stopOnFirstComplete && best < H) { reason = "early"; break; }
       if (t - lastProgress > progressEvery) { report(stop.collecting ? "collect" : best >= H ? "repair" : "improve"); lastProgress = t; }
     }
     it++;

@@ -178,6 +178,8 @@ v3를 다 만든 뒤, 배포할 때 정해야 할 것을 실제 코드 기준으
 3. 동시 계산 수를 코어 수에 맞추기 (`V3_WORKER_CONCURRENCY` = 코어 수 − 1).
 4. 배포 빌드에서 웹 서버 메모리와 계산 중 응답 시간을 다시 재기 (`scripts/v3-perf/api-check.ts`).
 
+> 후속: 사용자 조건(버셀 유지, 동시 10개 목표)에 맞춘 방안과 확정 사항은 [배포 방안](v3-deployment-plan.md)에 있다.
+
 ## 출처
 
 - [Vercel Functions Limits](https://vercel.com/docs/functions/limitations)

@@ -280,8 +280,14 @@ export async function knownLowerBound(db: Db, termId: string, inputHash: string)
 /** 같은 입력의 하한 계산이 진행 중이거나 하한을 얻고 끝났는가 */
 export async function hasBoundJob(db: Db, termId: string, inputHash: string): Promise<boolean> {
   const base = { termId, inputHash, kind: "diagnose" as const, diagnose: "bound" as const };
-  // 끝났지만 하한을 못 얻은 작업(중지·메모리 등)은 없는 것으로 본다
-  return (await jobs(db).countDocuments({ $or: [{ ...base, status: { $in: ["queued", "running", "stopping"] } }, { ...base, status: "done", lowerBound: { $ne: null } }] })) > 0;
+  // 끝났지만 하한을 못 얻은 작업(중지·메모리 등)은 없는 것으로 본다.
+  // 2026-10-18 이전 방식(항목별 최소 없이 전체 계산만)으로 얻은 하한은 약할 수 있어 새 방식으로 한 번 다시 계산한다 (diagnosis.items 유무)
+  return (await jobs(db).countDocuments({
+    $or: [
+      { ...base, status: { $in: ["queued", "running", "stopping"] } },
+      { ...base, status: "done", lowerBound: { $ne: null }, "diagnosis.items": { $exists: true } },
+    ],
+  })) > 0;
 }
 
 export async function failJob(db: Db, jobId: ObjectId, workerId: string | null, error: string, status: V3JobStatus = "error") {

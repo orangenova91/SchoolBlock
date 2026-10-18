@@ -8,6 +8,7 @@ import { V3Versions } from "@/components/v3/v3-versions";
 import {
   createDefaultClassCounts,
   createDefaultGradeDaySchedules,
+  dayLabel,
   type GradeClassCounts,
   type GradeDaySchedules,
   type SetBlockCell,
@@ -18,6 +19,7 @@ import type { V3JobView } from "@/lib/v3/api";
 import type { V3Weights } from "@/lib/v3/input";
 import type { QuickCheckResult } from "@/lib/v3/quick-check";
 import type { V3Judgement, V3Metrics } from "@/lib/v3/score";
+import type { V3ScoreDetails } from "@/lib/v3/validate";
 
 type EngineKind = "hybrid" | "search" | "milp";
 
@@ -104,6 +106,7 @@ type ResultView = {
   judgement: V3Judgement;
   diffFromTop: number;
   cells: TimetableCell[];
+  details?: V3ScoreDetails;
 };
 
 type Prefs = { avoidLunchDouble?: boolean; avoidTriplePeriod?: boolean; avoidSameDaySubject?: boolean };
@@ -570,6 +573,9 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
           ) : (
             <p className="text-center text-xs text-zinc-500">적용하면 현재 시간표가 되고 확정 버전으로도 저장됩니다. 메모는 자동으로 적힙니다.</p>
           )}
+          {results[shownRank]?.details && weights ? (
+            <ScoreDetailsBox rank={shownRank} metrics={results[shownRank].metrics} details={results[shownRank].details!} weights={weights} />
+          ) : null}
           {results[shownRank] ? (
             <V3TimetableView
               cells={results[shownRank].cells}
@@ -644,6 +650,63 @@ function jobSummary(j: V3JobView): string {
   const unplaced = live?.bestUnplaced ?? j.bestUnplaced;
   const head = score !== null ? `최고 ${score}점 · 결과 ${count}개` : unplaced ? `미배치 ${unplaced}시간` : "결과 없음";
   return `${head} · ${minutes(j.elapsedMs + (live?.segmentMs ?? 0))}`;
+}
+
+/** 점수 내역: 감점마다 어느 교사의 어느 수업 때문인지 */
+function ScoreDetailsBox({ rank, metrics, details, weights }: { rank: number; metrics: V3Metrics; details: V3ScoreDetails; weights: V3Weights }) {
+  const [open, setOpen] = useState(false);
+  const rows: { key: string; title: string; weight: number; items: { key: string; text: string }[] }[] = [
+    {
+      key: "lunch",
+      title: "점심시간 연강",
+      weight: weights.lunch,
+      items: details.lunch.map((d, i) => ({ key: `l${i}`, text: `${d.teacher} · ${dayLabel(d.day)}요일 — ${d.lessons.join(" / ")}` })),
+    },
+    {
+      key: "triple",
+      title: "3연강",
+      weight: weights.triple,
+      items: details.triple.map((d, i) => ({ key: `t${i}`, text: `${d.teacher} · ${dayLabel(d.day)}요일 ${d.startPeriod}~${d.startPeriod + 2}교시 — ${d.lessons.join(" / ")}` })),
+    },
+    {
+      key: "sameDay",
+      title: "같은 날 교과",
+      weight: weights.sameDay,
+      items: details.sameDay.map((d, i) => ({ key: `s${i}`, text: `${d.grade}학년 ${d.classNo}반 ${d.subject}(${d.teacher}) · ${dayLabel(d.day)}요일 ${d.periods.join("·")}교시` })),
+    },
+  ];
+  return (
+    <section className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-800">
+      <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between gap-2 text-left">
+        <span className="font-medium">
+          {rank + 1}번 결과 점수 내역 · {metrics.score}점 = 점심 연강 {metrics.lunch}건 × {weights.lunch} + 3연강 {metrics.triple}건 × {weights.triple} + 같은 날 교과{" "}
+          {metrics.sameDay}건 × {weights.sameDay}
+        </span>
+        <span className="shrink-0 text-xs text-zinc-500">{open ? "접기" : "어느 수업인지 보기"}</span>
+      </button>
+      {open ? (
+        <div className="mt-3 flex flex-col gap-3">
+          {rows.map((row) => (
+            <div key={row.key}>
+              <p className="text-xs font-semibold text-zinc-700">
+                {row.title} {row.items.length}건 × {row.weight}점 = {row.items.length * row.weight}점
+              </p>
+              {row.items.length ? (
+                <ul className="mt-1 max-h-48 list-inside list-disc overflow-auto text-xs text-zinc-700">
+                  {row.items.map((it) => (
+                    <li key={it.key}>{it.text}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-xs text-zinc-500">없음</p>
+              )}
+            </div>
+          ))}
+          <p className="text-xs text-zinc-500">교사는 SET 담당(여러 교사가 함께 맡는 +α 과목 포함)까지 셉니다. 아래 &ldquo;교사별&rdquo; 보기로 그 교사의 하루를 확인할 수 있습니다.</p>
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 function StatusChip({ job }: { job: V3JobView }) {

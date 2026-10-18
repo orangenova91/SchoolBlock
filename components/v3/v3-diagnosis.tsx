@@ -60,7 +60,7 @@ export function V3QuickCheckBox({ quick }: { quick: QuickCheckResult }) {
         <ul className="mt-2 max-h-48 list-inside list-disc overflow-auto text-xs">
           {[...errors, ...warns].map((w, i) => (
             <li key={`${w.rule}-${w.who}-${i}`} className={w.severity === "error" ? "font-medium" : ""}>
-              {w.who}: {w.message}
+              {w.message}
             </li>
           ))}
         </ul>
@@ -147,7 +147,7 @@ export function V3DiagnosisReport({ kind, report }: { kind: V3DiagnoseKind; repo
             <ul className="mt-1 list-inside list-disc text-xs">
               {r.structural.map((w, i) => (
                 <li key={i}>
-                  {w.who}: {w.message}
+                  {w.message}
                 </li>
               ))}
             </ul>

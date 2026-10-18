@@ -207,3 +207,63 @@ export function occurrencesFromCells(input: V3Input, cells: TimetableCell[], opt
   }
   return [...map.values()];
 }
+
+export type V3ScoreDetails = {
+  /** 점심 연강: 교사가 점심 앞뒤 교시를 모두 수업한 날 */
+  lunch: { teacher: string; day: Weekday; lessons: string[] }[];
+  /** 3연강: 점심을 걸치지 않고 3교시 연속 (4연속이면 2건) */
+  triple: { teacher: string; day: Weekday; startPeriod: number; lessons: string[] }[];
+  /** 같은 날 교과: 고른 교과가 한 반 한 요일에 2시간 이상 */
+  sameDay: { grade: Grade; classNo: number; day: Weekday; subject: string; teacher: string; periods: number[] }[];
+};
+
+/**
+ * 점수 내역: 점수(measure)와 같은 규칙으로 세되, 어느 수업 때문인지 함께 돌려준다 (결과 화면에서 확인용).
+ * 교사는 SET 회차 담당(+α 과목 교사 포함)까지 센다.
+ */
+export function scoreDetails(inst: V3Instance, sol: V3Solution): V3ScoreDetails {
+  const lap = inst.lunchAfter;
+  const lessonsAt = new Map<string, string[]>();
+  const add = (t: string, day: Weekday, p: number, label: string) => {
+    const k = slotKey(t, day, p);
+    const list = lessonsAt.get(k) ?? [];
+    list.push(label);
+    lessonsAt.set(k, list);
+  };
+  for (const c of sol.cells) if (c.kind !== "set") add(c.teacherName, c.day, c.period, `${c.grade}학년 ${c.classNo}반 ${c.subjectName}`);
+  for (const o of sol.occurrences) for (const [subject, ts] of Object.entries(o.bySubject)) for (const t of ts) add(t, o.day, o.period, `${o.grade}학년 ${o.set} SET ${subject}`);
+  const byTeacherDay = new Map<string, Set<number>>();
+  for (const k of lessonsAt.keys()) {
+    const [t, day, p] = k.split("|");
+    const key = `${t}|${day}`;
+    const set = byTeacherDay.get(key) ?? new Set<number>();
+    set.add(Number(p));
+    byTeacherDay.set(key, set);
+  }
+  const label = (t: string, day: string, p: number) => `${p}교시 ${(lessonsAt.get(slotKey(t, day as Weekday, p)) ?? []).join(", ")}`;
+  const out: V3ScoreDetails = { lunch: [], triple: [], sameDay: [] };
+  for (const [key, ps] of byTeacherDay) {
+    const [teacher, day] = key.split("|") as [string, Weekday];
+    if (ps.has(lap) && ps.has(lap + 1)) out.lunch.push({ teacher, day, lessons: [label(teacher, day, lap), label(teacher, day, lap + 1)] });
+    for (const s of [...ps].sort((a, b) => a - b)) {
+      if (isTripleRunWindow(s, lap) && ps.has(s + 1) && ps.has(s + 2)) {
+        out.triple.push({ teacher, day, startPeriod: s, lessons: [label(teacher, day, s), label(teacher, day, s + 1), label(teacher, day, s + 2)] });
+      }
+    }
+  }
+  const groups = new Map<string, { grade: Grade; classNo: number; day: Weekday; subject: string; teacher: string; periods: number[] }>();
+  for (const c of sol.cells) {
+    if (c.kind === "set" || !inst.bans.has(banKey(c.grade, c.subjectName))) continue;
+    const k = `${c.grade}|${c.classNo}|${c.day}|${c.subjectName}`;
+    const g = groups.get(k) ?? { grade: c.grade, classNo: c.classNo, day: c.day, subject: c.subjectName, teacher: c.teacherName, periods: [] };
+    g.periods.push(c.period);
+    groups.set(k, g);
+  }
+  for (const g of groups.values()) if (g.periods.length >= 2) out.sameDay.push({ ...g, periods: g.periods.sort((a, b) => a - b) });
+  const dayOrder = (d: string) => inst.days.indexOf(d as Weekday);
+  out.lunch.sort((a, b) => a.teacher.localeCompare(b.teacher, "ko") || dayOrder(a.day) - dayOrder(b.day));
+  out.triple.sort((a, b) => a.teacher.localeCompare(b.teacher, "ko") || dayOrder(a.day) - dayOrder(b.day) || a.startPeriod - b.startPeriod);
+  out.sameDay.sort((a, b) => a.grade - b.grade || a.classNo - b.classNo || dayOrder(a.day) - dayOrder(b.day));
+  return out;
+}
+

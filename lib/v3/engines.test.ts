@@ -8,7 +8,7 @@ import type { Collector } from "@/lib/v3/engines/collector";
 import type { EngineCheckpoint, EngineRun } from "@/lib/v3/engines/types";
 import { tinyInput } from "@/lib/v3/fixtures";
 import { buildInstance } from "@/lib/v3/instance";
-import { validateSolution } from "@/lib/v3/validate";
+import { scoreDetails, validateSolution } from "@/lib/v3/validate";
 
 const input = tinyInput({ rotated: true, fixed: [{ day: "wed", period: 3 }] });
 const inst = buildInstance(input);
@@ -33,6 +33,15 @@ describe("v3 엔진", () => {
     assert.equal(out.results[0].metrics.score, optimum);
     // 고정 회차 유지
     assert.ok(out.results[0].solution.occurrences.some((o) => o.day === "wed" && o.period === 3));
+  });
+
+  it("점수 내역(어느 수업 때문인지)은 점수 계산과 건수가 같다", () => {
+    const out = runSearch(base({ budgetMs: 1500 }));
+    for (const r of out.results) {
+      const d = scoreDetails(inst, r.solution);
+      assert.deepEqual([d.lunch.length, d.triple.length, d.sameDay.length], [r.metrics.lunch, r.metrics.triple, r.metrics.sameDay]);
+      for (const x of [...d.lunch, ...d.triple]) assert.ok(x.lessons.every((l) => /교시 .+/.test(l)), JSON.stringify(x));
+    }
   });
 
   it("혼합: 결과는 모두 검증기를 통과한다", async () => {

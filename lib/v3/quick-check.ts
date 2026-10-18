@@ -52,7 +52,7 @@ export function quickCheck(inst: V3Instance): QuickCheckResult {
   const push = (w: Omit<QuickWarning, "severity">, tight = false) => out.push({ ...w, severity: tight ? "warn" : "error" });
 
   for (const p of inst.pinConflicts) {
-    push({ rule: "pinConflict", who: `${p.grade}학년 ${p.classNo}반 ${p.subject}`, need: 1, have: 0, message: `${dayLabel(p.day)}요일 ${p.period}교시 선 수업이 ${withGwa(p.reason)} 겹칩니다. 선 수업이나 SET 위치를 고쳐 주세요` });
+    push({ rule: "pinConflict", who: `${p.grade}학년 ${p.classNo}반 ${p.subject}`, need: 1, have: 0, message: `${p.grade}학년 ${p.classNo}반 ${p.subject}(${p.teacher}) ${dayLabel(p.day)}요일 ${p.period}교시 선 수업이 ${withGwa(p.reason)} 겹칩니다. 선 수업이나 SET 위치를 고쳐 주세요` });
   }
 
   // 공통 수업(선 수업 포함) 시간: 반별·교사별·교사×학년별
@@ -74,7 +74,7 @@ export function quickCheck(inst: V3Instance): QuickCheckResult {
     const slots = gradeSlots(inst, g).length;
     for (let c = 1; c <= inst.classCounts[g]; c++) {
       const need = (classLoad.get(`${g}|${c}`) ?? 0) + inst.sets.filter((s) => s.grade === g && s.rooms.includes(c)).reduce((a, s) => a + s.units, 0);
-      if (need > slots) { classShort += need - slots; push({ rule: "class", who: `${g}학년 ${c}반`, need, have: slots, message: `수업 ${need}시간이 시간 칸 ${slots}칸보다 많습니다` }); }
+      if (need > slots) { classShort += need - slots; push({ rule: "class", who: `${g}학년 ${c}반`, need, have: slots, message: `${g}학년 ${c}반 수업 ${need}시간이 시간 칸 ${slots}칸보다 많습니다` }); }
     }
   }
 
@@ -86,7 +86,7 @@ export function quickCheck(inst: V3Instance): QuickCheckResult {
   for (const [t, need] of teacherLoad) {
     let have = 0;
     for (const day of inst.days) for (let p = 1; p <= maxP(day); p++) if (!inst.forbidden.has(slotKey(t, day, p))) have++;
-    if (need > have) { teacherShort += need - have; push({ rule: "teacher", who: t, need, have, message: `수업 ${need}시간이 배정 가능한 시간 ${have}칸보다 많습니다` }); }
+    if (need > have) { teacherShort += need - have; push({ rule: "teacher", who: t, need, have, message: `${t} 교사의 수업 ${need}시간이 배정 가능한 시간 ${have}칸보다 많습니다` }); }
   }
 
   // 3) 학년 전체 SET은 그 학년 모든 반을 차지한다 → 그 학년 공통 수업은 SET 칸 밖에서만 가능 (SET 위치와 무관)
@@ -96,14 +96,14 @@ export function quickCheck(inst: V3Instance): QuickCheckResult {
     const slots = gradeSlots(inst, g);
     if (whole.length) {
       const free = slots.filter((sl) => !inst.pins.some((p) => p.grade === g && p.day === sl.day && p.period === sl.period)).length;
-      if (wholeUnits > free) { blocking = true; push({ rule: "wholeSetColumns", who: `${g}학년`, need: wholeUnits, have: free, message: `학년 전체 SET ${wholeUnits}회차를 놓을, 학년 전체가 비는 칸이 ${free}칸뿐입니다 (선 수업 때문)` }); }
-      else if (wholeUnits > free - 2) push({ rule: "wholeSetColumns", who: `${g}학년`, need: wholeUnits, have: free, message: `학년 전체 SET을 놓을 칸 여유가 ${free - wholeUnits}칸뿐입니다` }, true);
+      if (wholeUnits > free) { blocking = true; push({ rule: "wholeSetColumns", who: `${g}학년`, need: wholeUnits, have: free, message: `${g}학년 전체 SET ${wholeUnits}회차를 놓을, 학년 전체가 비는 칸이 ${free}칸뿐입니다 (선 수업 때문)` }); }
+      else if (wholeUnits > free - 2) push({ rule: "wholeSetColumns", who: `${g}학년`, need: wholeUnits, have: free, message: `${g}학년 전체 SET을 놓을 칸 여유가 ${free - wholeUnits}칸뿐입니다` }, true);
     }
     const cap = slots.length - wholeUnits;
     for (const [k, n] of teacherGradeLoad) {
       const [t, gg] = k.split("|");
       if (Number(gg) !== g) continue;
-      if (n > cap) { gradeShort += n - cap; push({ rule: "teacherGrade", who: `${t} (${g}학년)`, need: n, have: cap, message: `${g}학년 수업 ${n}시간이 학년 전체 SET이 없는 칸 ${cap}칸보다 많습니다 (${n - cap}시간 부족)` }); continue; }
+      if (n > cap) { gradeShort += n - cap; push({ rule: "teacherGrade", who: `${t} (${g}학년)`, need: n, have: cap, message: `${t} 교사의 ${g}학년 수업 ${n}시간이 학년 전체 SET이 없는 칸 ${cap}칸보다 많습니다 (${n - cap}시간 부족)` }); continue; }
       if (!wholeUnits) continue;
       // 이 교사가 이 학년 수업을 할 수 없는 칸: 배정 불가, 다른 학년 선 수업
       const blocked = slots.filter((sl) =>
@@ -116,9 +116,9 @@ export function quickCheck(inst: V3Instance): QuickCheckResult {
       const allowed = slack + coverable;
       if (blocked > allowed) {
         gradeShort += blocked - allowed;
-        push({ rule: "teacherGradeBlocked", who: `${t} (${g}학년)`, need: blocked, have: allowed, message: `${g}학년 수업 ${n}시간을 학년 전체 SET이 없는 칸 ${cap}칸에 놓아야 합니다(여유 ${slack}칸). 이 교사가 수업할 수 없는 칸(배정 불가·다른 학년 선 수업) ${blocked}칸은 여유 칸이나 이 교사가 맡지 않는 학년 전체 SET 회차(${coverable}회)로만 덮을 수 있어 최대 ${allowed}칸까지 가능합니다 (${blocked - allowed}시간 부족)` });
+        push({ rule: "teacherGradeBlocked", who: `${t} (${g}학년)`, need: blocked, have: allowed, message: `${t} 교사의 ${g}학년 수업 ${n}시간을 학년 전체 SET이 없는 칸 ${cap}칸에 놓아야 합니다(여유 ${slack}칸). ${t} 교사가 수업할 수 없는 칸(배정 불가·다른 학년 선 수업) ${blocked}칸은 여유 칸이나 ${t} 교사가 맡지 않는 학년 전체 SET 회차(${coverable}회)로만 덮을 수 있어 최대 ${allowed}칸까지 가능합니다 (${blocked - allowed}시간 부족)` });
       } else if (slack <= 1 || blocked > slack) {
-        push({ rule: "teacherGradeBlocked", who: `${t} (${g}학년)`, need: n, have: cap, message: `${g}학년 수업 ${n}시간이 학년 전체 SET이 없는 칸 ${cap}칸 중 ${n}칸을 씁니다(여유 ${slack}칸). 이 교사가 수업할 수 없는 칸(배정 불가·다른 학년 선 수업)은 최대 ${allowed}칸(여유 ${slack} + 이 교사가 맡지 않는 학년 전체 SET ${coverable}회)까지만 가능하고, 지금 ${blocked}칸입니다.${blocked > slack ? ` 그중 ${blocked - slack}칸에는 반드시 이 교사가 맡지 않는 학년 전체 SET이 와야 합니다.` : ""}` }, true);
+        push({ rule: "teacherGradeBlocked", who: `${t} (${g}학년)`, need: n, have: cap, message: `${t} 교사의 ${g}학년 수업 ${n}시간이 학년 전체 SET이 없는 칸 ${cap}칸 중 ${n}칸을 씁니다(여유 ${slack}칸). ${t} 교사가 수업할 수 없는 칸(배정 불가·다른 학년 선 수업)은 최대 ${allowed}칸(여유 ${slack} + ${t} 교사가 맡지 않는 학년 전체 SET ${coverable}회)까지만 가능하고, 지금 ${blocked}칸입니다.${blocked > slack ? ` 그중 ${blocked - slack}칸에는 반드시 ${t} 교사가 맡지 않는 학년 전체 SET이 와야 합니다.` : ""}` }, true);
       }
     }
   }
@@ -133,13 +133,13 @@ export function quickCheck(inst: V3Instance): QuickCheckResult {
     };
     for (const f of s.fixed) {
       const why = blockedBy(f.day, f.period);
-      if (why) { blocking = true; push({ rule: "fixedConflict", who: setName(s), need: 1, have: 0, message: `고정한 ${dayLabel(f.day)}요일 ${f.period}교시가 ${withGwa(why)} 겹칩니다` }); }
+      if (why) { blocking = true; push({ rule: "fixedConflict", who: setName(s), need: 1, have: 0, message: `${setName(s)}의 고정한 ${dayLabel(f.day)}요일 ${f.period}교시가 ${withGwa(why)} 겹칩니다` }); }
     }
     const ok = gradeSlots(inst, s.grade).filter((sl) => !blockedBy(sl.day, sl.period));
     const days = new Set(ok.map((sl) => sl.day)).size;
     const needDays = Math.min(s.units, inst.days.filter((d) => (inst.periods[s.grade][d] ?? 0) > 0).length);
-    if (ok.length < s.units) { blocking = true; push({ rule: "setSlots", who: setName(s), need: s.units, have: ok.length, message: `${s.units}회차를 놓을 칸이 ${ok.length}칸뿐입니다` }); }
-    else if (days < needDays) { blocking = true; push({ rule: "setDays", who: setName(s), need: needDays, have: days, message: `하루 한 번씩 놓을 요일이 ${days}일뿐입니다 (${needDays}일 필요)` }); }
+    if (ok.length < s.units) { blocking = true; push({ rule: "setSlots", who: setName(s), need: s.units, have: ok.length, message: `${setName(s)} ${s.units}회차를 놓을 칸이 ${ok.length}칸뿐입니다` }); }
+    else if (days < needDays) { blocking = true; push({ rule: "setDays", who: setName(s), need: needDays, have: days, message: `${setName(s)}을 하루 한 번씩 놓을 요일이 ${days}일뿐입니다 (${needDays}일 필요)` }); }
   }
 
   return {

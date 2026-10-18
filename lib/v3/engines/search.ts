@@ -13,7 +13,7 @@ import type { Grade, TimetableCell, Weekday } from "@/lib/types";
 import { banKey, setDayBounds, slotKey, type V3Instance } from "@/lib/v3/instance";
 import type { V3Occurrence, V3Solution } from "@/lib/v3/validate";
 import { Collector } from "@/lib/v3/engines/collector";
-import { StopRules } from "@/lib/v3/engines/stop-rules";
+import { maxLowerBound, StopRules } from "@/lib/v3/engines/stop-rules";
 import type { EngineOutcome, EngineProgress, EngineRun, StopReason } from "@/lib/v3/engines/types";
 
 const H = 1000;
@@ -385,8 +385,10 @@ export function runSearch(run: EngineRun): EngineOutcome {
   else placeFresh(st);
 
   const collector = new Collector(input, inst, run.checkpoint?.results ?? []);
-  const lowerBound = run.lowerBound ?? run.checkpoint?.lowerBound ?? null;
-  const stop = new StopRules(false);
+  const baseLowerBound = run.lowerBound ?? run.checkpoint?.lowerBound ?? null;
+  // 같은 입력의 하한 계산이 동시에 돌면, 도중에 증명한 하한을 계산 중에도 바로 쓴다
+  const currentLowerBound = () => maxLowerBound(baseLowerBound, run.liveLowerBound?.());
+  const stop = new StopRules({ assumeZero: run.assumeZeroBound, goal: run.goal, exact: run.exact });
   let cur = st.total();
   let best = cur;
   let bestSnap = st.snapshot();
@@ -407,7 +409,7 @@ export function runSearch(run: EngineRun): EngineOutcome {
     run.onProgress?.({
       phase, elapsedMs: now(), segmentMs: Date.now() - t0,
       bestScore: collector.bestScore(), bestUnplaced: collector.bestScore() !== null ? 0 : (collector.bestIncomplete?.unplaced ?? null),
-      lowerBound, results: collector.results.length, iterations: it,
+      lowerBound: currentLowerBound(), results: collector.results.length, iterations: it,
     });
   };
   const offerBest = () => {
@@ -429,7 +431,7 @@ export function runSearch(run: EngineRun): EngineOutcome {
       if (t - lastOffer > 300) { offerBest(); lastOffer = t; }
       // 다른 좋은 결과도 모은다: 지금 상태가 필수 위반이 없고 상위 3개에 들 만하면
       if (t - lastAlt > 500 && cur < H && cur <= collector.admissionScore()) { collector.offer(st.decode(false), now()); lastAlt = t; }
-      if (stop.shouldStop(now(), lowerBound, collector, it)) { reason = "early"; break; }
+      if (stop.shouldStop(currentLowerBound(), collector)) { reason = "early"; break; }
       if (run.stopOnFirstComplete && best < H) { reason = "early"; break; }
       if (t - lastProgress > progressEvery) { report(stop.collecting ? "collect" : best >= H ? "repair" : "improve"); lastProgress = t; }
     }
@@ -549,8 +551,8 @@ export function runSearch(run: EngineRun): EngineOutcome {
     stopReason: reason,
     results,
     bestIncomplete: results.length ? null : collector.bestIncomplete,
-    lowerBound,
-    checkpoint: { kind: "search", best: bestSolution, results, elapsedMs: now(), lowerBound, seed: Math.floor(st.rand() * 2 ** 31) },
+    lowerBound: currentLowerBound(),
+    checkpoint: { kind: "search", best: bestSolution, results, elapsedMs: now(), lowerBound: currentLowerBound(), seed: Math.floor(st.rand() * 2 ** 31) },
     iterations: it,
     segmentMs: Date.now() - t0,
   };

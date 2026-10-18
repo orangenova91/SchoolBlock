@@ -6,7 +6,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getAccountId } from "@/lib/session";
 import { findOwnedTerm } from "@/lib/term-access";
-import { JOBS, knownLowerBound, type V3JobDocument } from "@/lib/v3/jobs";
+import { JOBS, jobFinishedForGood, knownLowerBound, type V3JobDocument } from "@/lib/v3/jobs";
 import { judge, nearThreshold, strictThreshold } from "@/lib/v3/score";
 
 export type V3TermContext = { accountId: string; termId: string; db: Db };
@@ -79,7 +79,10 @@ export async function jobView(db: Db, job: V3JobDocument, currentInputHash?: str
     diagnosis: job.kind === "diagnose" ? slimDiagnosis(job.diagnosis) : null,
     error: job.error ?? null,
     inputChanged,
-    canContinue: job.kind !== "diagnose" && finished && !inputChanged,
+    goal: job.goal ?? "strict",
+    /** 다음 추가 탐색의 목표 (엄격 기준 3개로 끝났으면 최적해 3개) */
+    nextGoal: job.status === "done" && job.summary.stopReason === "early" ? "optimal" : (job.goal ?? "strict"),
+    canContinue: job.kind !== "diagnose" && finished && !inputChanged && !jobFinishedForGood(job),
     createdAt: job.createdAt.toISOString(),
     updatedAt: job.updatedAt.toISOString(),
   };

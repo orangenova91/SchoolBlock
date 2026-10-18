@@ -161,7 +161,7 @@ export async function diagnoseFixedLoss(run: DiagnoseRun): Promise<FixedLossRepo
   const nothingFixed = run.inst.sets.every((s) => s.fixed.length === 0);
   const half = run.budgetMs / 2;
   run.onProgress?.("고정한 조건의 최선 계산 중");
-  const a = await runMilp({ input: run.input, inst: run.inst, budgetMs: half, seed: run.seed, shouldStop: run.shouldStop });
+  const a = await runMilp({ input: run.input, inst: run.inst, budgetMs: half, seed: run.seed, shouldStop: run.shouldStop, exact: true });
   let withoutFixed: Range;
   const withFixed = scoreRange(a.results, a.lowerBound);
   if (nothingFixed) withoutFixed = withFixed;
@@ -169,7 +169,7 @@ export async function diagnoseFixedLoss(run: DiagnoseRun): Promise<FixedLossRepo
     run.onProgress?.("고정을 풀었을 때의 최선 계산 중");
     const free = { ...run.inst, sets: run.inst.sets.map((s) => ({ ...s, fixed: [] })) };
     const freeInput = { ...run.input, fixedWholeCells: [], fixedPartialCells: [] };
-    const b = await runMilp({ input: freeInput, inst: free, budgetMs: Math.max(1000, run.budgetMs - (Date.now() - t0)), seed: run.seed, shouldStop: run.shouldStop });
+    const b = await runMilp({ input: freeInput, inst: free, budgetMs: Math.max(1000, run.budgetMs - (Date.now() - t0)), seed: run.seed, shouldStop: run.shouldStop, exact: true });
     withoutFixed = scoreRange(b.results, b.lowerBound);
   }
   const lossLo = withoutFixed.hi === null ? 0 : Math.max(0, withFixed.lo - withoutFixed.hi);
@@ -186,31 +186,87 @@ export type BoundReport = {
   best: number | null;
   /** 하한 = 최선 (최적 증명) */
   proven: boolean;
+  /**
+   * 항목별 최소 건수 (점심 연강·3연강·같은 날 교과를 하나씩 최소화한 하한). 꺼진 항목은 없음.
+   * 점수 = Σ 건수 × 중요도이고 각 건수는 자기 최소 이상이므로 Σ 최소 × 중요도 도 맞는 하한이다.
+   */
+  items?: Partial<Record<"lunch" | "triple" | "sameDay", { min: number; exact: boolean }>>;
+  /** Σ 항목 최소 × 중요도 */
+  itemSum?: number;
   elapsedMs: number;
 };
 
+/** 항목별 최소에 쓰는 시간 비율 (나머지는 전체 정수계획) */
+const ITEM_PHASE = 0.75;
+
+/**
+ * 이론상 최선(하한) 계산 (2026-10-18 개정).
+ * 1) 점심 연강·3연강·같은 날 교과를 하나씩 최소화한다. 한 항목만 보는 계산이라 훨씬 빨리 정확해진다
+ *    (테스트 시간표 6: 전체 계산은 5분에도 15점에 머물렀지만 점심 연강만은 37초에 "최소 8건" = 24점 증명).
+ *    항목이 하나 끝날 때마다 지금까지의 합을 하한으로 알린다 (남은 항목은 0 이상이므로 늘 맞는 값).
+ * 2) 남은 시간에 전체 정수계획으로 하한을 더 올리고 실제 시간표를 찾는다. 찾은 점수가 하한과 같으면 최선 증명.
+ * 진단이므로 일찍 끝내지 않는다 (최선을 증명하면 그때 끝남).
+ */
 export async function diagnoseBound(run: DiagnoseRun): Promise<BoundReport> {
   const t0 = Date.now();
-  run.onProgress?.("이론상 최선 계산 중");
-  let shown: number | null = null;
-  const r = await runMilp({
-    input: run.input,
-    inst: run.inst,
-    budgetMs: run.budgetMs,
-    seed: run.seed,
-    shouldStop: run.shouldStop,
-    progressEveryMs: 3000,
-    onProgress: (p) => {
-      if (p.lowerBound === null) return;
-      const lb = Math.max(0, Math.ceil(p.lowerBound - 1e-6));
-      if (shown !== null && lb <= shown) return;
-      shown = lb;
-      run.onBound?.(lb);
-    },
-  });
-  const lb = r.lowerBound === null ? null : Math.max(0, Math.ceil(r.lowerBound - 1e-6));
-  const best = r.results[0]?.metrics.score ?? null;
-  return { lowerBound: lb, best, proven: lb !== null && best !== null && best <= lb, elapsedMs: Date.now() - t0 };
+  const left = () => run.budgetMs - (Date.now() - t0);
+  const w = run.inst.weights;
+  let shown = -1;
+  const publish = (lb: number) => {
+    if (lb <= shown) return;
+    shown = lb;
+    run.onBound?.(lb);
+  };
+
+  // 1) 항목별 최소 (중요도에 비례해 시간을 나눔, 점심 연강부터)
+  const keys = (["lunch", "triple", "sameDay"] as const).filter((k) => w[k] > 0);
+  const items: NonNullable<BoundReport["items"]> = {};
+  let itemSum = 0;
+  const phaseEnd = Date.now() + run.budgetMs * ITEM_PHASE;
+  for (let i = 0; i < keys.length; i++) {
+    if (run.shouldStop?.()) break;
+    const k = keys[i];
+    const restWeight = keys.slice(i).reduce((a, x) => a + w[x], 0);
+    const budget = Math.max(1000, ((phaseEnd - Date.now()) * w[k]) / restWeight);
+    run.onProgress?.(`이론상 최선: ${k === "lunch" ? "점심 연강" : k === "triple" ? "3연강" : "같은 날 교과"} 최소 건수 계산 중`);
+    const m = buildModel(run.inst, { weights: { lunch: 0, triple: 0, sameDay: 0, [k]: 1 } });
+    const r = await solveModel(m, { budgetMs: budget, shouldStop: run.shouldStop });
+    const exact = r.status === "optimal" && r.objective !== null;
+    const min = exact ? Math.round(r.objective!) : r.lowerBound === null ? 0 : Math.max(0, Math.ceil(r.lowerBound - 1e-6));
+    items[k] = { min, exact };
+    itemSum += min * w[k];
+    publish(itemSum);
+  }
+
+  // 2) 전체 정수계획 (찾은 점수가 지금까지의 하한과 같으면 최선 증명 → 끝)
+  run.onProgress?.("이론상 최선 계산 중 (전체)");
+  let bestSeen: number | null = null;
+  const r = left() > 2000 && !run.shouldStop?.()
+    ? await runMilp({
+        input: run.input,
+        inst: run.inst,
+        budgetMs: left(),
+        seed: run.seed,
+        shouldStop: () => Boolean(run.shouldStop?.()) || (bestSeen !== null && bestSeen <= shown),
+        exact: true,
+        progressEveryMs: 3000,
+        onProgress: (p) => {
+          if (p.bestScore !== null) bestSeen = bestSeen === null ? p.bestScore : Math.min(bestSeen, p.bestScore);
+          if (p.lowerBound !== null) publish(Math.max(0, Math.ceil(p.lowerBound - 1e-6)));
+        },
+      })
+    : null;
+  const milpLb = r?.lowerBound == null ? null : Math.max(0, Math.ceil(r.lowerBound - 1e-6));
+  const lowerBound = keys.length || milpLb !== null ? Math.max(itemSum, milpLb ?? 0) : null;
+  const best = r?.results[0]?.metrics.score ?? null;
+  return {
+    lowerBound,
+    best,
+    proven: lowerBound !== null && best !== null && best <= lowerBound,
+    items,
+    itemSum,
+    elapsedMs: Date.now() - t0,
+  };
 }
 
 // ── 4) 데이터 한계 ──

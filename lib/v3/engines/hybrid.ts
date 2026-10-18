@@ -17,7 +17,7 @@ import { createHighsModel, getHighs, hasSolution, overMemory, type HighsModel } 
 import { completeVector } from "@/lib/v3/engines/milp";
 import { solveModel } from "@/lib/v3/engines/solve";
 import { rng, runSearch } from "@/lib/v3/engines/search";
-import { StopRules } from "@/lib/v3/engines/stop-rules";
+import { maxLowerBound, StopRules } from "@/lib/v3/engines/stop-rules";
 import type { EngineOutcome, EngineRun, StopReason } from "@/lib/v3/engines/types";
 
 const SUB_SECONDS = 15;
@@ -83,7 +83,9 @@ export async function runHybrid(run: EngineRun): Promise<EngineOutcome> {
   const now = () => baseMs + (Date.now() - t0);
   const left = () => run.budgetMs - (Date.now() - t0);
   const collector = new Collector(input, inst, run.checkpoint?.results ?? []);
-  const lowerBound = run.lowerBound ?? run.checkpoint?.lowerBound ?? null;
+  const baseLowerBound = run.lowerBound ?? run.checkpoint?.lowerBound ?? null;
+  // 같은 입력의 하한 계산이 동시에 돌면, 도중에 증명한 하한을 계산 중에도 바로 쓴다
+  const currentLowerBound = () => maxLowerBound(baseLowerBound, run.liveLowerBound?.());
   const rand = rng((run.seed ?? run.checkpoint?.seed ?? 1) * 7919 + 13);
   const progressEvery = run.progressEveryMs ?? 2000;
   let iterations = 0;
@@ -103,7 +105,7 @@ export async function runHybrid(run: EngineRun): Promise<EngineOutcome> {
   const m = buildModel(inst, { slack: true });
   const highs = await getHighs();
   const model = createHighsModel(highs, m);
-  const stop = new StopRules(true);
+  const stop = new StopRules({ assumeZero: run.assumeZeroBound, goal: run.goal, exact: run.exact });
   let lastProgress = 0;
   let cur: Float64Array | null = null;
   let curCost = Infinity;
@@ -115,7 +117,7 @@ export async function runHybrid(run: EngineRun): Promise<EngineOutcome> {
       if (!cur) {
         // 시작 해가 필수 조건을 어김 → 어긴 요일을 비우고 고친다
         const { days, grades } = violatedArea(m, x0);
-        run.onProgress?.({ phase: "repair", elapsedMs: now(), segmentMs: Date.now() - t0, bestScore: null, bestUnplaced: null, lowerBound, results: collector.results.length, iterations });
+        run.onProgress?.({ phase: "repair", elapsedMs: now(), segmentMs: Date.now() - t0, bestScore: null, bestUnplaced: null, lowerBound: currentLowerBound(), results: collector.results.length, iterations });
         const r = solveWith(model, m, x0, (c) => (m.day[c] !== null && days.has(m.day[c]!)) || (m.grade[c] !== null && grades.has(m.grade[c]!)), Math.min(120, left() / 1000));
         cur = r?.x ?? null;
         // 요일과 상관없는 조건(주당 시수 등)을 어기면 요일만 비워서는 못 고친다 → 전체를 다시 푼다.
@@ -123,7 +125,7 @@ export async function runHybrid(run: EngineRun): Promise<EngineOutcome> {
         if (!cur && left() > 5000) {
           // 그래도 안 되면 점수는 잠시 잊고 "가장 적게 남는 배치"부터 찾는다 (배치 가능 판정과 같은 계산).
           // 그 배치는 필수 조건을 모두 지키므로 여기서부터 부분 재계산으로 점수·미배치를 줄여 간다
-          run.onProgress?.({ phase: "repair", elapsedMs: now(), segmentMs: Date.now() - t0, bestScore: null, bestUnplaced: null, lowerBound, results: collector.results.length, iterations });
+          run.onProgress?.({ phase: "repair", elapsedMs: now(), segmentMs: Date.now() - t0, bestScore: null, bestUnplaced: null, lowerBound: currentLowerBound(), results: collector.results.length, iterations });
           const mu = buildModel(inst, { slack: true, weights: { lunch: 0, triple: 0, sameDay: 0 } });
           const r = await solveModel(mu, { budgetMs: Math.min(150_000, left() * 0.6), warm: encodeSolution(inst, mu, startSol), shouldStop: run.shouldStop });
           if (r.x) {
@@ -158,7 +160,7 @@ export async function runHybrid(run: EngineRun): Promise<EngineOutcome> {
     let lastImprove = 0;
     while (cur && reason === "budget" && left() > 2000) {
       if (run.shouldStop?.()) { reason = "user"; break; }
-      if (stop.shouldStop(now(), lowerBound, collector, iterations)) { reason = "early"; break; }
+      if (stop.shouldStop(currentLowerBound(), collector)) { reason = "early"; break; }
       // 계산기 메모리는 줄지 않으므로 상한을 넘으면 이 구간을 끝내고 중단점에서 새 계산기로 이어 간다
       if (overMemory()) { reason = "memory"; break; }
       iterations++;
@@ -183,7 +185,7 @@ export async function runHybrid(run: EngineRun): Promise<EngineOutcome> {
       const t = Date.now();
       if (t - lastProgress > progressEvery) {
         lastProgress = t;
-        run.onProgress?.({ phase: stop.collecting ? "collect" : curCost >= 1000 ? "repair" : "improve", elapsedMs: now(), segmentMs: t - t0, bestScore: collector.bestScore(), bestUnplaced: collector.bestScore() !== null ? 0 : (collector.bestIncomplete?.unplaced ?? null), lowerBound, results: collector.results.length, iterations });
+        run.onProgress?.({ phase: stop.collecting ? "collect" : curCost >= 1000 ? "repair" : "improve", elapsedMs: now(), segmentMs: t - t0, bestScore: collector.bestScore(), bestUnplaced: collector.bestScore() !== null ? 0 : (collector.bestIncomplete?.unplaced ?? null), lowerBound: currentLowerBound(), results: collector.results.length, iterations });
       }
     }
   } finally {
@@ -195,8 +197,8 @@ export async function runHybrid(run: EngineRun): Promise<EngineOutcome> {
     stopReason: reason,
     results,
     bestIncomplete: results.length ? null : collector.bestIncomplete,
-    lowerBound,
-    checkpoint: { kind: "hybrid", best, results, elapsedMs: now(), lowerBound, seed: Math.floor(rand() * 2 ** 31) },
+    lowerBound: currentLowerBound(),
+    checkpoint: { kind: "hybrid", best, results, elapsedMs: now(), lowerBound: currentLowerBound(), seed: Math.floor(rand() * 2 ** 31) },
     iterations,
     segmentMs: Date.now() - t0,
   };

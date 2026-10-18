@@ -75,7 +75,8 @@ const PHASE_LABEL: Record<string, string> = {
 const STOP_REASON: Record<string, string> = {
   budget: "정한 시간만큼 계산했습니다.",
   user: "요청대로 멈췄습니다. 지금까지 찾은 가장 좋은 결과를 보여 드립니다.",
-  early: "목표를 달성하고 서로 다른 결과 3개를 모아 일찍 끝냈습니다.",
+  early: "목표 점수에 드는 서로 다른 결과 3개를 모아 일찍 끝냈습니다.",
+  optimal: "최선임을 증명해 더 계산할 것이 없어 끝냈습니다.",
   memory: "계산 메모리 한도에 닿아 멈췄습니다. 지금까지의 결과를 보여 드립니다.",
   infeasible: "모든 수업을 배치할 수 없는 조건으로 확인되었습니다.",
 };
@@ -712,7 +713,7 @@ function JobDetail({
               onClick={onContinue}
               className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800 disabled:opacity-50"
             >
-              5분 더 계산
+              {job.status === "done" && job.nextGoal === "optimal" && job.goal !== "optimal" ? "추가 탐색 (최적해 3개)" : "5분 더 계산"}
             </button>
           ) : null}
         </div>
@@ -744,11 +745,21 @@ function JobDetail({
         </div>
         <div className="rounded-lg bg-zinc-50 px-3 py-2">
           <dt className="text-xs text-zinc-500">이론상 최선</dt>
-          <dd className="font-semibold text-zinc-900">{unplacedOnly ? "-" : job.lowerBound === null ? "계산 중" : `${job.lowerBound}점`}</dd>
+          <dd className="font-semibold text-zinc-900">
+            {unplacedOnly
+              ? "-"
+              : job.lowerBound !== null
+                ? `${job.lowerBound}점`
+                : (liveScore ?? best?.score) === 0
+                  ? "0점 (0점이 곧 최선)"
+                  : "계산 중 · 0점 이상"}
+          </dd>
         </div>
         <div className="rounded-lg bg-zinc-50 px-3 py-2">
           <dt className="text-xs text-zinc-500">목표 (근접 기준)</dt>
-          <dd className="font-semibold text-zinc-900">{unplacedOnly ? "미배치 0" : job.nearThreshold === null ? "-" : `${job.nearThreshold}점 이하`}</dd>
+          <dd className="font-semibold text-zinc-900">
+            {unplacedOnly ? "미배치 0" : job.nearThreshold === null ? "6점 이하면 달성 (최선 계산 전)" : `${job.nearThreshold}점 이하`}
+          </dd>
         </div>
         <div className="rounded-lg bg-zinc-50 px-3 py-2">
           <dt className="text-xs text-zinc-500">모은 결과</dt>
@@ -767,10 +778,19 @@ function JobDetail({
                 : "5분 계산이 끝났지만 아직 모든 수업을 놓은 시간표가 없습니다. 더 계산하려면 “5분 더 계산”을 눌러 주세요. (중단점은 30일 동안 보관합니다)"
               : job.status === "error"
                 ? `오류로 멈췄습니다: ${job.error ?? ""}`
-                : job.stopReason
-                  ? STOP_REASON[job.stopReason] ?? ""
-                  : job.error ?? ""}
+                : job.stopReason === "early"
+                  ? job.goal === "optimal"
+                    ? "이론상 최선과 같은 점수의 서로 다른 시간표 3개를 찾아 끝냈습니다."
+                    : `엄격 기준(${job.strictThreshold ?? 3}점 이하)에 드는 서로 다른 시간표 3개를 찾아 멈췄습니다. 최선(이론상 최선 ${job.lowerBound ?? 0}점)과 같은 시간표 3개를 찾으려면 “추가 탐색 (최적해 3개)”을 눌러 주세요. 찾을 때까지 5분씩 계산합니다.`
+                  : job.stopReason
+                    ? STOP_REASON[job.stopReason] ?? ""
+                    : job.error ?? ""}
       </p>
+      {job.goal === "optimal" && job.status !== "done" ? (
+        <p className="mt-1 text-xs font-medium text-sky-800">
+          지금 목표: 이론상 최선({job.lowerBound ?? 0}점)과 같은 점수의 시간표 3개. 이론상 최선이 아직 덜 계산된 값이면 끝까지 못 찾을 수 있습니다.
+        </p>
+      ) : null}
       {!unplacedOnly && job.lowerBound !== null && job.strictThreshold !== null ? (
         <p className="mt-1 text-xs text-zinc-500">
           목표: 이론상 최선 {job.lowerBound}점의 1.1배 또는 +6점 중 넉넉한 쪽({job.nearThreshold}점)까지는 달성으로 봅니다. 엄격 기준은{" "}

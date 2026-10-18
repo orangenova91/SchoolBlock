@@ -2,6 +2,7 @@
  * 계산 스레드 (worker_threads 진입점). 계산만 한다. DB·웹 요청은 조정자(coordinator)가 맡는다.
  *
  * - 계산은 이 스레드를 끝날 때까지 붙잡으므로, 중지 신호는 공유 메모리(Atomics)로 받는다.
+ * - 같은 입력의 하한 계산이 동시에 돌면, 조정자가 새 하한을 공유 메모리(lowerBoundBuffer)에 넣어 준다.
  * - 진행 상황은 postMessage 로 조정자에게 보낸다 (계산 중에도 보낼 수 있음).
  * - 구간이 끝나면 스레드도 끝난다 → 계산기(WebAssembly) 메모리가 함께 풀린다.
  */
@@ -14,6 +15,7 @@ import type { EngineCheckpoint, EngineProgress } from "@/lib/v3/engines/types";
 import type { V3Input } from "@/lib/v3/input";
 import { buildInstance } from "@/lib/v3/instance";
 import type { DiagnoseKind, V3JobKind } from "@/lib/v3/jobs";
+import type { StopGoal } from "@/lib/v3/engines/stop-rules";
 
 export type EngineThreadInput = {
   kind: V3JobKind;
@@ -24,6 +26,10 @@ export type EngineThreadInput = {
   lowerBound: number | null;
   seed: number;
   stopBuffer: SharedArrayBuffer;
+  /** Float64 1칸: 다른 작업이 증명한 하한 (NaN = 모름). 조정자가 2초마다 갱신 */
+  lowerBoundBuffer?: SharedArrayBuffer;
+  /** 조기 종료 목표 (엄격 기준 3개 / 최적해 3개) */
+  goal?: StopGoal;
 };
 
 export type EngineThreadMessage =
@@ -53,7 +59,17 @@ async function main() {
     post({ type: "done", report, stopped: shouldStop() });
     return;
   }
-  const run = { ...base, checkpoint: data.checkpoint, lowerBound: data.lowerBound, onProgress: (p: EngineProgress) => post({ type: "progress", progress: p }) };
+  const live = data.lowerBoundBuffer ? new Float64Array(data.lowerBoundBuffer) : null;
+  const run = {
+    ...base,
+    checkpoint: data.checkpoint,
+    lowerBound: data.lowerBound,
+    // 점수는 0보다 작을 수 없으므로, 하한을 모르면 0을 하한으로 보고 0점·3점 이하에서 일찍 끝낼 수 있게 한다
+    assumeZeroBound: true,
+    goal: data.goal ?? "strict",
+    liveLowerBound: () => (live && !Number.isNaN(live[0]) ? live[0] : null),
+    onProgress: (p: EngineProgress) => post({ type: "progress", progress: p }),
+  };
   const outcome = data.kind === "search" ? runSearch(run) : data.kind === "milp" ? await runMilp(run) : await runHybrid(run);
   post({ type: "done", outcome });
 }

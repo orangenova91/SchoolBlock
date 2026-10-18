@@ -9,6 +9,7 @@ import type { V3Input } from "@/lib/v3/input";
 import type { V3Instance } from "@/lib/v3/instance";
 import type { V3Metrics } from "@/lib/v3/score";
 import type { V3Solution } from "@/lib/v3/validate";
+import type { StopGoal } from "@/lib/v3/engines/stop-rules";
 
 export type EngineKind = "search" | "milp" | "hybrid";
 
@@ -64,9 +65,18 @@ export type EngineRun = {
   progressEveryMs?: number;
   /** 첫 완성본을 찾으면 바로 끝낸다 (배치 가능 판정용: 예시 하나면 증명됨) */
   stopOnFirstComplete?: boolean;
+  /** 하한을 모르면 0으로 보고 조기 종료한다 (생성 작업. 진단은 끔: 정확한 값이 필요) */
+  assumeZeroBound?: boolean;
+  /** 조기 종료 목표: 엄격 기준 3개(기본) / 최적해 3개 (엄격 기준으로 끝난 뒤 추가 탐색) */
+  goal?: StopGoal;
+  /** 일찍 끝내지 않는다 (진단: 정해진 시간 안에서 끝까지 정확하게) */
+  exact?: boolean;
+  /** 계산 중에 다른 작업(하한 계산)이 증명한 하한을 읽는다. 없으면 null */
+  liveLowerBound?: () => number | null;
 };
 
-export type StopReason = "budget" | "user" | "early" | "memory" | "infeasible";
+/** optimal: 정수계획이 최선을 증명함 (더 계산할 것이 없음) */
+export type StopReason = "budget" | "user" | "early" | "optimal" | "memory" | "infeasible";
 
 export type EngineOutcome = {
   stopReason: StopReason;

@@ -11,7 +11,8 @@ import { gradeSlots, slotKey, type V3Instance, type V3Set } from "@/lib/v3/insta
 export type QuickRule =
   | "class" // 반 시간
   | "teacher" // 교사 시간
-  | "teacherGrade" // 교사의 학년 수업 > 학년 전체 SET 밖 칸
+  | "teacherGrade" // 교사의 학년 수업 > 학년 전체 SET 밖 칸 (시간 수 문제: 배정 불가를 풀어도 못 고침)
+  | "teacherGradeBlocked" // 교사의 학년 수업은 SET 밖 칸에 들어가지만, 수업할 수 없는 칸이 많아 모자람 (배정 불가·선 수업을 풀면 고칠 수 있음)
   | "wholeSetColumns" // 학년 전체 SET 회차 > 학년 전체가 비는 칸
   | "setSlots" // SET을 놓을 칸 부족
   | "setDays" // SET을 놓을 요일 부족 (하루 1회)
@@ -102,8 +103,23 @@ export function quickCheck(inst: V3Instance): QuickCheckResult {
     for (const [k, n] of teacherGradeLoad) {
       const [t, gg] = k.split("|");
       if (Number(gg) !== g) continue;
-      if (n > cap) { gradeShort += n - cap; push({ rule: "teacherGrade", who: `${t} (${g}학년)`, need: n, have: cap, message: `${g}학년 수업 ${n}시간이 학년 전체 SET 밖 칸 ${cap}칸보다 많습니다 (${n - cap}시간 부족)` }); }
-      else if (n === cap && wholeUnits > 0) push({ rule: "teacherGrade", who: `${t} (${g}학년)`, need: n, have: cap, message: `${g}학년 수업 ${n}시간이 학년 전체 SET 밖 칸 ${cap}칸을 모두 씁니다. 이 교사에게 배정 불가·선 수업을 더하면 배치할 수 없게 됩니다` }, true);
+      if (n > cap) { gradeShort += n - cap; push({ rule: "teacherGrade", who: `${t} (${g}학년)`, need: n, have: cap, message: `${g}학년 수업 ${n}시간이 학년 전체 SET이 없는 칸 ${cap}칸보다 많습니다 (${n - cap}시간 부족)` }); continue; }
+      if (!wholeUnits) continue;
+      // 이 교사가 이 학년 수업을 할 수 없는 칸: 배정 불가, 다른 학년 선 수업
+      const blocked = slots.filter((sl) =>
+        inst.forbidden.has(slotKey(t, sl.day, sl.period)) ||
+        inst.pins.some((p) => p.teacher === t && p.grade !== g && p.day === sl.day && p.period === sl.period)).length;
+      // 그런 칸은 여유 칸(SET이 없는 칸 중 이 교사가 안 쓰는 칸)이 되거나, 이 교사가 맡지 않는 학년 전체 SET 회차로 덮여야 한다.
+      // 순환 담당은 다른 교사가 맡을 수 있으므로 "맡지 않는 회차"로 넉넉하게 센다 (필요조건)
+      const slack = cap - n;
+      const coverable = whole.filter((s) => !s.subjects.some((x) => !x.rotated && x.teachers.some((tt) => tt.name === t))).reduce((a, s) => a + s.units, 0);
+      const allowed = slack + coverable;
+      if (blocked > allowed) {
+        gradeShort += blocked - allowed;
+        push({ rule: "teacherGradeBlocked", who: `${t} (${g}학년)`, need: blocked, have: allowed, message: `${g}학년 수업 ${n}시간을 학년 전체 SET이 없는 칸 ${cap}칸에 놓아야 합니다(여유 ${slack}칸). 이 교사가 수업할 수 없는 칸(배정 불가·다른 학년 선 수업) ${blocked}칸은 여유 칸이나 이 교사가 맡지 않는 학년 전체 SET 회차(${coverable}회)로만 덮을 수 있어 최대 ${allowed}칸까지 가능합니다 (${blocked - allowed}시간 부족)` });
+      } else if (slack <= 1 || blocked > slack) {
+        push({ rule: "teacherGradeBlocked", who: `${t} (${g}학년)`, need: n, have: cap, message: `${g}학년 수업 ${n}시간이 학년 전체 SET이 없는 칸 ${cap}칸 중 ${n}칸을 씁니다(여유 ${slack}칸). 이 교사가 수업할 수 없는 칸(배정 불가·다른 학년 선 수업)은 최대 ${allowed}칸(여유 ${slack} + 이 교사가 맡지 않는 학년 전체 SET ${coverable}회)까지만 가능하고, 지금 ${blocked}칸입니다.${blocked > slack ? ` 그중 ${blocked - slack}칸에는 반드시 이 교사가 맡지 않는 학년 전체 SET이 와야 합니다.` : ""}` }, true);
+      }
     }
   }
 

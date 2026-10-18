@@ -43,7 +43,9 @@ export async function POST(request: Request, context: RouteContext) {
     const lower = job.lowerBound === null ? known : known === null ? job.lowerBound : Math.max(job.lowerBound, known);
     const lb = lower === null ? null : Math.max(0, Math.ceil(lower - 1e-6));
     const j = judge(v.metrics, { lower, proven: false });
-    const note = `v3 · ${KIND_LABEL[job.kind] ?? job.kind} · ${v.metrics.score}점 (${lb === null ? "최선 미계산" : `최선 ${lb}, ${j.near ? "달성" : "미달"}`})`;
+    // 하한을 아직 몰라도 0점은 곧 최선이고, 6점 이하는 어떤 하한이든 달성이다 (점수는 0 이상)
+    const judged = lb === null ? (j.optimal ? "최선 0, 달성" : j.near ? "최선 미계산, 달성" : "최선 미계산") : `최선 ${lb}, ${j.near ? "달성" : "미달"}`;
+    const note = `v3 · ${KIND_LABEL[job.kind] ?? job.kind} · ${v.metrics.score}점 (${judged})`;
     const working: Partial<TimetableDocument> = {
       termId,
       status: "ready",

@@ -83,6 +83,18 @@ describe("점수와 목표 판정", () => {
     assert.equal(judge(m(24, 1), { lower: 24, proven: true }).near, false);
     assert.equal(judge(m(24), { lower: null, proven: false }).near, null);
   });
+  it("하한을 몰라도 0점은 최선, 6점 이하는 달성 (점수는 0 이상)", () => {
+    const m = (score: number, unplaced = 0) => ({ unplaced, lunch: 0, triple: 0, sameDay: 0, score });
+    const zero = judge(m(0), { lower: null, proven: false });
+    assert.equal(zero.optimal, true);
+    assert.equal(zero.near, true);
+    assert.equal(zero.strict, true);
+    const five = judge(m(5), { lower: null, proven: false });
+    assert.deepEqual([five.near, five.strict, five.optimal, five.gapToNear], [true, null, false, 0]);
+    // 0 기준으로 못 미치면 진짜 하한을 알기 전까지 모름 (목표까지 몇 점인지 말하지 않음)
+    assert.deepEqual([judge(m(7), { lower: null, proven: false }).near, judge(m(7), { lower: null, proven: false }).gapToNear], [null, null]);
+    assert.equal(judge(m(0, 2), { lower: null, proven: false }).optimal, false);
+  });
 });
 
 describe("상위 3개 결과", () => {
@@ -119,6 +131,19 @@ describe("빠른 검사", () => {
     assert.ok(w, JSON.stringify(r.warnings));
     assert.equal(w.need - w.have, 1);
     assert.ok(r.minUnplaced >= 1);
+  });
+  it("교사의 수업할 수 없는 칸은 여유 칸 + 그 교사가 맡지 않는 학년 전체 SET 회차까지만 허용 (일반 규칙)", () => {
+    // 1학년 15칸, SET 2회 → SET 밖 13칸. 국어 6시간씩 두 반 = 12시간 → 여유 1칸, 김국어가 맡지 않는 SET 2회 → 최대 3칸
+    const slot = (day: "mon" | "tue" | "wed" | "thu" | "fri", period: number) => ({ teacherName: "김국어", day, period });
+    const three = quickCheck(buildInstance(tinyInput({ koreanHours: 6, forbidden: [slot("mon", 1), slot("tue", 1), slot("wed", 1)] })));
+    const warn = three.warnings.find((x) => x.rule === "teacherGradeBlocked");
+    assert.equal(warn?.severity, "warn", JSON.stringify(three.warnings));
+    assert.equal(three.minUnplaced, 0);
+    const four = quickCheck(buildInstance(tinyInput({ koreanHours: 6, forbidden: [slot("mon", 1), slot("tue", 1), slot("wed", 1), slot("thu", 1)] })));
+    const err = four.warnings.find((x) => x.rule === "teacherGradeBlocked" && x.severity === "error");
+    assert.ok(err, JSON.stringify(four.warnings));
+    assert.equal(err.need - err.have, 1);
+    assert.ok(four.minUnplaced >= 1);
   });
   it("고정 SET과 겹친 선 수업은 빼지 않고 오류로 막는다 (v1·v2와 다름: 정확한 완성)", async () => {
     const inst = buildInstance(tinyInput({

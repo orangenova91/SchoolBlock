@@ -5,9 +5,10 @@
  *       running → stopping(중지 요청) → stopped,  불가 증명 → infeasible,  오류 → error
  * 상태 바꾸기는 "지금 상태가 맞을 때만" 바꾸는 조건부 갱신으로 해서, 화면 요청과 작업자가 동시에 바꿔도 꼬이지 않는다.
  */
-import { ObjectId, type Db } from "mongodb";
+import { ObjectId, type Db, type Filter } from "mongodb";
 import type { V3Metrics } from "@/lib/v3/score";
 import type { EngineCheckpoint, EngineKind, EngineOutcome, StoredResult } from "@/lib/v3/engines/types";
+import type { StopGoal } from "@/lib/v3/engines/stop-rules";
 
 export const JOBS = "v3Jobs";
 export const JOB_RESULTS = "v3JobResults";
@@ -54,6 +55,11 @@ export type V3JobDocument = {
   status: V3JobStatus;
   /** 사전 승인: 켜져 있으면 구간이 끝나도 묻지 않고 계속 (최대 시간까지) */
   autoContinue: boolean;
+  /**
+   * 조기 종료 목표 (없으면 strict). strict: 엄격 기준 안의 서로 다른 결과 3개.
+   * 엄격 기준 3개로 끝난 작업을 사용자가 추가 탐색하면 optimal(이론상 최선과 같은 점수 3개)로 바뀐다.
+   */
+  goal?: StopGoal;
   segmentMs: number;
   /** 최대 시간 (30분 + 추가 승인분) */
   maxMs: number;
@@ -137,6 +143,17 @@ export async function createJob(
  * 가장 오래 기다린 대기 작업을 하나 가져간다. 같은 학기에 이미 실행 중인 작업이 있으면 건너뛴다(학기당 실행 1).
  * 임대가 끝난(작업자가 끊긴) 실행 작업도 다시 가져가 중단점에서 이어 간다.
  */
+/** 하한 계산 작업인가 (같은 학기의 생성 작업과 동시에 돌 수 있음) */
+export function isBoundJob(job: Pick<V3JobDocument, "kind" | "diagnose">): boolean {
+  return job.kind === "diagnose" && job.diagnose === "bound";
+}
+
+/** 같은 줄(하한 계산 / 그 밖의 작업)의 작업만 고르는 조건. 학기당 한 줄에 하나씩만 실행한다 */
+function laneFilter(job: Pick<V3JobDocument, "kind" | "diagnose">): Filter<V3JobDocument> {
+  const bound: Filter<V3JobDocument> = { kind: "diagnose", diagnose: "bound" };
+  return isBoundJob(job) ? bound : { $nor: [bound] };
+}
+
 export async function claimNextJob(db: Db, workerId: string): Promise<V3JobDocument | null> {
   const now = new Date();
   // 끊긴 작업 되살리기
@@ -146,7 +163,8 @@ export async function claimNextJob(db: Db, workerId: string): Promise<V3JobDocum
   );
   const candidates = await jobs(db).find({ status: "queued" }).sort({ queuedAt: 1 }).limit(20).toArray();
   for (const c of candidates) {
-    const busy = await jobs(db).countDocuments({ termId: c.termId, status: { $in: ["running", "stopping"] } });
+    // 같은 학기는 한 번에 하나씩. 다만 이론상 최선(하한) 계산은 따로 세어, 빈자리가 있으면 생성 작업과 동시에 돈다
+    const busy = await jobs(db).countDocuments({ termId: c.termId, status: { $in: ["running", "stopping"] }, ...laneFilter(c) });
     if (busy > 0) continue;
     const claimed = await jobs(db).findOneAndUpdate(
       { _id: c._id, status: "queued" },
@@ -155,7 +173,7 @@ export async function claimNextJob(db: Db, workerId: string): Promise<V3JobDocum
     );
     if (!claimed) continue;
     // 동시에 같은 학기 작업을 가져간 작업자가 있으면 늦은 쪽이 돌려놓는다
-    const other = await jobs(db).findOne({ termId: c.termId, status: { $in: ["running", "stopping"] }, _id: { $ne: c._id } });
+    const other = await jobs(db).findOne({ termId: c.termId, status: { $in: ["running", "stopping"] }, _id: { $ne: c._id }, ...laneFilter(c) });
     if (other) {
       await jobs(db).updateOne({ _id: c._id, "lease.workerId": workerId }, { $set: { status: "queued", lease: null } });
       continue;
@@ -184,7 +202,7 @@ export async function loadCheckpoint(db: Db, jobId: ObjectId): Promise<EngineChe
 export function nextStatusAfterSegment(job: Pick<V3JobDocument, "kind" | "autoContinue" | "maxMs" | "stopRequested">, elapsedMs: number, stopReason: EngineOutcome["stopReason"] | "done"): V3JobStatus {
   if (stopReason === "user" || job.stopRequested) return "stopped";
   if (stopReason === "infeasible") return "infeasible";
-  if (job.kind === "diagnose" || stopReason === "early" || stopReason === "done") return "done";
+  if (job.kind === "diagnose" || stopReason === "early" || stopReason === "optimal" || stopReason === "done") return "done";
   if (elapsedMs >= job.maxMs - 1000) return "done";
   return job.autoContinue ? "queued" : "awaiting";
 }
@@ -292,19 +310,32 @@ export async function requestStop(db: Db, jobId: ObjectId): Promise<V3JobStatus>
  * 이어 돌리기 승인 (5분). 승인 대기·중지·완료 상태에서, 입력이 그대로이고 중단점이 있을 때만.
  * 최대 시간을 다 썼으면 5분을 더한다.
  */
+/** 이 작업이 목표를 다 이뤄 더 계산할 것이 없는가 (최적해 3개를 찾았거나, 정수계획이 최선을 증명함) */
+export function jobFinishedForGood(job: Pick<V3JobDocument, "status" | "goal" | "summary">): boolean {
+  if (job.status !== "done") return false;
+  return job.summary.stopReason === "optimal" || (job.summary.stopReason === "early" && job.goal === "optimal");
+}
+
+/** 추가 탐색을 승인하면 목표가 어떻게 되는가: 엄격 기준 3개로 끝났으면 최적해 3개로 올린다 */
+export function goalAfterApproval(job: Pick<V3JobDocument, "status" | "goal" | "summary">): StopGoal {
+  if (job.status === "done" && job.summary.stopReason === "early") return "optimal";
+  return job.goal ?? "strict";
+}
+
 export async function approveContinue(db: Db, jobId: ObjectId, currentInputHash: string): Promise<V3JobDocument> {
   const job = await jobs(db).findOne({ _id: jobId });
   if (!job) throw new JobStateError("작업이 없습니다.");
   if (job.kind === "diagnose") throw new JobStateError("진단 작업은 이어 돌릴 수 없습니다. 새로 실행해 주세요.");
   if (!["awaiting", "stopped", "done"].includes(job.status)) throw new JobStateError("지금 상태에서는 이어 돌릴 수 없습니다.");
   if (job.inputHash !== currentInputHash) throw new JobStateError("작업 뒤에 입력이 바뀌어 이어 돌릴 수 없습니다. 새로 실행해 주세요.");
+  if (jobFinishedForGood(job)) throw new JobStateError("이미 최선과 같은 시간표를 찾아 더 계산할 것이 없습니다.");
   const ck = await db.collection(CHECKPOINTS).countDocuments({ jobId: String(jobId) });
   if (!ck) throw new JobStateError("중단점이 없어(만료됨) 이어 돌릴 수 없습니다. 새로 실행해 주세요.");
   const maxMs = job.elapsedMs >= job.maxMs - 1000 ? job.elapsedMs + EXTEND_MS : job.maxMs;
   const now = new Date();
   const r = await jobs(db).findOneAndUpdate(
     { _id: jobId, status: job.status },
-    { $set: { status: "queued", queuedAt: now, updatedAt: now, maxMs, stopRequested: false, error: null }, $unset: { finishedAt: "" } },
+    { $set: { status: "queued", queuedAt: now, updatedAt: now, maxMs, goal: goalAfterApproval(job), stopRequested: false, error: null }, $unset: { finishedAt: "" } },
     { returnDocument: "after" },
   );
   if (!r) throw new JobStateError("작업 상태가 바뀌었습니다. 다시 시도해 주세요.");

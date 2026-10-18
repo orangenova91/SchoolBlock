@@ -207,9 +207,23 @@ export function V3DiagnosisReport({ kind, report }: { kind: V3DiagnoseKind; repo
   return (
     <div className="text-sm">
       <p className="font-medium">
-        {r.lowerBound === null ? "이론상 최선을 계산하지 못했습니다." : `이론상 최선: ${r.lowerBound}점 (어떤 방법으로도 이보다 좋을 수 없음)`}
+        {r.lowerBound === null
+          ? "이론상 최선을 계산하지 못했습니다."
+          : r.proven
+            ? `이론상 최선: ${r.lowerBound}점 (최선임이 증명됨)`
+            : `이론상 최선: ${r.lowerBound}점 이상 (어떤 방법으로도 이보다 좋을 수 없음)`}
         <span className="ml-1.5 text-xs font-normal opacity-70">({seconds(r.elapsedMs)})</span>
       </p>
+      {r.items && Object.keys(r.items).length ? (
+        <p className="mt-1 text-xs">
+          항목별 최소:{" "}
+          {(["lunch", "triple", "sameDay"] as const)
+            .filter((k) => r.items?.[k])
+            .map((k) => `${k === "lunch" ? "점심 연강" : k === "triple" ? "3연강" : "같은 날 교과"} ${r.items![k]!.min}건${r.items![k]!.exact ? "" : " 이상"}`)
+            .join(" · ")}{" "}
+          → 중요도를 곱해 더하면 {r.itemSum ?? 0}점
+        </p>
+      ) : null}
       {r.best !== null ? (
         <p className="mt-1 text-xs">
           계산 중 찾은 가장 좋은 점수 {r.best}점{r.proven ? " — 최선임이 증명되었습니다." : ""}

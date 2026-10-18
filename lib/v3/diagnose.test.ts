@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { TeacherForbiddenSlot, Weekday } from "@/lib/types";
-import { diagnoseDataLimit, diagnoseFeasibility, diagnoseFixedLoss, diagnoseRelax } from "@/lib/v3/diagnose";
+import { diagnoseBound, diagnoseDataLimit, diagnoseFeasibility, diagnoseFixedLoss, diagnoseRelax } from "@/lib/v3/diagnose";
 import { tinyInput } from "@/lib/v3/fixtures";
 import { buildInstance } from "@/lib/v3/instance";
 import { quickCheck } from "@/lib/v3/quick-check";
@@ -84,5 +84,19 @@ describe("v3 진단", () => {
     assert.equal(r.lunch.skipped, false);
     assert.ok(r.lunch.min.exact);
     assert.ok(r.lunch.count.bound <= r.lunch.min.lo);
+  });
+
+  it("이론상 최선: 항목별 최소의 합을 먼저 하한으로 쓰고, 전체 계산과 합쳐 최선을 증명한다", async () => {
+    const input = tinyInput({ rotated: true });
+    const inst = buildInstance(input);
+    const seen: number[] = [];
+    const r = await diagnoseBound({ input, inst, budgetMs: 30_000, onBound: (lb) => seen.push(lb) });
+    assert.ok(r.items?.lunch, JSON.stringify(r));
+    const sum = (["lunch", "triple", "sameDay"] as const).reduce((a, k) => a + (r.items?.[k]?.min ?? 0) * inst.weights[k], 0);
+    assert.equal(r.itemSum, sum);
+    assert.ok(r.lowerBound !== null && r.lowerBound >= sum);
+    assert.equal(r.proven, true);
+    // 알린 하한은 늘 오르기만 한다
+    assert.deepEqual(seen, [...seen].sort((a, b) => a - b));
   });
 });

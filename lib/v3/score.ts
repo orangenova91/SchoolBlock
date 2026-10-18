@@ -46,9 +46,26 @@ export type V3Judgement = {
   threshold: number | null;
 };
 
+/**
+ * 점수는 0보다 작을 수 없으므로 0은 늘 맞는 하한이다 (계산 없이 아는 "이론상 최선의 출발점").
+ * 하한을 아직 모르면 0으로 판정하되, 0 기준으로 달성한 것만 확정한다:
+ * 진짜 하한 L ≥ 0 이면 기준도 그만큼 넉넉해지므로(근접 max(1.1L, L+6) ≥ 6) "0 기준 달성"은 늘 참이다.
+ * 0 기준으로 못 미친 경우는 진짜 하한을 알기 전까지 "모름"(null)으로 둔다.
+ */
 export function judge(m: V3Metrics, bound: V3Bound): V3Judgement {
   const complete = m.unplaced === 0;
-  if (bound.lower === null) return { complete, near: null, strict: null, optimal: false, gapToNear: null, threshold: null };
+  if (bound.lower === null) {
+    const near = complete && m.score <= nearThreshold(0) + 1e-9;
+    const strict = complete && m.score <= strictThreshold(0) + 1e-9;
+    return {
+      complete,
+      near: near ? true : null,
+      strict: strict ? true : null,
+      optimal: complete && m.score <= 1e-9,
+      gapToNear: near ? 0 : null,
+      threshold: null,
+    };
+  }
   // 점수는 정수라서 하한 23.4 는 "24점 이상"과 같다
   const lb = Math.max(0, Math.ceil(bound.lower - 1e-6));
   const threshold = nearThreshold(lb);

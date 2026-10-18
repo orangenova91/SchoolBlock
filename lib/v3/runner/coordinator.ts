@@ -101,6 +101,11 @@ export class Coordinator {
     const budgetMs = Math.max(1000, Math.min(job.segmentMs, job.maxMs - job.elapsedMs));
     const stopBuffer = new SharedArrayBuffer(4);
     const flag = new Int32Array(stopBuffer);
+    // 같은 입력의 하한 계산이 동시에 돌 수 있으므로, 새로 증명된 하한을 계산 중에도 넘겨 준다
+    const known = await knownLowerBound(db, job.termId, job.inputHash);
+    const lowerBoundBuffer = new SharedArrayBuffer(8);
+    const liveBound = new Float64Array(lowerBoundBuffer);
+    liveBound[0] = known ?? Number.NaN;
     const workerData: EngineThreadInput = {
       kind: job.kind,
       diagnose: job.diagnose,
@@ -108,9 +113,11 @@ export class Coordinator {
       checkpoint,
       budgetMs,
       // 같은 입력의 다른 작업(하한 계산 등)이 증명한 하한도 함께 써서 조기 종료·근접 판정에 쓴다
-      lowerBound: maxOrNull(job.lowerBound, await knownLowerBound(db, job.termId, job.inputHash)),
+      lowerBound: maxOrNull(job.lowerBound, known),
       seed: job.seed + job.segments * 7919,
       stopBuffer,
+      lowerBoundBuffer,
+      goal: job.goal ?? "strict",
     };
     this.opts.log(`#${job.number} ${job.kind}${job.diagnose ? `:${job.diagnose}` : ""} 구간 ${job.segments + 1} 시작 (${Math.round(budgetMs / 1000)}초)`);
     const worker = new Worker(this.opts.enginePath, { workerData, execArgv: ["--import", "tsx"] });
@@ -142,6 +149,10 @@ export class Coordinator {
         const r = await heartbeat(db, job._id, slotId, latest);
         if (!r) { leaseLost = true; Atomics.store(flag, 0, 1); }
         else if (r.stopRequested) Atomics.store(flag, 0, 1);
+        if (r && job.kind !== "diagnose") {
+          const lb = await knownLowerBound(db, job.termId, job.inputHash);
+          if (lb !== null && (Number.isNaN(liveBound[0]) || lb > liveBound[0])) liveBound[0] = lb;
+        }
       } catch { /* 다음 박동에서 다시 시도 */ }
     }, this.opts.heartbeatMs);
     try {

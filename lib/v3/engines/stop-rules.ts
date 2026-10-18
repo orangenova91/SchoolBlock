@@ -1,46 +1,55 @@
 /**
- * 조기 종료 (docs/v3-requirements.md 8.5).
+ * 조기 종료 (docs/v3-requirements.md 8.5, 2026-10-18 정책).
  *
- * - 최선(하한)에 닿거나 엄격 기준(5%·3점)에 들면 "결과 모으기" 단계로 들어간다. 바로 끝내지 않는다.
- * - 모으기 단계에서는 기준 안의 서로 다른 결과 3개가 모이면 끝낸다.
- * - 3개가 안 모여도, 상위 목록이 30초 동안 바뀌지 않고 (혼합·정수계획은) 부분 재계산을 20회 이상 했으면 끝낸다.
- * - 하한을 모르면 조기 종료하지 않는다 (구간 시간을 다 쓴다).
+ * 목표(goal)에 드는 서로 다른 결과 3개가 모이면 끝낸다. 1~2개로는 끝내지 않는다 (구간 시간을 다 쓴다).
+ * - strict(기본): 엄격 기준 max(하한 × 1.05, 하한 + 3) 이하인 결과 3개
+ * - optimal: 하한(이론상 최선)과 같은 점수의 결과 3개 — 엄격 기준 3개로 끝난 뒤 사용자가 추가 탐색을 승인했을 때
+ * 하한을 모르면: 생성 작업(assumeZero)은 0을 하한으로 쓴다 (점수는 0보다 작을 수 없으므로 늘 맞는 값).
+ *   0 기준 엄격 기준은 3점이라, 진짜 최선이 더 큰 학교는 그 점수에 닿을 수 없어 일찍 잘못 멈추지 않는다.
+ * 진단(exact)은 정확한 값이 필요하므로 일찍 끝내지 않는다.
  */
 import { strictThreshold } from "@/lib/v3/score";
 import type { Collector } from "@/lib/v3/engines/collector";
 
-export const EXTRA_QUIET_MS = 30_000;
-export const EXTRA_MIN_ITERATIONS = 20;
+export type StopGoal = "strict" | "optimal";
+
+export type StopRuleOptions = {
+  /** 하한을 모르면 0으로 본다 (생성 작업용) */
+  assumeZero?: boolean;
+  goal?: StopGoal;
+  /** 일찍 끝내지 않는다 (진단용) */
+  exact?: boolean;
+};
 
 export class StopRules {
-  private collectingSince: number | null = null;
-  private itersAtCollect = 0;
+  private reached = false;
 
-  constructor(private countIterations: boolean) {}
+  constructor(private readonly opts: StopRuleOptions = {}) {}
 
-  /** 지금 모으기 단계인가 */
+  /** 지금 목표 점수에 닿아 "결과 모으기" 중인가 (진행 표시용) */
   get collecting(): boolean {
-    return this.collectingSince !== null;
+    return this.reached;
   }
 
-  /** 기준 점수: 최적에 닿았으면 하한 그 자체, 아니면 엄격 기준 */
-  private target(lowerBound: number, best: number): number {
-    const lb = Math.ceil(lowerBound - 1e-6);
-    return best <= lb ? lb : strictThreshold(lb);
+  /** 목표 점수: optimal 이면 하한 그 자체, 아니면 엄격 기준 */
+  target(lowerBound: number): number {
+    const lb = Math.max(0, Math.ceil(lowerBound - 1e-6));
+    return this.opts.goal === "optimal" ? lb : strictThreshold(lb);
   }
 
-  shouldStop(nowMs: number, lowerBound: number | null, collector: Collector, iterations: number): boolean {
+  shouldStop(lowerBound: number | null, collector: Collector): boolean {
+    if (this.opts.exact) return false;
     const best = collector.bestScore();
-    if (lowerBound === null || best === null) return false;
-    const target = this.target(lowerBound, best);
-    if (best > target) return false;
-    if (this.collectingSince === null) {
-      this.collectingSince = nowMs;
-      this.itersAtCollect = iterations;
-    }
-    if (collector.top.fullAtOrBelow(target)) return true;
-    const quiet = nowMs - Math.max(collector.lastChangeMs, this.collectingSince) >= EXTRA_QUIET_MS;
-    const enoughIters = !this.countIterations || iterations - this.itersAtCollect >= EXTRA_MIN_ITERATIONS;
-    return quiet && enoughIters;
+    const lb = lowerBound ?? (this.opts.assumeZero ? 0 : null);
+    if (lb === null || best === null) return false;
+    const target = this.target(lb);
+    this.reached = best <= target + 1e-9;
+    return this.reached && collector.top.fullAtOrBelow(target);
   }
+}
+
+/** 둘 중 큰 하한 (모르면 null). 하한은 클수록 정확하다 */
+export function maxLowerBound(a: number | null | undefined, b: number | null | undefined): number | null {
+  const x = a ?? null, y = b ?? null;
+  return x === null ? y : y === null ? x : Math.max(x, y);
 }

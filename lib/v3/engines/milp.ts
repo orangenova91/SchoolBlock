@@ -11,9 +11,9 @@
 import { buildModel, decodeSolution, encodeSolution, type V3Model } from "@/lib/v3/model";
 import type { V3Solution } from "@/lib/v3/validate";
 import { Collector } from "@/lib/v3/engines/collector";
-import { createHighsModel, dualBound, getHighs, hasSolution, overMemory, type HighsModel } from "@/lib/v3/engines/highs";
+import { createHighsModel, dualBound, getHighs, hasSolution, HIGHS_STATUS, overMemory, type HighsModel } from "@/lib/v3/engines/highs";
 import { runSearch } from "@/lib/v3/engines/search";
-import { StopRules } from "@/lib/v3/engines/stop-rules";
+import { maxLowerBound, StopRules } from "@/lib/v3/engines/stop-rules";
 import type { EngineOutcome, EngineRun, StopReason } from "@/lib/v3/engines/types";
 
 /** 결정 변수(x·y·z·u)를 주어진 값에 묶고 나머지(점수 변수)만 풀어 완전한 해 벡터를 만든다 */
@@ -57,7 +57,7 @@ export async function runMilp(run: EngineRun): Promise<EngineOutcome> {
   const m = buildModel(inst);
   const highs = await getHighs();
   const model = createHighsModel(highs, m);
-  const stop = new StopRules(false);
+  const stop = new StopRules({ assumeZero: run.assumeZeroBound, goal: run.goal, exact: run.exact });
   let reason: StopReason = "budget";
   let lastProgress = 0;
   let incumbents = 0;
@@ -82,7 +82,7 @@ export async function runMilp(run: EngineRun): Promise<EngineOutcome> {
         if (typeof db === "number" && Number.isFinite(db)) lowerBound = Math.max(lowerBound ?? -Infinity, db);
         const t = Date.now();
         if (run.shouldStop?.()) { reason = "user"; e.interrupt(); }
-        else if (stop.shouldStop(now(), lowerBound, collector, incumbents)) { reason = "early"; e.interrupt(); }
+        else if (stop.shouldStop(maxLowerBound(lowerBound, run.liveLowerBound?.()), collector)) { reason = "early"; e.interrupt(); }
         else if (overMemory()) { reason = "memory"; e.interrupt(); }
         if (t - lastProgress > progressEvery) {
           lastProgress = t;
@@ -95,6 +95,8 @@ export async function runMilp(run: EngineRun): Promise<EngineOutcome> {
     if (db !== null) lowerBound = Math.max(lowerBound ?? -Infinity, db);
     if (hasSolution(model)) collector.offer(decodeSolution(inst, m, model.getSolution().colValue), now());
     if (model.getModelStatus() === 8 && collector.results.length === 0) reason = "infeasible";
+    // 최선을 증명하고 끝났으면 더 계산할 것이 없다 (이전에는 "시간 다 씀"으로 보고해 미리 승인 시 구간을 계속 다시 돌렸음)
+    else if (model.getModelStatus() === HIGHS_STATUS.optimal && reason === "budget" && collector.results.length > 0) reason = "optimal";
   } finally {
     model.dispose();
   }

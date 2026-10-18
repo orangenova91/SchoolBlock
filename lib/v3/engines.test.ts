@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import { runHybrid } from "@/lib/v3/engines/hybrid";
 import { runMilp } from "@/lib/v3/engines/milp";
 import { runSearch } from "@/lib/v3/engines/search";
+import { StopRules } from "@/lib/v3/engines/stop-rules";
+import type { Collector } from "@/lib/v3/engines/collector";
 import type { EngineCheckpoint, EngineRun } from "@/lib/v3/engines/types";
 import { tinyInput } from "@/lib/v3/fixtures";
 import { buildInstance } from "@/lib/v3/instance";
@@ -48,15 +50,49 @@ describe("v3 엔진", () => {
     assert.ok(second.checkpoint.elapsedMs >= first.checkpoint.elapsedMs + 700, "누적 시간 이어 감");
   });
 
+  it("정수계획이 최선을 증명하면 '최선 증명'으로 끝나고, 중단점에서 다시 돌려도 바로 끝난다", async () => {
+    const first = await runMilp(base({ budgetMs: 20_000 }));
+    assert.ok(first.stopReason === "optimal" || first.stopReason === "early", first.stopReason);
+    const saved: EngineCheckpoint = JSON.parse(JSON.stringify(first.checkpoint));
+    const again = await runMilp(base({ budgetMs: 20_000, checkpoint: saved, assumeZeroBound: true }));
+    assert.ok(again.stopReason === "optimal" || again.stopReason === "early", again.stopReason);
+    assert.ok(again.segmentMs < 10_000, `${again.segmentMs}ms`);
+  });
+
+  it("조기 종료 규칙: 목표 안의 결과 3개가 모여야 끝나고, 진단은 끝내지 않는다", () => {
+    const fake = (best: number | null, full: boolean) =>
+      ({ bestScore: () => best, top: { fullAtOrBelow: () => full }, lastChangeMs: 0 }) as unknown as Collector;
+    // 생성 작업: 하한을 모르면 0 기준(엄격 3점). 진단(하한 모름)은 끝내지 않음
+    assert.equal(new StopRules().shouldStop(null, fake(0, true)), false);
+    assert.equal(new StopRules({ assumeZero: true }).shouldStop(null, fake(0, true)), true);
+    assert.equal(new StopRules({ assumeZero: true }).shouldStop(null, fake(10, true)), false);
+    // 결과가 3개 모이지 않으면 오래 조용해도 끝내지 않음 (하나만 찾았다고 멈추지 않음)
+    assert.equal(new StopRules({ assumeZero: true }).shouldStop(24, fake(24, false)), false);
+    // 엄격 기준: 하한 24 → 27점 이하 3개면 끝
+    assert.equal(new StopRules({ assumeZero: true }).shouldStop(24, fake(27, true)), true);
+    // 최적해 목표: 하한과 같은 점수여야 함
+    const optimal = new StopRules({ assumeZero: true, goal: "optimal" });
+    assert.equal(optimal.target(24), 24);
+    assert.equal(optimal.shouldStop(24, fake(27, true)), false);
+    assert.equal(optimal.shouldStop(24, fake(24, true)), true);
+    // 진단(exact)은 어떤 경우에도 일찍 끝내지 않음
+    assert.equal(new StopRules({ exact: true }).shouldStop(24, fake(24, true)), false);
+  });
+
   it("사용자 중지 요청은 바로 처리한다", () => {
     const out = runSearch(base({ budgetMs: 60_000, shouldStop: () => true }));
     assert.equal(out.stopReason, "user");
     assert.ok(out.segmentMs < 5000);
   });
 
-  it("하한을 알면 최선에 닿은 뒤 서로 다른 결과를 모으고 일찍 끝난다", () => {
-    const out = runSearch(base({ budgetMs: 60_000, lowerBound: optimum }));
-    assert.equal(out.stopReason, "early");
-    assert.ok(out.segmentMs < 45_000, `${out.segmentMs}ms`);
+  it("하한을 알아도 목표 안의 서로 다른 결과가 3개 모일 때만 일찍 끝나고, 아니면 구간 끝까지 계산한다", () => {
+    const out = runSearch(base({ budgetMs: 4000, lowerBound: optimum, assumeZeroBound: true }));
+    const inTarget = out.results.filter((r) => r.metrics.score <= optimum + 3).length;
+    if (inTarget === 3) assert.equal(out.stopReason, "early");
+    else {
+      // 작은 학교는 서로 30칸 이상 다른 좋은 시간표가 3개 없을 수 있다 → 결과 1~2개로는 멈추지 않음
+      assert.equal(out.stopReason, "budget");
+      assert.ok(out.segmentMs >= 3500, `${out.segmentMs}ms`);
+    }
   });
 });

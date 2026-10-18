@@ -128,12 +128,15 @@ export class Coordinator {
       worker.on("message", (m: EngineThreadMessage) => {
         if (m.type === "progress") {
           const p = m.progress;
+          // 하한은 한번 증명되면 내려가지 않는다: 하한 없이 문구만 오는 진행(예: "3연강 최소 건수 계산 중")이 앞서 알린 하한을 지우지 않게 한다
+          const prevLb: number | null = (latest as V3JobProgress | null)?.lowerBound ?? null;
+          const lowerBound = p.lowerBound == null ? prevLb : prevLb === null ? p.lowerBound : Math.max(prevLb, p.lowerBound);
           latest = {
             phase: p.phase ?? "improve",
             ...(p.message ? { message: p.message } : {}),
             bestScore: p.bestScore ?? null,
             bestUnplaced: p.bestUnplaced ?? null,
-            lowerBound: p.lowerBound ?? null,
+            lowerBound,
             results: p.results ?? 0,
             iterations: p.iterations ?? 0,
             segmentMs: p.segmentMs ?? 0,

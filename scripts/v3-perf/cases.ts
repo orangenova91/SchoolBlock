@@ -44,7 +44,8 @@ export function loadV3Case(spec: string): V3Input {
     f = d.input; preferences = d.preferences;
   }
   const catalog = catalogGradeSets(f.subjects, f.classCounts).filter((c) => c.kind !== "invalid" && c.units);
-  const keep = new Set(fix === "half" ? catalog.filter((_, i) => i % 2 === 1).map((c) => `${c.grade}|${c.set}`) : []);
+  // fix: none = SET 위치 모두 자동 / half = 짝수 번째만 원래 위치에 고정 / all = 앱 자동 배치 위치를 모두 고정 (v1·v2와 같은 조건)
+  const keep = new Set(fix === "half" ? catalog.filter((_, i) => i % 2 === 1).map((c) => `${c.grade}|${c.set}`) : fix === "all" ? catalog.map((c) => `${c.grade}|${c.set}`) : []);
   const mine = (c: { grade: number; set: string }) => keep.has(`${c.grade}|${c.set}`);
   return {
     teachers: f.teachers, subjects: f.subjects, classCounts: f.classCounts, schedules: f.schedules,

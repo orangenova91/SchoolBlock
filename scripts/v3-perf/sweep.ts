@@ -5,6 +5,7 @@
  *
  *   부모: sweep.ts <이름> <사례> <방법> <총ms> <구간ms> <하한|-> <seed>   → JSON 한 줄
  *   방법 hybmilp: 첫 구간은 혼합, 이후 구간은 정수계획이 혼합의 중단점(최고 결과)에서 이어 계산 (B안 검토용)
+ *   방법 이름 뒤 @ms (예: hybrid@20000): 시작 해 탐색 시간(warmMs) 바꾸기
  *   자식: sweep.ts --one <사례> <방법> <구간ms> <하한|-> <seed> <중단점 파일> <시작ms>
  *   하한만: sweep.ts <이름> <사례> bound <ms>
  */
@@ -44,14 +45,15 @@ async function one(spec: string, method: string, segMs: number, lbText: string, 
   const timeline: [number, number][] = [];
   let best = Infinity;
   const t0 = Date.now();
+  const [engineName, warmText] = method.split("@");
   const run: EngineRun = {
-    input, inst, budgetMs: segMs, seed, checkpoint,
+    input, inst, budgetMs: segMs, seed, checkpoint, ...(warmText ? { warmMs: Number(warmText) } : {}),
     lowerBound: lbText === "-" ? null : Number(lbText),
     exact: true,
     progressEveryMs: 1000,
     onProgress: (p) => { if (p.bestScore !== null && p.bestScore < best) { best = p.bestScore; timeline.push([startMs + Date.now() - t0, best]); } },
   };
-  const out: EngineOutcome = method === "search" ? runSearch(run) : method === "milp" ? await runMilp(run) : await runHybrid(run);
+  const out: EngineOutcome = engineName === "search" ? runSearch(run) : engineName === "milp" ? await runMilp(run) : await runHybrid(run);
   const final = out.results[0]?.metrics.score;
   if (final !== undefined && final < best) timeline.push([startMs + Date.now() - t0, final]);
   writeFileSync(ckFile, JSON.stringify(out.checkpoint));

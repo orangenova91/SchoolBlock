@@ -11,6 +11,7 @@
  *      (무작위 구역만으로는 남은 수업이 들어갈 자리를 포함하지 못해 오래 못 고칠 수 있음: M2 측정)
  */
 import { buildModel, decodeSolution, encodeSolution, type V3Model } from "@/lib/v3/model";
+import type { V3Instance } from "@/lib/v3/instance";
 import type { Weekday } from "@/lib/types";
 import { Collector } from "@/lib/v3/engines/collector";
 import { createHighsModel, getHighs, hasSolution, overMemory, type HighsModel } from "@/lib/v3/engines/highs";
@@ -21,6 +22,18 @@ import { maxLowerBound, StopRules } from "@/lib/v3/engines/stop-rules";
 import type { EngineOutcome, EngineRun, StopReason } from "@/lib/v3/engines/types";
 
 const SUB_SECONDS = 15;
+
+/**
+ * 시작 해를 만드는 탐색 시간 (2026-10-19 측정, docs/v3-timing-guide.md 4절).
+ * 30반 이하는 20초면 충분하고, 정밀 계산(부분 재계산)을 일찍 시작할수록 빨리 좋아진다
+ * (12~24반·체험용 20반 13곳: 목표 도달 중앙 52초 → 18초, 5분 뒤 점수도 같거나 좋음).
+ * 큰 학교는 시작 해가 덜 다듬어지면 부분 재계산이 고치기 버거워 기존 시간(구간의 25%)을 둔다.
+ */
+export function hybridWarmMs(inst: Pick<V3Instance, "classCounts">, budgetMs: number): number {
+  const classes = inst.classCounts[1] + inst.classCounts[2] + inst.classCounts[3];
+  const standard = Math.max(10_000, budgetMs * 0.25);
+  return classes <= 30 ? Math.min(20_000, standard) : standard;
+}
 const STALE_ITERATIONS = 20;
 
 /** 결정 변수만 neighborhood 밖에서 x 에 묶는다 */
@@ -94,7 +107,7 @@ export async function runHybrid(run: EngineRun): Promise<EngineOutcome> {
   // 1) 시작 해
   let startSol = run.checkpoint?.best ?? null;
   if (!startSol) {
-    const warm = runSearch({ ...run, budgetMs: Math.max(10_000, run.budgetMs * 0.25), checkpoint: null, onProgress: run.onProgress });
+    const warm = runSearch({ ...run, budgetMs: run.warmMs ?? hybridWarmMs(inst, run.budgetMs), checkpoint: null, onProgress: run.onProgress });
     for (const r of warm.results) collector.offer(r.solution, now());
     startSol = warm.results[0]?.solution ?? warm.checkpoint.best;
     // 완성본이 없어도 "가장 적게 남는 배치"를 기록해 둔다 (화면의 미배치 안내에 쓰임)

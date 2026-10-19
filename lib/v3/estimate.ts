@@ -71,10 +71,10 @@ export function estimateMethods(size: V3SizeSummary): V3Estimate {
   if (tier === "small") {
     return {
       tier,
-      recommended: "milp",
-      methods: { milp: "약 20초~1분 (거의 늘 최선까지)", hybrid: "약 20초~1분 30초 (거의 늘 최선까지)", search: "약 1분 30초~2분 30초" },
+      recommended: "hybrid",
+      methods: { hybrid: "약 10~40초 (거의 늘 최선까지)", milp: "약 20초~1분 (최선 증명까지 가는 경우가 많음)", search: "약 1분 30초~2분 30초" },
       slower,
-      tip: "작은 학교는 정수계획과 혼합 모두 최선까지 찾습니다. 정수계획이 조금 더 빠릅니다.",
+      tip: "작은 학교는 혼합과 정수계획 모두 최선까지 찾습니다. 혼합이 조금 더 빠르고, 정수계획은 최선임을 증명해 줍니다.",
     };
   }
   if (tier === "medium") {
@@ -82,7 +82,7 @@ export function estimateMethods(size: V3SizeSummary): V3Estimate {
       tier,
       recommended: "hybrid",
       methods: {
-        hybrid: "약 30초~2분 (가끔 5분 이상)",
+        hybrid: "약 15초~1분 (가끔 3분 이상)",
         milp: "20초~5분 이상, 10분에도 못 닿는 학교가 있음 (약 5곳 중 1곳)",
         search: "약 2~3분, 못 닿는 학교가 있음",
       },

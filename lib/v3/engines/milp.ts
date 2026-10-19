@@ -48,7 +48,7 @@ export async function runMilp(run: EngineRun): Promise<EngineOutcome> {
   let start: V3Solution | null = run.checkpoint?.best ?? collector.results[0]?.solution ?? null;
   let iterations = 0;
   if (!start) {
-    const warm = runSearch({ ...run, budgetMs: Math.min(20_000, Math.max(3_000, run.budgetMs * 0.15)), checkpoint: null, onProgress: undefined });
+    const warm = runSearch({ ...run, budgetMs: run.warmMs ?? Math.min(20_000, Math.max(3_000, run.budgetMs * 0.15)), checkpoint: null, onProgress: undefined });
     for (const r of warm.results) collector.offer(r.solution, now());
     start = warm.results[0]?.solution ?? warm.checkpoint.best;
     iterations += warm.iterations;

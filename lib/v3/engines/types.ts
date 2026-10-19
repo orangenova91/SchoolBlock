@@ -71,6 +71,8 @@ export type EngineRun = {
   goal?: StopGoal;
   /** 일찍 끝내지 않는다 (진단: 정해진 시간 안에서 끝까지 정확하게) */
   exact?: boolean;
+  /** 시작 해를 만드는 탐색 시간 (혼합·정수계획). 없으면 기본값 (혼합: 구간의 25%·10초 이상, 정수계획: 3~20초) */
+  warmMs?: number;
   /** 계산 중에 다른 작업(하한 계산)이 증명한 하한을 읽는다. 없으면 null */
   liveLowerBound?: () => number | null;
 };

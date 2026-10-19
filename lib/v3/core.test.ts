@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { estimateMethods } from "@/lib/v3/estimate";
+import { hybridWarmMs } from "@/lib/v3/engines/hybrid";
 import { describe, it } from "node:test";
 import loadHighs from "highs";
 import type { TimetableCell } from "@/lib/types";
@@ -224,7 +225,7 @@ describe("계산 시간 안내 (lib/v3/estimate.ts)", () => {
   const size = (classes: number, o: Partial<{ forbidden: number; pins: number; fixedSet: number }> = {}) =>
     ({ classes, teachers: classes * 2, lessons: classes * 30, avgLoad: 15, forbidden: 0, pins: 0, fixedSet: 0, sets: 9, ...o });
   it("반 수로 규모를 나누고 규모에 맞는 방법을 추천", () => {
-    assert.deepEqual([estimateMethods(size(12)).tier, estimateMethods(size(12)).recommended], ["small", "milp"]);
+    assert.deepEqual([estimateMethods(size(12)).tier, estimateMethods(size(12)).recommended], ["small", "hybrid"]);
     assert.deepEqual([estimateMethods(size(13)).tier, estimateMethods(size(13)).recommended], ["medium", "hybrid"]);
     assert.deepEqual([estimateMethods(size(31)).tier, estimateMethods(size(31)).recommended], ["large", "hybrid"]);
   });
@@ -232,6 +233,16 @@ describe("계산 시간 안내 (lib/v3/estimate.ts)", () => {
     assert.equal(estimateMethods(size(20)).slower.length, 0);
     const e = estimateMethods(size(20, { forbidden: 100, pins: 40, fixedSet: 3 }));
     assert.equal(e.slower.length, 3, JSON.stringify(e.slower));
+  });
+});
+
+describe("혼합의 시작 해 탐색 시간", () => {
+  const inst = (n: number) => ({ classCounts: { 1: n, 2: n, 3: n } as const });
+  it("30반 이하는 20초, 큰 학교는 구간의 25%", () => {
+    assert.equal(hybridWarmMs(inst(10), 300_000), 20_000);
+    assert.equal(hybridWarmMs(inst(11), 300_000), 75_000);
+    // 짧은 구간에서는 기존 규칙(25%, 10초 이상)보다 길어지지 않는다
+    assert.equal(hybridWarmMs(inst(4), 20_000), 10_000);
   });
 });
 

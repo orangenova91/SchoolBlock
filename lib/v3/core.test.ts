@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { estimateMethods } from "@/lib/v3/estimate";
 import { describe, it } from "node:test";
 import loadHighs from "highs";
 import type { TimetableCell } from "@/lib/types";
@@ -218,3 +219,19 @@ describe("모델과 검증기", () => {
     assert.equal((await solve(buildModel(inst))).status, 8);
   });
 });
+
+describe("계산 시간 안내 (lib/v3/estimate.ts)", () => {
+  const size = (classes: number, o: Partial<{ forbidden: number; pins: number; fixedSet: number }> = {}) =>
+    ({ classes, teachers: classes * 2, lessons: classes * 30, avgLoad: 15, forbidden: 0, pins: 0, fixedSet: 0, sets: 9, ...o });
+  it("반 수로 규모를 나누고 규모에 맞는 방법을 추천", () => {
+    assert.deepEqual([estimateMethods(size(12)).tier, estimateMethods(size(12)).recommended], ["small", "milp"]);
+    assert.deepEqual([estimateMethods(size(13)).tier, estimateMethods(size(13)).recommended], ["medium", "hybrid"]);
+    assert.deepEqual([estimateMethods(size(31)).tier, estimateMethods(size(31)).recommended], ["large", "hybrid"]);
+  });
+  it("더 걸릴 수 있는 조건을 알려 준다", () => {
+    assert.equal(estimateMethods(size(20)).slower.length, 0);
+    const e = estimateMethods(size(20, { forbidden: 100, pins: 40, fixedSet: 3 }));
+    assert.equal(e.slower.length, 3, JSON.stringify(e.slower));
+  });
+});
+

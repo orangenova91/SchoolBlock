@@ -4,6 +4,7 @@ import { loadV3Input, v3InputHash } from "@/lib/v3/input";
 import { buildInstance } from "@/lib/v3/instance";
 import { JOBS, type V3JobDocument } from "@/lib/v3/jobs";
 import { quickCheck } from "@/lib/v3/quick-check";
+import { estimateMethods, summarizeSize } from "@/lib/v3/estimate";
 
 type RouteContext = { params: Promise<{ termId: string }> };
 
@@ -28,9 +29,12 @@ export async function GET(request: Request, context: RouteContext) {
       .toArray();
     const latest = new Map<string, V3JobDocument>();
     for (const d of diagnoses) if (d.diagnose && !latest.has(d.diagnose)) latest.set(d.diagnose, d);
+    const size = summarizeSize(input, inst);
     return NextResponse.json({
       inputHash,
       quick,
+      size,
+      estimate: estimateMethods(size),
       sets: inst.sets.map((s) => ({ grade: s.grade, set: s.set, kind: s.kind, units: s.units, fixed: s.fixed.length })),
       weights: inst.weights,
       diagnoses: Object.fromEntries(await Promise.all([...latest].map(async ([k, d]) => [k, await jobView(ctx.db, d, inputHash)]))),

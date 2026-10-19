@@ -20,6 +20,7 @@ import type { V3Weights } from "@/lib/v3/input";
 import type { QuickCheckResult } from "@/lib/v3/quick-check";
 import type { V3Judgement, V3Metrics } from "@/lib/v3/score";
 import type { V3ScoreDetails } from "@/lib/v3/validate";
+import { TIER_LABEL, type V3Estimate, type V3SizeSummary } from "@/lib/v3/estimate";
 
 type EngineKind = "hybrid" | "search" | "milp";
 
@@ -95,6 +96,8 @@ const POLL_MS = 2500;
 type Checks = {
   inputHash: string;
   quick: QuickCheckResult;
+  size?: V3SizeSummary;
+  estimate?: V3Estimate;
   weights: V3Weights;
   diagnoses: Partial<Record<V3DiagnoseKind, V3JobView>>;
 };
@@ -452,8 +455,24 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
           한 번 누르면 5분씩 계산하고 진행 상황을 보여 줍니다. 언제든 멈출 수 있고, 멈추면 그때까지 찾은 가장 좋은 결과를 보여
           줍니다. 결과는 서로 30칸 이상 다른 좋은 시간표 3개를 모읍니다.
         </p>
+        {checks?.size && checks.estimate ? (
+          <div className="mt-3 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
+            <p>
+              이 시간표: <b>{TIER_LABEL[checks.estimate.tier]}</b> · {checks.size.classes}반 · 교사 {checks.size.teachers}명(1인 평균 {checks.size.avgLoad}시간) · 주당 수업{" "}
+              {checks.size.lessons}칸 · 배정 불가 {checks.size.forbidden}칸 · 선 수업 {checks.size.pins}칸
+            </p>
+            <p className="mt-1 text-zinc-500">
+              예상 시간은 목표(근접 기준)에 닿기까지의 대략적인 범위입니다 (여러 학교 조건을 측정한 값, 학교마다 차이가 큼).
+              {checks.estimate.slower.length ? ` 더 걸릴 수 있는 조건: ${checks.estimate.slower.join(", ")}.` : ""}
+            </p>
+            {checks.estimate.tip ? <p className="mt-1 text-zinc-700">{checks.estimate.tip}</p> : null}
+          </div>
+        ) : null}
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {ENGINES.map((e) => (
+          {ENGINES.map((base) => {
+            const e = { ...base, recommended: checks?.estimate ? checks.estimate.recommended === base.kind : base.recommended };
+            const time = checks?.estimate?.methods[base.kind];
+            return (
             <button
               key={e.kind}
               type="button"
@@ -470,8 +489,10 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
                 ) : null}
               </span>
               <span className={`text-xs ${e.recommended ? "text-zinc-300" : "text-zinc-600"}`}>{e.hint}</span>
+              {time ? <span className={`text-xs font-medium ${e.recommended ? "text-emerald-300" : "text-zinc-800"}`}>예상: {time}</span> : null}
             </button>
-          ))}
+            );
+          })}
         </div>
         <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-zinc-700">
           <input type="checkbox" className="mt-0.5" checked={autoContinue} onChange={(e) => setAutoContinue(e.target.checked)} />

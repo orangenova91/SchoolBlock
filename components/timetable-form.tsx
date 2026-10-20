@@ -878,8 +878,8 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           [
             { key: "class", label: "학반별" },
             { key: "teacher", label: "교사별" },
-            { key: "grade", label: "학년 전체" },
-            { key: "allTeachers", label: "전체 교사(미세 조정)" },
+            { key: "grade", label: "전체 학년 시간표" },
+            { key: "allTeachers", label: "전체 교사 시간표(미세 조정)" },
           ] as const
         ).map((tab) => (
           <button

@@ -5,6 +5,7 @@ import {
   WEEKDAYS,
   type Grade,
   type GradeDaySchedules,
+  type SubjectBlockCell,
   type TeacherForbiddenSlot,
   type TimetableCell,
   type Weekday,
@@ -174,6 +175,60 @@ export function swapSameClassCommonCells(
   }
 
   return { cells: next };
+}
+
+type LessonIdentity = Pick<
+  TimetableCell,
+  "grade" | "classNo" | "day" | "period" | "subjectName" | "teacherName"
+>;
+
+function fixedLessonKey(cell: LessonIdentity): string {
+  return `${cell.grade}|${cell.classNo}|${cell.day}|${cell.period}|${cell.subjectName}|${cell.teacherName}`;
+}
+
+/** Keys of 선 수업(교과 블록) lessons, matched by exact class + slot + subject + teacher. */
+export function fixedLessonKeys(blocks: SubjectBlockCell[]): Set<string> {
+  return new Set(blocks.map(fixedLessonKey));
+}
+
+/**
+ * True when this common lesson still sits exactly where step 5 (선 수업 배치)
+ * fixed it. A fixed lesson that was swapped elsewhere no longer counts.
+ */
+export function isFixedLesson(cell: TimetableCell, keys: Set<string>): boolean {
+  return cell.kind === "common" && keys.has(fixedLessonKey(cell));
+}
+
+const FIXED_NOTICE_LIMIT = 3;
+
+/**
+ * Notice for 선 수업 lessons that a swap moved off their fixed slot, or null
+ * when none moved.
+ */
+export function describeMovedFixedLessons(
+  before: TimetableCell[],
+  after: TimetableCell[],
+  blocks: SubjectBlockCell[],
+): string | null {
+  const keys = fixedLessonKeys(blocks);
+  const afterKeys = new Set(after.map(fixedLessonKey));
+  const moved = before.filter(
+    (cell) => isFixedLesson(cell, keys) && !afterKeys.has(fixedLessonKey(cell)),
+  );
+  if (moved.length === 0) return null;
+
+  const shown = moved
+    .slice(0, FIXED_NOTICE_LIMIT)
+    .map(
+      (cell) =>
+        `${cell.grade}-${cell.classNo} ${cell.subjectName}(${dayLabel(cell.day)}${cell.period})`,
+    )
+    .join(", ");
+  const rest =
+    moved.length > FIXED_NOTICE_LIMIT
+      ? ` 외 ${moved.length - FIXED_NOTICE_LIMIT}건`
+      : "";
+  return `선 수업으로 고정된 ${shown}${rest}도 함께 옮겨졌습니다. 시간표를 다시 생성하면 원래 자리로 돌아갑니다.`;
 }
 
 /** One weekday + period column of the whole timetable. */

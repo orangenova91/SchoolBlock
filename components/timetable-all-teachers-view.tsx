@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { shortSubjectName, subjectSetBadgeClass } from "@/lib/subjects";
 import {
+  fixedLessonKeys,
+  isFixedLesson,
   isSameClassSwapTarget,
   swapSameClassCommonCells,
   swapWholeSlots,
@@ -18,6 +20,7 @@ import {
   WEEKDAYS,
   dayLabel,
   type GradeDaySchedules,
+  type SubjectBlockCell,
   type Teacher,
   type TimetableCell,
   type Weekday,
@@ -27,6 +30,8 @@ type TimetableAllTeachersViewProps = {
   cells: TimetableCell[];
   schedules: GradeDaySchedules;
   teachers: Teacher[];
+  /** 선 수업(교과 블록) placements, used to mark lessons still at their fixed slot. */
+  subjectBlocks?: SubjectBlockCell[];
   swapEnabled?: boolean;
   swapping?: boolean;
   onSwap?: (from: TimetableCellRef, to: TimetableCellRef) => void;
@@ -80,6 +85,16 @@ function slotKey(day: Weekday, period: number): string {
   return `${day}-${period}`;
 }
 
+/** Marks a 선 수업(고정) lesson, or a period column that contains one. */
+function FixedDot() {
+  return (
+    <span
+      aria-label="선 수업"
+      className="ml-0.5 inline-block h-1.5 w-1.5 rounded-full bg-sky-500 align-middle"
+    />
+  );
+}
+
 function dayStartBorder(isDayStart: boolean): string {
   return isDayStart ? "border-l-2 border-l-zinc-500" : "";
 }
@@ -101,6 +116,7 @@ export function TimetableAllTeachersView({
   cells,
   schedules,
   teachers,
+  subjectBlocks = [],
   swapEnabled = false,
   swapping = false,
   onSwap,
@@ -127,6 +143,19 @@ export function TimetableAllTeachersView({
     () => Array.from({ length: periodCols }, (_, i) => i + 1),
     [periodCols],
   );
+
+  const fixedKeys = useMemo(() => fixedLessonKeys(subjectBlocks), [subjectBlocks]);
+
+  /** Number of fixed 선 수업 lessons per weekday+period column. */
+  const fixedCountBySlot = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const cell of cells) {
+      if (!isFixedLesson(cell, fixedKeys)) continue;
+      const key = slotKey(cell.day, cell.period);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+    return counts;
+  }, [cells, fixedKeys]);
 
   const cellsByTeacher = useMemo(() => {
     const map = new Map<string, TimetableCell[]>();
@@ -295,12 +324,20 @@ export function TimetableAllTeachersView({
         {swapEnabled && cells.length > 0 && teacherNames.length > 0 ? (
           <p className="min-w-0 flex-1 text-center text-xs text-zinc-500">
             {pickedSlot
-              ? `${dayLabel(pickedSlot.day)}${pickedSlot.period}교시 전체를 집었습니다. 초록 교시 번호를 누르면 두 교시의 모든 수업(SET·선 수업 포함)을 통째로 바꾸고, 주황 교시는 바꿀 수 없습니다. Esc 또는 같은 교시를 다시 누르면 취소합니다.`
+              ? `${dayLabel(pickedSlot.day)}${pickedSlot.period}교시 전체를 집었습니다.${
+                  fixedCountBySlot.get(slotKey(pickedSlot.day, pickedSlot.period))
+                    ? ` 이 교시에는 선 수업(고정) ${fixedCountBySlot.get(slotKey(pickedSlot.day, pickedSlot.period))}건이 있어 함께 옮겨집니다.`
+                    : ""
+                } 초록 교시 번호를 누르면 두 교시의 모든 수업(SET·선 수업 포함)을 통째로 바꾸고, 주황 교시는 바꿀 수 없습니다. Esc 또는 같은 교시를 다시 누르면 취소합니다.`
               : picked
                 ? `${picked.grade}-${picked.classNo} ${picked.subjectName}을 집었습니다. 초록 칸은 맞바꿀 수 있고, 주황 칸은 그 시간에 다른 수업이 있어 조정할 수 없습니다. Esc 또는 같은 칸을 다시 누르면 취소합니다.`
                 : `공통 수업을 클릭해 집고, 같은 학반의 다른 칸을 클릭하면 시간을 맞바꿉니다. SET 수업은 이동할 수 없습니다.${
                     slotSwapEnabled
                       ? " 위쪽 교시 번호를 클릭하면 그 교시 전체를 다른 교시와 바꿀 수 있습니다."
+                      : ""
+                  }${
+                    fixedCountBySlot.size > 0
+                      ? " 파란 점은 선 수업(고정) 수업입니다."
                       : ""
                   }`}
           </p>
@@ -385,6 +422,9 @@ export function TimetableAllTeachersView({
                         pickedSlot?.day === key && pickedSlot.period === period;
                       const isTarget = slotHints.valid.has(sKey);
                       const blockedReason = slotHints.blocked.get(sKey);
+                      const fixedCount = fixedCountBySlot.get(sKey) ?? 0;
+                      const fixedNote =
+                        fixedCount > 0 ? `선 수업(고정) ${fixedCount}건 포함` : "";
                       return (
                         <th
                           key={sKey}
@@ -394,8 +434,10 @@ export function TimetableAllTeachersView({
                             blockedReason
                               ? `교환 불가 · ${blockedReason}`
                               : clickable
-                                ? `${dayLabel(key)}${period}교시 전체 교환`
-                                : undefined
+                                ? [`${dayLabel(key)}${period}교시 전체 교환`, fixedNote]
+                                    .filter(Boolean)
+                                    .join(" · ")
+                                : fixedNote || undefined
                           }
                           onClick={
                             clickable ? () => handlePickSlot(key, period) : undefined
@@ -427,6 +469,7 @@ export function TimetableAllTeachersView({
                           } ${dayStartBorder(period === periods[0])}`}
                         >
                           {period}
+                          {fixedCount > 0 ? <FixedDot /> : null}
                         </th>
                       );
                     }),
@@ -492,6 +535,7 @@ export function TimetableAllTeachersView({
                                 const isTarget = swapHints.valid.has(key);
                                 const isBlocked = swapHints.blocked.has(key);
                                 const blockedReason = swapHints.blocked.get(key);
+                                const fixed = isFixedLesson(c, fixedKeys);
                                 return (
                                   <div
                                     key={i}
@@ -508,7 +552,9 @@ export function TimetableAllTeachersView({
                                     title={
                                       blockedReason
                                         ? `조정 불가 · ${blockedReason}`
-                                        : `${c.grade}학년 ${c.classNo}반 ${c.subjectName} · ${name}`
+                                        : `${c.grade}학년 ${c.classNo}반 ${c.subjectName} · ${name}${
+                                            fixed ? " · 선 수업(고정)" : ""
+                                          }`
                                     }
                                     onClick={() => handlePick(c)}
                                     onKeyDown={(event) => {
@@ -536,6 +582,7 @@ export function TimetableAllTeachersView({
                                   >
                                     <span className="block font-medium">
                                       {c.grade}-{c.classNo}
+                                      {fixed ? <FixedDot /> : null}
                                     </span>
                                     <span className="block truncate">
                                       {shortSubjectName(c.subjectName)}

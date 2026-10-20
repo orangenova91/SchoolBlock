@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { parseSlotRef, swapWholeSlots } from "@/lib/timetable-swap";
+import {
+  describeMovedFixedLessons,
+  fixedLessonKeys,
+  isFixedLesson,
+  parseSlotRef,
+  swapWholeSlots,
+} from "@/lib/timetable-swap";
 import {
   createDefaultGradeDaySchedules,
   type GradeDaySchedules,
@@ -133,6 +139,94 @@ describe("swapWholeSlots", () => {
       "error" in
         swapWholeSlots(cells, { day: "tue", period: 1 }, { day: "wed", period: 2 }, options),
     );
+  });
+});
+
+describe("describeMovedFixedLessons", () => {
+  const block = (
+    classNo: number,
+    day: TimetableCell["day"],
+    period: number,
+    subjectName: string,
+  ) => ({ grade: 1 as const, classNo, day, period, subjectName, teacherName: "김교사" });
+
+  it("names fixed lessons moved by a slot swap", () => {
+    const cells = [
+      common(1, 3, "mon", 1, "국어", "김교사"),
+      common(1, 4, "mon", 1, "수학", "이교사"),
+      common(1, 3, "tue", 2, "영어", "박교사"),
+    ];
+    const result = swapWholeSlots(
+      cells,
+      { day: "mon", period: 1 },
+      { day: "tue", period: 2 },
+      options,
+    );
+    assert.ok(!("error" in result));
+    const notice = describeMovedFixedLessons(cells, result.cells, [
+      block(3, "mon", 1, "국어"),
+    ]);
+    assert.equal(
+      notice,
+      "선 수업으로 고정된 1-3 국어(월1)도 함께 옮겨졌습니다. 시간표를 다시 생성하면 원래 자리로 돌아갑니다.",
+    );
+  });
+
+  it("returns null when no fixed lesson moved", () => {
+    const cells = [
+      common(1, 3, "mon", 1, "국어", "김교사"),
+      common(1, 3, "tue", 2, "영어", "박교사"),
+      common(1, 3, "wed", 3, "과학", "최교사"),
+    ];
+    const result = swapWholeSlots(
+      cells,
+      { day: "mon", period: 1 },
+      { day: "tue", period: 2 },
+      options,
+    );
+    assert.ok(!("error" in result));
+    assert.equal(
+      describeMovedFixedLessons(cells, result.cells, [
+        { ...block(3, "wed", 3, "과학"), teacherName: "최교사" },
+      ]),
+      null,
+    );
+  });
+
+  it("summarizes more than three moved fixed lessons", () => {
+    const cells = [1, 2, 3, 4, 5].map((n) =>
+      common(1, n, "mon", 1, "국어", "김교사"),
+    );
+    const result = swapWholeSlots(
+      cells,
+      { day: "mon", period: 1 },
+      { day: "fri", period: 3 },
+      options,
+    );
+    assert.ok(!("error" in result));
+    const notice = describeMovedFixedLessons(
+      cells,
+      result.cells,
+      [1, 2, 3, 4, 5].map((n) => block(n, "mon", 1, "국어")),
+    );
+    assert.match(notice ?? "", /1-1 국어\(월1\), 1-2 국어\(월1\), 1-3 국어\(월1\) 외 2건도/);
+  });
+});
+
+describe("isFixedLesson", () => {
+  it("only marks common lessons still at their fixed slot", () => {
+    const keys = fixedLessonKeys([
+      {
+        grade: 1,
+        classNo: 1,
+        day: "mon",
+        period: 1,
+        subjectName: "국어",
+        teacherName: "김교사",
+      },
+    ]);
+    assert.equal(isFixedLesson(common(1, 1, "mon", 1, "국어", "김교사"), keys), true);
+    assert.equal(isFixedLesson(common(1, 1, "mon", 2, "국어", "김교사"), keys), false);
   });
 });
 

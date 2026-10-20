@@ -8,6 +8,7 @@ import { filterForbiddenSlots } from "@/lib/teacher-constraints";
 import { ensureTeachers, sanitizeTeachers } from "@/lib/teachers";
 import { findOwnedTerm } from "@/lib/term-access";
 import {
+  describeMovedFixedLessons,
   parseCellRef,
   parseSlotRef,
   swapSameClassCommonCells,
@@ -23,6 +24,7 @@ import {
   createDefaultTeachers,
   type DayScheduleDocument,
   type GenerationPreferencesDocument,
+  type SubjectBlocksDocument,
   type TeacherConstraintsDocument,
   type TeachersDocument,
   type TimetableDocument,
@@ -95,18 +97,25 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     const db = await getDb();
-    const [working, scheduleDoc, constraintsDoc, teachersDoc, preferencesDoc] =
-      await Promise.all([
-        db.collection<TimetableDocument>("timetables").findOne({ termId }),
-        db.collection<DayScheduleDocument>("daySchedules").findOne({ termId }),
-        db
-          .collection<TeacherConstraintsDocument>("teacherConstraints")
-          .findOne({ termId }),
-        db.collection<TeachersDocument>("teachers").findOne({ termId }),
-        db
-          .collection<GenerationPreferencesDocument>("generationPreferences")
-          .findOne({ termId }),
-      ]);
+    const [
+      working,
+      scheduleDoc,
+      constraintsDoc,
+      teachersDoc,
+      preferencesDoc,
+      subjectBlocksDoc,
+    ] = await Promise.all([
+      db.collection<TimetableDocument>("timetables").findOne({ termId }),
+      db.collection<DayScheduleDocument>("daySchedules").findOne({ termId }),
+      db
+        .collection<TeacherConstraintsDocument>("teacherConstraints")
+        .findOne({ termId }),
+      db.collection<TeachersDocument>("teachers").findOne({ termId }),
+      db
+        .collection<GenerationPreferencesDocument>("generationPreferences")
+        .findOne({ termId }),
+      db.collection<SubjectBlocksDocument>("subjectBlocks").findOne({ termId }),
+    ]);
 
     if (!working || !Array.isArray(working.cells) || working.cells.length === 0) {
       return NextResponse.json(
@@ -167,7 +176,14 @@ export async function POST(request: Request, context: RouteContext) {
       },
     );
 
+    const notice = describeMovedFixedLessons(
+      working.cells,
+      swapped.cells,
+      subjectBlocksDoc?.cells ?? [],
+    );
+
     return NextResponse.json({
+      notice,
       cells: swapped.cells,
       lunchDoubleCount: lunchDoubles.length,
       lunchDoubles,

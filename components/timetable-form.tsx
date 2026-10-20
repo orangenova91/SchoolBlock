@@ -27,6 +27,7 @@ import {
   type SameDaySubjectViolation,
   type Semester,
   type SoftRunDetail,
+  type SubjectBlockCell,
   type Teacher,
   type TimetableCell,
   type TimetableUnplaced,
@@ -193,6 +194,9 @@ export function TimetableForm({ termId }: TimetableFormProps) {
   );
   const [versionMessage, setVersionMessage] = useState("");
   const [swapping, setSwapping] = useState(false);
+  /** Notice after a swap moved 선 수업 lessons off their fixed slots. */
+  const [swapNotice, setSwapNotice] = useState("");
+  const [subjectBlocks, setSubjectBlocks] = useState<SubjectBlockCell[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -214,6 +218,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           status?: "idle" | "ready" | "failed";
           cells?: TimetableCell[];
           seedCells?: TimetableCell[];
+          subjectBlocks?: SubjectBlockCell[];
           unplaced?: TimetableUnplaced[];
           message?: string | null;
           error?: string;
@@ -258,6 +263,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           setStatus(tt.status ?? "idle");
           setCells(asArray(tt.cells));
           setSeedCells(asArray(tt.seedCells));
+          setSubjectBlocks(asArray(tt.subjectBlocks));
           setUnplaced(asArray(tt.unplaced));
           setMessage(tt.message ?? "");
           applyDiagnostics(tt);
@@ -369,6 +375,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
   function clearWorkingResult() {
     setStatus("idle");
     setCells([]);
+    setSwapNotice("");
     setUnplaced([]);
     setMessage("");
     applyDiagnostics({});
@@ -493,6 +500,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
     setSwapping(true);
     setError("");
     setVersionMessage("");
+    setSwapNotice("");
     try {
       const response = await fetch(`/api/terms/${termId}/timetable/swap`, {
         method: "POST",
@@ -501,6 +509,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       });
       const data = (await response.json()) as PlacementDiagnostics & {
         cells?: TimetableCell[];
+        notice?: string | null;
         error?: string;
       };
       if (!response.ok) {
@@ -509,6 +518,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       }
       setCells(Array.isArray(data.cells) ? data.cells : cells);
       applyDiagnostics(data);
+      setSwapNotice(data.notice ?? "");
     } catch {
       setError("서버에 연결할 수 없습니다.");
     } finally {
@@ -539,6 +549,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       }
       setStatus(data.status ?? "failed");
       setCells(asArray(data.cells));
+      setSwapNotice("");
       setUnplaced(asArray(data.unplaced));
       setMessage(data.message ?? "");
       applyDiagnostics(data);
@@ -837,6 +848,15 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         </p>
       ) : null}
 
+      {swapNotice && !selectedVersionId ? (
+        <p
+          className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-center text-sm text-amber-900"
+          role="status"
+        >
+          {swapNotice}
+        </p>
+      ) : null}
+
       {unplaced.length > 0 && !selectedVersionId ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <p className="font-medium">미배치 공통 수업</p>
@@ -1013,6 +1033,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           cells={displayedCells}
           schedules={schedules}
           teachers={teachers}
+          subjectBlocks={subjectBlocks}
           swapEnabled={
             !selectedVersionId && previewKind === "full" && cells.length > 0
           }

@@ -140,6 +140,8 @@ export async function GET(request: Request, context: RouteContext) {
       status: doc?.status ?? "idle",
       cells: doc?.cells ?? [],
       seedCells,
+      // 선 수업(교과 블록): lets the 전체 교사 view mark fixed lessons.
+      subjectBlocks: subjectBlocksDoc?.cells ?? [],
       unplaced: doc?.unplaced ?? [],
       generatedAt: doc?.generatedAt ?? null,
       message: doc?.message ?? null,

@@ -16,7 +16,10 @@ import { getAccountId } from "@/lib/session";
 import { filterForbiddenSlots } from "@/lib/teacher-constraints";
 import { ensureTeachers, sanitizeTeachers } from "@/lib/teachers";
 import { findOwnedTerm } from "@/lib/term-access";
-import { solveSameDaySubjectPriority } from "@/lib/timetable";
+import {
+  clearedWorkingResult,
+  solveSameDaySubjectPriority,
+} from "@/lib/timetable";
 import {
   createDefaultClassCounts,
   createDefaultGradeDaySchedules,
@@ -156,16 +159,26 @@ export async function POST(request: Request, context: RouteContext) {
     });
 
     const now = new Date();
+    // 점심시간 우선 배치는 이전 동일 교과 잠금 위에서 만든 결과이고, 전체
+    // 배치 결과도 이전 잠금 기준이므로 둘 다 무효화한다. 남겨 두면 새 잠금과
+    // 칸이 겹치거나, 새로고침 후 오래된 전체 시간표를 확정할 수 있다.
     await db.collection<TimetableDocument>("timetables").updateOne(
       { termId },
       {
         $set: {
           termId,
+          ...clearedWorkingResult(),
           sameDaySubjectLockCells: result.lockCells,
           sameDaySubjectStatus: result.status,
           sameDaySubjectMessage: result.message,
           sameDaySubjectGeneratedAt: now,
           updatedAt: now,
+        },
+        $unset: {
+          lunchLockCells: "",
+          lunchStatus: "",
+          lunchMessage: "",
+          lunchGeneratedAt: "",
         },
       },
       { upsert: true },

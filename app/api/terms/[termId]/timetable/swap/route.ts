@@ -8,8 +8,11 @@ import { filterForbiddenSlots } from "@/lib/teacher-constraints";
 import { ensureTeachers, sanitizeTeachers } from "@/lib/teachers";
 import { findOwnedTerm } from "@/lib/term-access";
 import {
+  describeMovedFixedLessons,
   parseCellRef,
+  parseSlotRef,
   swapSameClassCommonCells,
+  swapWholeSlots,
 } from "@/lib/timetable-swap";
 import {
   listLunchTeacherDoubles,
@@ -21,6 +24,7 @@ import {
   createDefaultTeachers,
   type DayScheduleDocument,
   type GenerationPreferencesDocument,
+  type SubjectBlocksDocument,
   type TeacherConstraintsDocument,
   type TeachersDocument,
   type TimetableDocument,
@@ -63,12 +67,21 @@ export async function POST(request: Request, context: RouteContext) {
     );
   }
 
+  // mode "slot": swap every lesson of one weekday+period column with another.
+  // Otherwise: swap two common lessons of the same class.
   const raw = body as Record<string, unknown>;
-  const from = parseCellRef(raw.from);
-  const to = parseCellRef(raw.to);
-  if (!from || !to) {
+  const slotMode = raw.mode === "slot";
+  const fromCell = slotMode ? null : parseCellRef(raw.from);
+  const toCell = slotMode ? null : parseCellRef(raw.to);
+  const fromSlot = slotMode ? parseSlotRef(raw.from) : null;
+  const toSlot = slotMode ? parseSlotRef(raw.to) : null;
+  if (slotMode ? !fromSlot || !toSlot : !fromCell || !toCell) {
     return NextResponse.json(
-      { error: "바꿀 수업 정보가 올바르지 않습니다." },
+      {
+        error: slotMode
+          ? "바꿀 교시 정보가 올바르지 않습니다."
+          : "바꿀 수업 정보가 올바르지 않습니다.",
+      },
       { status: 400 },
     );
   }
@@ -84,18 +97,25 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     const db = await getDb();
-    const [working, scheduleDoc, constraintsDoc, teachersDoc, preferencesDoc] =
-      await Promise.all([
-        db.collection<TimetableDocument>("timetables").findOne({ termId }),
-        db.collection<DayScheduleDocument>("daySchedules").findOne({ termId }),
-        db
-          .collection<TeacherConstraintsDocument>("teacherConstraints")
-          .findOne({ termId }),
-        db.collection<TeachersDocument>("teachers").findOne({ termId }),
-        db
-          .collection<GenerationPreferencesDocument>("generationPreferences")
-          .findOne({ termId }),
-      ]);
+    const [
+      working,
+      scheduleDoc,
+      constraintsDoc,
+      teachersDoc,
+      preferencesDoc,
+      subjectBlocksDoc,
+    ] = await Promise.all([
+      db.collection<TimetableDocument>("timetables").findOne({ termId }),
+      db.collection<DayScheduleDocument>("daySchedules").findOne({ termId }),
+      db
+        .collection<TeacherConstraintsDocument>("teacherConstraints")
+        .findOne({ termId }),
+      db.collection<TeachersDocument>("teachers").findOne({ termId }),
+      db
+        .collection<GenerationPreferencesDocument>("generationPreferences")
+        .findOne({ termId }),
+      db.collection<SubjectBlocksDocument>("subjectBlocks").findOne({ termId }),
+    ]);
 
     if (!working || !Array.isArray(working.cells) || working.cells.length === 0) {
       return NextResponse.json(
@@ -117,10 +137,11 @@ export async function POST(request: Request, context: RouteContext) {
     );
     const preferences = normalizeGenerationPreferences(preferencesDoc);
 
-    const swapped = swapSameClassCommonCells(working.cells, from, to, {
-      forbiddenSlots,
-      schedules,
-    });
+    const swapOptions = { forbiddenSlots, schedules };
+    const swapped =
+      fromSlot && toSlot
+        ? swapWholeSlots(working.cells, fromSlot, toSlot, swapOptions)
+        : swapSameClassCommonCells(working.cells, fromCell!, toCell!, swapOptions);
     if ("error" in swapped) {
       return NextResponse.json({ error: swapped.error }, { status: 400 });
     }
@@ -155,7 +176,14 @@ export async function POST(request: Request, context: RouteContext) {
       },
     );
 
+    const notice = describeMovedFixedLessons(
+      working.cells,
+      swapped.cells,
+      subjectBlocksDoc?.cells ?? [],
+    );
+
     return NextResponse.json({
+      notice,
       cells: swapped.cells,
       lunchDoubleCount: lunchDoubles.length,
       lunchDoubles,

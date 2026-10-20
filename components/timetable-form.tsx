@@ -11,7 +11,10 @@ import {
   type TimetableVersionSummary,
 } from "@/components/timetable-version-panel";
 import { subjectSetBadgeClass } from "@/lib/subjects";
-import type { TimetableCellRef } from "@/lib/timetable-swap";
+import type {
+  TimetableCellRef,
+  TimetableSlotRef,
+} from "@/lib/timetable-swap";
 import { cellsForClass, maxPeriods } from "@/lib/timetable";
 import {
   GRADES,
@@ -24,6 +27,7 @@ import {
   type SameDaySubjectViolation,
   type Semester,
   type SoftRunDetail,
+  type SubjectBlockCell,
   type Teacher,
   type TimetableCell,
   type TimetableUnplaced,
@@ -42,6 +46,52 @@ function formatSoftRunDetail(detail: SoftRunDetail): string {
 function formatSameDaySubjectViolation(detail: SameDaySubjectViolation): string {
   const periods = detail.periods.map((p) => `${p}교시`).join("·");
   return `${dayLabel(detail.day)} ${detail.grade}학년 ${detail.classNo}반 · ${detail.subjectName}(${detail.teacherName}) · ${periods}`;
+}
+
+/** Diagnostics every full-placement response (GET/POST/swap) carries. */
+type PlacementDiagnostics = {
+  lunchDoubleCount?: number;
+  lunchDoubles?: SoftRunDetail[];
+  tripleRunCount?: number;
+  tripleRuns?: SoftRunDetail[];
+  sameDaySubjectViolationCount?: number;
+  sameDaySubjectViolations?: SameDaySubjectViolation[];
+};
+
+function asArray<T>(value: T[] | undefined): T[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function distinctTeacherCount(items: { teacherName: string }[]): number {
+  return new Set(items.map((item) => item.teacherName)).size;
+}
+
+const DIAGNOSTIC_PREVIEW_COUNT = 5;
+
+/** Diagnostic list that shows the first few entries and expands to all, so
+ * entries beyond the preview are never silently hidden in a scroll box. */
+function DiagnosticList({ items }: { items: string[] }) {
+  const [expanded, setExpanded] = useState(false);
+  const hidden = items.length - DIAGNOSTIC_PREVIEW_COUNT;
+  const shown = expanded ? items : items.slice(0, DIAGNOSTIC_PREVIEW_COUNT);
+  return (
+    <>
+      <ul className="mt-2 list-inside list-disc text-xs">
+        {shown.map((item, i) => (
+          <li key={i}>{item}</li>
+        ))}
+      </ul>
+      {hidden > 0 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded((prev) => !prev)}
+          className="mt-1.5 text-xs font-medium underline underline-offset-2"
+        >
+          {expanded ? "접기" : `나머지 ${hidden}건 더 보기`}
+        </button>
+      ) : null}
+    </>
+  );
 }
 
 type TermSummary = {
@@ -102,6 +152,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
     "idle",
   );
   const [lunchMessage, setLunchMessage] = useState("");
+  const [lunchGeneratedAt, setLunchGeneratedAt] = useState<string | null>(null);
   const [lunchLockCount, setLunchLockCount] = useState(0);
   const [avoidLunchDouble, setAvoidLunchDouble] = useState(true);
   const [avoidTriplePeriod, setAvoidTriplePeriod] = useState(true);
@@ -143,6 +194,9 @@ export function TimetableForm({ termId }: TimetableFormProps) {
   );
   const [versionMessage, setVersionMessage] = useState("");
   const [swapping, setSwapping] = useState(false);
+  /** Notice after a swap moved 선 수업 lessons off their fixed slots. */
+  const [swapNotice, setSwapNotice] = useState("");
+  const [subjectBlocks, setSubjectBlocks] = useState<SubjectBlockCell[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -159,23 +213,19 @@ export function TimetableForm({ termId }: TimetableFormProps) {
             fetch(`/api/terms/${termId}/teachers`),
             fetch(`/api/terms/${termId}/timetable/versions`),
           ]);
-        const tt = (await ttRes.json()) as {
+        const tt = (await ttRes.json()) as PlacementDiagnostics & {
           term?: TermSummary;
           status?: "idle" | "ready" | "failed";
           cells?: TimetableCell[];
           seedCells?: TimetableCell[];
+          subjectBlocks?: SubjectBlockCell[];
           unplaced?: TimetableUnplaced[];
           message?: string | null;
           error?: string;
-          lunchDoubleCount?: number;
-          lunchDoubles?: SoftRunDetail[];
-          tripleRunCount?: number;
-          tripleRuns?: SoftRunDetail[];
           lunchStatus?: "idle" | "ready" | "failed";
           lunchMessage?: string | null;
+          lunchGeneratedAt?: string | null;
           lunchLockCount?: number;
-          sameDaySubjectViolationCount?: number;
-          sameDaySubjectViolations?: SameDaySubjectViolation[];
           sameDaySubjectStatus?: "idle" | "ready" | "failed";
           sameDaySubjectMessage?: string | null;
           sameDaySubjectLockCount?: number;
@@ -211,26 +261,19 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         if (!cancelled) {
           setTerm(tt.term ?? null);
           setStatus(tt.status ?? "idle");
-          setCells(Array.isArray(tt.cells) ? tt.cells : []);
-          setSeedCells(Array.isArray(tt.seedCells) ? tt.seedCells : []);
-          setUnplaced(Array.isArray(tt.unplaced) ? tt.unplaced : []);
+          setCells(asArray(tt.cells));
+          setSeedCells(asArray(tt.seedCells));
+          setSubjectBlocks(asArray(tt.subjectBlocks));
+          setUnplaced(asArray(tt.unplaced));
           setMessage(tt.message ?? "");
-          setLunchDoubleCount(tt.lunchDoubleCount ?? 0);
-          setLunchDoubles(Array.isArray(tt.lunchDoubles) ? tt.lunchDoubles : []);
-          setTripleRunCount(tt.tripleRunCount ?? 0);
-          setTripleRuns(Array.isArray(tt.tripleRuns) ? tt.tripleRuns : []);
+          applyDiagnostics(tt);
           setPreviewKind(
             Array.isArray(tt.cells) && tt.cells.length > 0 ? "full" : null,
           );
           setLunchStatus(tt.lunchStatus ?? "idle");
           setLunchMessage(tt.lunchMessage ?? "");
+          setLunchGeneratedAt(tt.lunchGeneratedAt ?? null);
           setLunchLockCount(tt.lunchLockCount ?? 0);
-          setSameDaySubjectViolationCount(tt.sameDaySubjectViolationCount ?? 0);
-          setSameDaySubjectViolations(
-            Array.isArray(tt.sameDaySubjectViolations)
-              ? tt.sameDaySubjectViolations
-              : [],
-          );
           setSameDaySubjectStatus(tt.sameDaySubjectStatus ?? "idle");
           setSameDaySubjectMessage(tt.sameDaySubjectMessage ?? "");
           setSameDaySubjectLockCount(tt.sameDaySubjectLockCount ?? 0);
@@ -319,6 +362,24 @@ export function TimetableForm({ termId }: TimetableFormProps) {
     confirming ||
     deletingVersionId !== null ||
     swapping;
+
+  function applyDiagnostics(data: PlacementDiagnostics) {
+    setLunchDoubleCount(data.lunchDoubleCount ?? 0);
+    setLunchDoubles(asArray(data.lunchDoubles));
+    setTripleRunCount(data.tripleRunCount ?? 0);
+    setTripleRuns(asArray(data.tripleRuns));
+    setSameDaySubjectViolationCount(data.sameDaySubjectViolationCount ?? 0);
+    setSameDaySubjectViolations(asArray(data.sameDaySubjectViolations));
+  }
+
+  function clearWorkingResult() {
+    setStatus("idle");
+    setCells([]);
+    setSwapNotice("");
+    setUnplaced([]);
+    setMessage("");
+    applyDiagnostics({});
+  }
 
   function clearVersionView() {
     setSelectedVersionId(null);
@@ -427,24 +488,28 @@ export function TimetableForm({ termId }: TimetableFormProps) {
     }
   }
 
-  async function handleSwapCells(from: TimetableCellRef, to: TimetableCellRef) {
+  function handleSwapCells(from: TimetableCellRef, to: TimetableCellRef) {
+    return postSwap({ from, to });
+  }
+
+  function handleSwapSlots(from: TimetableSlotRef, to: TimetableSlotRef) {
+    return postSwap({ mode: "slot", from, to });
+  }
+
+  async function postSwap(payload: Record<string, unknown>) {
     setSwapping(true);
     setError("");
     setVersionMessage("");
+    setSwapNotice("");
     try {
       const response = await fetch(`/api/terms/${termId}/timetable/swap`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from, to }),
+        body: JSON.stringify(payload),
       });
-      const data = (await response.json()) as {
+      const data = (await response.json()) as PlacementDiagnostics & {
         cells?: TimetableCell[];
-        lunchDoubleCount?: number;
-        lunchDoubles?: SoftRunDetail[];
-        tripleRunCount?: number;
-        tripleRuns?: SoftRunDetail[];
-        sameDaySubjectViolationCount?: number;
-        sameDaySubjectViolations?: SameDaySubjectViolation[];
+        notice?: string | null;
         error?: string;
       };
       if (!response.ok) {
@@ -452,16 +517,8 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         return;
       }
       setCells(Array.isArray(data.cells) ? data.cells : cells);
-      setLunchDoubleCount(data.lunchDoubleCount ?? 0);
-      setLunchDoubles(Array.isArray(data.lunchDoubles) ? data.lunchDoubles : []);
-      setTripleRunCount(data.tripleRunCount ?? 0);
-      setTripleRuns(Array.isArray(data.tripleRuns) ? data.tripleRuns : []);
-      setSameDaySubjectViolationCount(data.sameDaySubjectViolationCount ?? 0);
-      setSameDaySubjectViolations(
-        Array.isArray(data.sameDaySubjectViolations)
-          ? data.sameDaySubjectViolations
-          : [],
-      );
+      applyDiagnostics(data);
+      setSwapNotice(data.notice ?? "");
     } catch {
       setError("서버에 연결할 수 없습니다.");
     } finally {
@@ -479,37 +536,23 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       const response = await fetch(`/api/terms/${termId}/timetable`, {
         method: "POST",
       });
-      const data = (await response.json()) as {
+      const data = (await response.json()) as PlacementDiagnostics & {
         status?: "ready" | "failed";
         cells?: TimetableCell[];
         unplaced?: TimetableUnplaced[];
         message?: string;
         error?: string;
-        lunchDoubleCount?: number;
-        lunchDoubles?: SoftRunDetail[];
-        tripleRunCount?: number;
-        tripleRuns?: SoftRunDetail[];
-        sameDaySubjectViolationCount?: number;
-        sameDaySubjectViolations?: SameDaySubjectViolation[];
       };
       if (!response.ok) {
         setError(data.error ?? "시간표 생성에 실패했습니다.");
         return;
       }
       setStatus(data.status ?? "failed");
-      setCells(Array.isArray(data.cells) ? data.cells : []);
-      setUnplaced(Array.isArray(data.unplaced) ? data.unplaced : []);
+      setCells(asArray(data.cells));
+      setSwapNotice("");
+      setUnplaced(asArray(data.unplaced));
       setMessage(data.message ?? "");
-      setLunchDoubleCount(data.lunchDoubleCount ?? 0);
-      setLunchDoubles(Array.isArray(data.lunchDoubles) ? data.lunchDoubles : []);
-      setTripleRunCount(data.tripleRunCount ?? 0);
-      setTripleRuns(Array.isArray(data.tripleRuns) ? data.tripleRuns : []);
-      setSameDaySubjectViolationCount(data.sameDaySubjectViolationCount ?? 0);
-      setSameDaySubjectViolations(
-        Array.isArray(data.sameDaySubjectViolations)
-          ? data.sameDaySubjectViolations
-          : [],
-      );
+      applyDiagnostics(data);
       setPreviewKind("full");
     } catch {
       setError("서버에 연결할 수 없습니다.");
@@ -543,8 +586,13 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       setSameDaySubjectStatus(data.sameDaySubjectStatus ?? "failed");
       setSameDaySubjectMessage(data.sameDaySubjectMessage ?? "");
       setSameDaySubjectLockCount(data.filledCount ?? 0);
+      // 서버가 이전 점심 잠금과 전체 배치 결과를 무효화했다.
+      setLunchStatus("idle");
+      setLunchMessage("");
+      setLunchGeneratedAt(null);
+      setLunchLockCount(0);
+      clearWorkingResult();
       setCells(Array.isArray(data.cells) ? data.cells : []);
-      setUnplaced([]);
       setPreviewKind("sameDay");
     } catch {
       setError("서버에 연결할 수 없습니다.");
@@ -566,6 +614,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       const data = (await response.json()) as {
         lunchStatus?: "ready" | "failed";
         lunchMessage?: string;
+        lunchGeneratedAt?: string;
         targetCount?: number;
         filledCount?: number;
         cells?: TimetableCell[];
@@ -577,9 +626,11 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       }
       setLunchStatus(data.lunchStatus ?? "failed");
       setLunchMessage(data.lunchMessage ?? "");
+      setLunchGeneratedAt(data.lunchGeneratedAt ?? null);
       setLunchLockCount(data.filledCount ?? 0);
+      // 서버가 이전 전체 배치 결과를 무효화했다.
+      clearWorkingResult();
       setCells(Array.isArray(data.cells) ? data.cells : []);
-      setUnplaced([]);
       setPreviewKind("lunch");
     } catch {
       setError("서버에 연결할 수 없습니다.");
@@ -607,17 +658,11 @@ export function TimetableForm({ termId }: TimetableFormProps) {
         setError(data.error ?? "초기화에 실패했습니다.");
         return;
       }
-      setStatus("idle");
-      setCells([]);
-      setUnplaced([]);
-      setMessage("");
-      setLunchDoubleCount(0);
-      setLunchDoubles([]);
+      clearWorkingResult();
       setLunchStatus("idle");
       setLunchMessage("");
+      setLunchGeneratedAt(null);
       setLunchLockCount(0);
-      setSameDaySubjectViolationCount(0);
-      setSameDaySubjectViolations([]);
       setSameDaySubjectStatus("idle");
       setSameDaySubjectMessage("");
       setSameDaySubjectLockCount(0);
@@ -716,9 +761,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
             onClick={() => {
               void handleSameDaySubjectPriority();
             }}
-            disabled={
-              generating || lunchGenerating || sameDayGenerating || resetting || swapping
-            }
+            disabled={actionsBusy}
             className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {sameDayGenerating
@@ -732,14 +775,14 @@ export function TimetableForm({ termId }: TimetableFormProps) {
             onClick={() => {
               void handleLunchPriority();
             }}
-            disabled={
-              generating || lunchGenerating || sameDayGenerating || resetting || swapping
-            }
+            disabled={actionsBusy}
             className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {lunchGenerating
-              ? "점심시간 배치 중… (최대 약 15초)"
-              : "점심시간 우선 배치"}
+              ? "점심시간 배치 중…"
+              : lunchLockCount > 0
+                ? "점심시간 다시 배치"
+                : "점심시간 우선 배치"}
           </button>
         ) : null}
         <button
@@ -747,9 +790,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           onClick={() => {
             void handleGenerate();
           }}
-          disabled={
-            generating || lunchGenerating || sameDayGenerating || resetting || swapping
-          }
+          disabled={actionsBusy}
           className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {generating
@@ -764,14 +805,10 @@ export function TimetableForm({ termId }: TimetableFormProps) {
             void handleReset();
           }}
           disabled={
+            actionsBusy ||
             (status === "idle" &&
               lunchLockCount === 0 &&
-              sameDaySubjectLockCount === 0) ||
-            generating ||
-            lunchGenerating ||
-            sameDayGenerating ||
-            resetting ||
-            swapping
+              sameDaySubjectLockCount === 0)
           }
           className="rounded-lg border border-red-300 bg-white px-4 py-2.5 text-sm font-medium text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -808,6 +845,15 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       {error ? (
         <p className="text-center text-sm text-red-600" role="alert">
           {error}
+        </p>
+      ) : null}
+
+      {swapNotice && !selectedVersionId ? (
+        <p
+          className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-center text-sm text-amber-900"
+          role="status"
+        >
+          {swapNotice}
         </p>
       ) : null}
 
@@ -863,8 +909,8 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           [
             { key: "class", label: "학반별" },
             { key: "teacher", label: "교사별" },
-            { key: "grade", label: "학년 전체" },
-            { key: "allTeachers", label: "전체 교사(미세 조정)" },
+            { key: "grade", label: "전체 학년 시간표" },
+            { key: "allTeachers", label: "전체 교사 시간표(미세 조정)" },
           ] as const
         ).map((tab) => (
           <button
@@ -987,11 +1033,13 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           cells={displayedCells}
           schedules={schedules}
           teachers={teachers}
+          subjectBlocks={subjectBlocks}
           swapEnabled={
             !selectedVersionId && previewKind === "full" && cells.length > 0
           }
           swapping={swapping}
           onSwap={(from, to) => void handleSwapCells(from, to)}
+          onSwapSlots={(from, to) => void handleSwapSlots(from, to)}
         />
       )}
 
@@ -1049,6 +1097,9 @@ export function TimetableForm({ termId }: TimetableFormProps) {
             <div>
               <p className="mb-1 text-center text-xs font-medium text-zinc-500">
                 점심시간 우선 배치 결과
+                {lunchGeneratedAt
+                  ? ` · ${new Date(lunchGeneratedAt).toLocaleTimeString("ko-KR")} 실행`
+                  : null}
               </p>
               <pre
                 role="status"
@@ -1088,13 +1139,9 @@ export function TimetableForm({ termId }: TimetableFormProps) {
                 : null}
             </p>
             {sameDaySubjectViolationCount > 0 ? (
-              <ul className="mt-2 max-h-40 list-inside list-disc overflow-auto text-xs">
-                {sameDaySubjectViolations.map((v, i) => (
-                  <li key={`${v.teacherName}-${v.day}-${i}`}>
-                    {formatSameDaySubjectViolation(v)}
-                  </li>
-                ))}
-              </ul>
+              <DiagnosticList
+                items={sameDaySubjectViolations.map(formatSameDaySubjectViolation)}
+              />
             ) : null}
           </div>
 
@@ -1107,18 +1154,15 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           >
             <p className="font-medium">
               점심시간 연강 {lunchDoubleCount}건
+              {lunchDoubleCount > 0
+                ? ` (교사 ${distinctTeacherCount(lunchDoubles)}명)`
+                : null}
               {!avoidLunchDouble && lunchDoubleCount > 0
                 ? " (점심시간 연강 배제가 꺼져 있어 참고용으로만 표시됩니다)"
                 : null}
             </p>
             {lunchDoubleCount > 0 ? (
-              <ul className="mt-2 max-h-40 list-inside list-disc overflow-auto text-xs">
-                {lunchDoubles.map((d, i) => (
-                  <li key={`${d.teacherName}-${d.day}-${i}`}>
-                    {formatSoftRunDetail(d)}
-                  </li>
-                ))}
-              </ul>
+              <DiagnosticList items={lunchDoubles.map(formatSoftRunDetail)} />
             ) : null}
           </div>
 
@@ -1131,18 +1175,15 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           >
             <p className="font-medium">
               3연강 {tripleRunCount}건
+              {tripleRunCount > 0
+                ? ` (교사 ${distinctTeacherCount(tripleRuns)}명)`
+                : null}
               {!avoidTriplePeriod && tripleRunCount > 0
                 ? " (3연강 완화가 꺼져 있어 참고용으로만 표시됩니다)"
                 : null}
             </p>
             {tripleRunCount > 0 ? (
-              <ul className="mt-2 max-h-40 list-inside list-disc overflow-auto text-xs">
-                {tripleRuns.map((d, i) => (
-                  <li key={`${d.teacherName}-${d.day}-${i}`}>
-                    {formatSoftRunDetail(d)}
-                  </li>
-                ))}
-              </ul>
+              <DiagnosticList items={tripleRuns.map(formatSoftRunDetail)} />
             ) : null}
           </div>
         </div>

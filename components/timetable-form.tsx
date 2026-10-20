@@ -11,7 +11,10 @@ import {
   type TimetableVersionSummary,
 } from "@/components/timetable-version-panel";
 import { subjectSetBadgeClass } from "@/lib/subjects";
-import type { TimetableCellRef } from "@/lib/timetable-swap";
+import type {
+  TimetableCellRef,
+  TimetableSlotRef,
+} from "@/lib/timetable-swap";
 import { cellsForClass, maxPeriods } from "@/lib/timetable";
 import {
   GRADES,
@@ -478,7 +481,15 @@ export function TimetableForm({ termId }: TimetableFormProps) {
     }
   }
 
-  async function handleSwapCells(from: TimetableCellRef, to: TimetableCellRef) {
+  function handleSwapCells(from: TimetableCellRef, to: TimetableCellRef) {
+    return postSwap({ from, to });
+  }
+
+  function handleSwapSlots(from: TimetableSlotRef, to: TimetableSlotRef) {
+    return postSwap({ mode: "slot", from, to });
+  }
+
+  async function postSwap(payload: Record<string, unknown>) {
     setSwapping(true);
     setError("");
     setVersionMessage("");
@@ -486,7 +497,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
       const response = await fetch(`/api/terms/${termId}/timetable/swap`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from, to }),
+        body: JSON.stringify(payload),
       });
       const data = (await response.json()) as PlacementDiagnostics & {
         cells?: TimetableCell[];
@@ -1007,6 +1018,7 @@ export function TimetableForm({ termId }: TimetableFormProps) {
           }
           swapping={swapping}
           onSwap={(from, to) => void handleSwapCells(from, to)}
+          onSwapSlots={(from, to) => void handleSwapSlots(from, to)}
         />
       )}
 

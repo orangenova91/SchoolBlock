@@ -175,3 +175,95 @@ export function swapSameClassCommonCells(
 
   return { cells: next };
 }
+
+/** One weekday + period column of the whole timetable. */
+export type TimetableSlotRef = {
+  day: Weekday;
+  period: number;
+};
+
+export function parseSlotRef(value: unknown): TimetableSlotRef | null {
+  if (!value || typeof value !== "object") return null;
+  const raw = value as Record<string, unknown>;
+  if (typeof raw.day !== "string" || !WEEKDAY_KEYS.has(raw.day)) return null;
+  if (
+    typeof raw.period !== "number" ||
+    !Number.isInteger(raw.period) ||
+    raw.period < 1 ||
+    raw.period > MAX_PERIODS
+  ) {
+    return null;
+  }
+  return { day: raw.day as Weekday, period: raw.period };
+}
+
+function atSlot(cell: TimetableCell, slot: TimetableSlotRef): boolean {
+  return cell.day === slot.day && cell.period === slot.period;
+}
+
+/**
+ * Swaps every lesson (common, SET and pre-locked alike, all grades) at `from`
+ * with every lesson at `to`. Because whole columns trade places, a timetable
+ * with no teacher/class double-booking stays free of them, so only per-grade
+ * period existence and teacher forbidden slots need checking.
+ */
+export function swapWholeSlots(
+  cells: TimetableCell[],
+  from: TimetableSlotRef,
+  to: TimetableSlotRef,
+  options: {
+    forbiddenSlots: TeacherForbiddenSlot[];
+    schedules: GradeDaySchedules;
+  },
+): { cells: TimetableCell[] } | { error: string } {
+  if (from.day === to.day && from.period === to.period) {
+    return { error: "같은 교시끼리는 바꿀 수 없습니다." };
+  }
+
+  const fromCells = cells.filter((cell) => atSlot(cell, from));
+  const toCells = cells.filter((cell) => atSlot(cell, to));
+  if (fromCells.length === 0 && toCells.length === 0) {
+    return { error: "두 교시 모두 수업이 없습니다." };
+  }
+
+  const moves: [TimetableCell[], TimetableSlotRef][] = [
+    [fromCells, to],
+    [toCells, from],
+  ];
+
+  for (const grade of GRADES) {
+    for (const [moving, dest] of moves) {
+      if (!moving.some((cell) => cell.grade === grade)) continue;
+      if ((options.schedules[grade]?.[dest.day] ?? 0) < dest.period) {
+        return {
+          error: `${grade}학년은 ${dayLabel(dest.day)}${dest.period}교시가 없습니다.`,
+        };
+      }
+    }
+  }
+
+  const forbidden = new Set(
+    options.forbiddenSlots.map(
+      (slot) => `${slot.teacherName}|${slot.day}|${slot.period}`,
+    ),
+  );
+  for (const [moving, dest] of moves) {
+    for (const cell of moving) {
+      for (const name of teacherNames(cell.teacherName)) {
+        if (forbidden.has(`${name}|${dest.day}|${dest.period}`)) {
+          return {
+            error: `${name} 교사는 ${dayLabel(dest.day)}${dest.period}교시에 배정 불가입니다.`,
+          };
+        }
+      }
+    }
+  }
+
+  return {
+    cells: cells.map((cell) => {
+      if (atSlot(cell, from)) return { ...cell, day: to.day, period: to.period };
+      if (atSlot(cell, to)) return { ...cell, day: from.day, period: from.period };
+      return cell;
+    }),
+  };
+}

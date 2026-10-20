@@ -4,6 +4,7 @@ import { catalogGradeSets, countPlaced, sameSetInternalTeacherConflicts, slotKey
 import {
   autoPlacePartialSets,
   autoPlaceWholeSets,
+  formatAutoPlaceOutcome,
 } from "@/lib/set-blocks-auto";
 import {
   createEmptyTeacherAssignments,
@@ -39,6 +40,18 @@ function setRow(
   classNo: number,
 ): Subject {
   return { set, name, units, classCount: 1, classNo };
+}
+
+/** Deterministic PRNG (mulberry32) for reproducible auto-place runs. */
+function seededRandom(seed: number): () => number {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    let t = state;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }
 
 function teacher(
@@ -214,6 +227,132 @@ describe("autoPlaceWholeSets", () => {
     assert.equal(grade1Whole.day, "mon");
     assert.equal(grade1Whole.period, 1);
     assert.equal(result.unplaced.length, 0);
+  });
+
+  it("produces different layouts across runs instead of a fixed one", () => {
+    const subjects: GradeSubjects = {
+      ...emptySubjects(),
+      1: [setRow("A", "물리", 3, 1), setRow("A", "화학", 3, 2)],
+    };
+    const counts = classCounts(2);
+    const catalog = catalogGradeSets(subjects, counts);
+    const teachers = [
+      teacher("김물리", 1, "물리", 3),
+      teacher("이화학", 1, "화학", 3),
+    ];
+
+    const layouts = new Set<string>();
+    for (let seed = 1; seed <= 10; seed++) {
+      const result = autoPlaceWholeSets({
+        cells: [],
+        partialCells: [],
+        catalog,
+        teachers,
+        schedules: schedulesOf(periods()),
+        classCounts: counts,
+        random: seededRandom(seed),
+      });
+      assert.equal(result.unplaced.length, 0);
+      assert.equal(new Set(result.cells.map((c) => c.day)).size, 3);
+      layouts.add(
+        result.cells
+          .map((c) => slotKey(c.day, c.period))
+          .sort()
+          .join(","),
+      );
+    }
+    assert.ok(layouts.size > 1);
+  });
+
+  it("is reproducible with the same injected random source", () => {
+    const subjects: GradeSubjects = {
+      ...emptySubjects(),
+      1: [setRow("A", "물리", 3, 1), setRow("A", "화학", 3, 2)],
+    };
+    const counts = classCounts(2);
+    const catalog = catalogGradeSets(subjects, counts);
+    const teachers = [
+      teacher("김물리", 1, "물리", 3),
+      teacher("이화학", 1, "화학", 3),
+    ];
+    const run = () =>
+      autoPlaceWholeSets({
+        cells: [],
+        partialCells: [],
+        catalog,
+        teachers,
+        schedules: schedulesOf(periods()),
+        classCounts: counts,
+        random: seededRandom(42),
+      }).cells;
+
+    assert.deepEqual(run(), run());
+  });
+
+  it("warns when filling whole SETs leaves a partial SET without slots", () => {
+    const subjects: GradeSubjects = {
+      ...emptySubjects(),
+      1: [
+        setRow("A", "물리", 1, 1),
+        setRow("A", "화학", 1, 2),
+        setRow("B", "생명", 1, 1),
+      ],
+    };
+    const counts = classCounts(2);
+    const catalog = catalogGradeSets(subjects, counts);
+    const teachers = [
+      teacher("이물리", 1, "물리", 1),
+      teacher("이화학", 1, "화학", 1),
+      teacher("김생명", 1, "생명", 1),
+    ];
+
+    const result = autoPlaceWholeSets({
+      cells: [],
+      partialCells: [],
+      catalog,
+      teachers,
+      schedules: schedulesOf(periods({ mon: 1, tue: 0, wed: 0, thu: 0, fri: 0 })),
+      classCounts: counts,
+    });
+
+    assert.equal(result.unplaced.length, 0);
+    assert.deepEqual(
+      result.partialShortfalls.map((s) => [s.grade, s.set, s.remaining]),
+      [[1, "B", 1]],
+    );
+    assert.ok(result.warnings.some((w) => w.includes("SET B")));
+    assert.equal(formatAutoPlaceOutcome("전학년 SET", result).error, true);
+  });
+
+  it("reports no partial shortfall when partial SETs still fit", () => {
+    const subjects: GradeSubjects = {
+      ...emptySubjects(),
+      1: [
+        setRow("A", "물리", 1, 1),
+        setRow("A", "화학", 1, 2),
+        setRow("B", "생명", 1, 1),
+      ],
+    };
+    const counts = classCounts(2);
+    const catalog = catalogGradeSets(subjects, counts);
+    const teachers = [
+      teacher("이물리", 1, "물리", 1),
+      teacher("이화학", 1, "화학", 1),
+      teacher("김생명", 1, "생명", 1),
+    ];
+
+    const result = autoPlaceWholeSets({
+      cells: [],
+      partialCells: [],
+      catalog,
+      teachers,
+      schedules: schedulesOf(periods({ mon: 2, tue: 0, wed: 0, thu: 0, fri: 0 })),
+      classCounts: counts,
+    });
+
+    assert.equal(result.unplaced.length, 0);
+    assert.equal(result.partialShortfalls.length, 0);
+    assert.equal(formatAutoPlaceOutcome("전학년 SET", result).error, false);
   });
 
   it("applies a teacher rotation when a SET subject is shared", () => {

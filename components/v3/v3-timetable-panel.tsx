@@ -26,20 +26,22 @@ type EngineKind = "hybrid" | "search" | "milp";
 
 const KIND_LABEL: Record<string, string> = { hybrid: "혼합", search: "탐색", milp: "정수계획", diagnose: "진단" };
 
-const ENGINES: { kind: EngineKind; label: string; recommended?: boolean; hint: string }[] = [
+const ENGINES: { kind: EngineKind; badge: string; label: string; hint: string }[] = [
   {
     kind: "hybrid",
+    badge: "방법1",
     label: "혼합",
-    recommended: true,
     hint: "탐색으로 먼저 완성본을 만든 뒤, 하루·학년 단위로 나눠 정밀 계산으로 다듬습니다. 대부분 가장 좋은 결과를 냅니다.",
   },
   {
     kind: "search",
+    badge: "방법2",
     label: "탐색",
     hint: "칸을 바꿔 보며 점수를 조금씩 줄입니다. 빠르게 완성본을 찾지만 더 좋은 답을 놓칠 수 있습니다.",
   },
   {
     kind: "milp",
+    badge: "방법3",
     label: "정수계획",
     hint: "시간표 전체를 한 번에 수식으로 풀어 최선을 찾습니다. 작은 학교에 강하고, 큰 학교는 오래 걸립니다.",
   },
@@ -137,6 +139,7 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [loaded, setLoaded] = useState<{ key: string; jobId: string; list: ResultView[] }>({ key: "", jobId: "", list: [] });
   const [shownRank, setShownRank] = useState(0);
+  const [engineKind, setEngineKind] = useState<EngineKind>("hybrid");
   const [autoContinue, setAutoContinue] = useState(false);
   const [busy, setBusy] = useState(false);
   const [applying, setApplying] = useState<number | null>(null);
@@ -387,12 +390,6 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
         </p>
       </header>
 
-      {current ? (
-        <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700">
-          현재 적용된 시간표: {current.message || "(메모 없음)"} · 수업 {current.cellCount}칸
-        </div>
-      ) : null}
-
       {error ? (
         <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-center text-sm text-red-700" role="alert">
           {error}
@@ -406,59 +403,49 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
 
       {checks ? <V3QuickCheckBox quick={checks.quick} /> : null}
 
-      {weights ? (
-        <section className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-800">
-          <p className="font-medium">
-            조건별 중요도
-            <span className="ml-1.5 text-xs font-normal text-zinc-500">
-              {savingWeights ? "저장 중…" : "한 건이 생길 때 더해지는 점수입니다. 다음 생성부터 반영됩니다."}
-            </span>
-          </p>
-          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
-            {WEIGHT_ROWS.map((row) => {
-              const on = prefs[row.pref] ?? row.key !== "sameDay";
-              return (
-                <label key={row.key} className="flex items-center justify-between gap-2">
-                  <span className={on ? "" : "text-zinc-400"}>
-                    {row.label}
-                    {on ? "" : " (꺼짐)"}
-                  </span>
-                  <select
-                    value={weights[row.key]}
-                    disabled={!on || savingWeights || busy}
-                    onChange={(e) => void changeWeights({ ...weights, [row.key]: Number(e.target.value) })}
-                    className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {choices.map((c) => (
-                      <option key={c} value={c}>
-                        {c}점
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              );
-            })}
-          </div>
-          <p className="mt-2 text-xs text-zinc-500">
-            조건을 켜고 끄는 것은{" "}
-            <Link href={`/v3/terms/${termId}/preferences`} className="underline">
-              추가 조건 설정
-            </Link>
-            에서 합니다. 교사 중복·배정 불가·선 수업·고정한 SET·같은 SET 하루 한 번은 중요도와 관계없이 반드시 지킵니다.
-          </p>
-        </section>
-      ) : null}
-
       <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-        <h2 className="text-base font-semibold text-zinc-900">계산 방법 고르기</h2>
+        <h2 className="text-base font-semibold text-zinc-900">시간표 생성</h2>
         <p className="mt-1 text-sm text-zinc-600">
-          한 번 누르면 5분씩 계산하고 진행 상황을 보여 줍니다. 언제든 멈출 수 있고, 멈추면 그때까지 찾은 가장 좋은 결과를 보여
-          줍니다. 결과는 서로 30칸 이상 다른 좋은 시간표 3개를 모읍니다.
+          방법을 고른 뒤 시간표 생성을 누르면 5분씩 계산하고 진행 상황을 보여 줍니다. 언제든 멈출 수 있고, 멈추면 그때까지 찾은 가장 좋은 결과를 보여
+          줍니다. 결과는 서로 30칸 이상 다른 좋은 시간표 3개를 모읍니다. 조건별 가중치 설정을 이용해 사용자가 원하는 방향의 시간표로 생성할 수 있습니다.
         </p>
+        {blocked ? <p className="mt-4 text-xs font-medium text-red-700">빠른 검사 오류를 먼저 고쳐야 생성할 수 있습니다.</p> : null}
+        <button
+          type="button"
+          disabled={busy || blocked}
+          onClick={() => void startJob(engineKind)}
+          className="mt-4 w-full rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          시간표 생성
+        </button>
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {ENGINES.map((engine) => {
+            const time = checks?.estimate?.methods[engine.kind];
+            const picked = engine.kind === engineKind;
+            return (
+            <button
+              key={engine.kind}
+              type="button"
+              aria-pressed={picked}
+              onClick={() => setEngineKind(engine.kind)}
+              className={`flex flex-col items-start gap-1 rounded-xl border bg-white px-4 py-3 text-left text-zinc-900 transition hover:bg-zinc-50 ${
+                picked ? "border-zinc-900 ring-1 ring-zinc-900" : "border-zinc-300"
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-semibold text-zinc-700 ring-1 ring-zinc-200">{engine.badge}</span>
+                <span className="text-sm font-semibold">{engine.label}</span>
+              </span>
+              <span className="text-xs text-zinc-600">{engine.hint}</span>
+              {time ? <span className="text-xs font-medium text-zinc-800">예상: {time}</span> : null}
+            </button>
+            );
+          })}
+        </div>
         {checks?.size && checks.estimate ? (
-          <div className="mt-3 rounded-lg bg-zinc-50 px-3 py-2 text-xs text-zinc-700">
+          <div className="mt-4 rounded-lg bg-zinc-200 px-3 py-2 text-xs text-zinc-700">
             <p>
-              이 시간표: <b>{TIER_LABEL[checks.estimate.tier]}</b> · {checks.size.classes}반 · 교사 {checks.size.teachers}명(1인 평균 {checks.size.avgLoad}시간) · 주당 수업{" "}
+              * 이 시간표에 대해서: <b>{TIER_LABEL[checks.estimate.tier]}</b> · {checks.size.classes}반 · 교사 {checks.size.teachers}명(1인 평균 {checks.size.avgLoad}시간) · 주당 수업{" "}
               {checks.size.lessons}칸 · 배정 불가 {checks.size.forbidden}칸 · 선 수업 {checks.size.pins}칸
             </p>
             <p className="mt-1 text-zinc-500">
@@ -468,32 +455,48 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
             {checks.estimate.tip ? <p className="mt-1 text-zinc-700">{checks.estimate.tip}</p> : null}
           </div>
         ) : null}
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {ENGINES.map((base) => {
-            const e = { ...base, recommended: checks?.estimate ? checks.estimate.recommended === base.kind : base.recommended };
-            const time = checks?.estimate?.methods[base.kind];
-            return (
-            <button
-              key={e.kind}
-              type="button"
-              disabled={busy || blocked}
-              onClick={() => void startJob(e.kind)}
-              className={`flex flex-col items-start gap-1 rounded-xl border px-4 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50 ${
-                e.recommended ? "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-800" : "border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-50"
-              }`}
-            >
-              <span className="flex items-center gap-2 text-sm font-semibold">
-                {e.label}
-                {e.recommended ? (
-                  <span className="rounded bg-emerald-400 px-1.5 py-0.5 text-[10px] font-bold text-emerald-950">추천</span>
-                ) : null}
+        {weights ? (
+          <div className="mt-4 text-sm text-zinc-800">
+            <p className="font-medium">
+              조건별 가중치 설정
+              <span className="ml-1.5 text-xs font-normal text-zinc-500">
+                {savingWeights ? "저장 중…" : "한 건이 생길 때 더해지는 점수입니다. 시간표 생성 로직에 반영됩니다.(점수가 높을수록 불량한 시간표입니다.)"}
               </span>
-              <span className={`text-xs ${e.recommended ? "text-zinc-300" : "text-zinc-600"}`}>{e.hint}</span>
-              {time ? <span className={`text-xs font-medium ${e.recommended ? "text-emerald-300" : "text-zinc-800"}`}>예상: {time}</span> : null}
-            </button>
-            );
-          })}
-        </div>
+            </p>
+            <div className="mt-2 grid grid-cols-1 gap-3 sm:grid-cols-3">
+              {WEIGHT_ROWS.map((row) => {
+                const on = prefs[row.pref] ?? row.key !== "sameDay";
+                return (
+                  <label key={row.key} className="flex items-center justify-between gap-2 rounded-xl border border-zinc-300 bg-white px-4 py-3">
+                    <span className={on ? "" : "text-zinc-400"}>
+                      {row.label}
+                      {on ? "" : " (꺼짐)"}
+                    </span>
+                    <select
+                      value={weights[row.key]}
+                      disabled={!on || savingWeights || busy}
+                      onChange={(e) => void changeWeights({ ...weights, [row.key]: Number(e.target.value) })}
+                      className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {choices.map((c) => (
+                        <option key={c} value={c}>
+                          {c}점
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="mt-2 text-xs text-zinc-500">
+              조건을 켜고 끄는 것은{" "}
+              <Link href={`/v3/terms/${termId}/preferences`} className="underline">
+                추가 조건 설정
+              </Link>
+              에서 합니다. 교사 중복·배정 불가·선 수업·고정한 SET·같은 SET 하루 한 번은 중요도와 관계없이 반드시 지킵니다.
+            </p>
+          </div>
+        ) : null}
         <label className="mt-4 flex cursor-pointer items-start gap-2 text-sm text-zinc-700">
           <input type="checkbox" className="mt-0.5" checked={autoContinue} onChange={(e) => setAutoContinue(e.target.checked)} />
           <span>
@@ -503,10 +506,13 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
             </span>
           </span>
         </label>
-        {blocked ? (
-          <p className="mt-3 text-xs font-medium text-red-700">빠른 검사 오류를 먼저 고쳐야 생성할 수 있습니다.</p>
-        ) : null}
       </section>
+
+      {current ? (
+        <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700">
+          현재 적용된 시간표: {current.message || "(메모 없음)"} · 수업 {current.cellCount}칸
+        </div>
+      ) : null}
 
       {engineJobs.length ? (
         <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">

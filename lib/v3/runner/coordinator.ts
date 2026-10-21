@@ -120,7 +120,8 @@ export class Coordinator {
       goal: job.goal ?? "strict",
     };
     this.opts.log(`#${job.number} ${job.kind}${job.diagnose ? `:${job.diagnose}` : ""} 구간 ${job.segments + 1} 시작 (${Math.round(budgetMs / 1000)}초)`);
-    const worker = new Worker(this.opts.enginePath, { workerData, execArgv: ["--import", "tsx"] });
+    // "--import tsx"는 Node 22의 계산 스레드에서 tsconfig 경로(@/…)를 풀지 못한다 → CJS 로더로 띄운다
+    const worker = new Worker(this.opts.enginePath, { workerData, execArgv: ["--require", "tsx/cjs"] });
     let latest: V3JobProgress | null = null;
     let done: EngineThreadMessage | null = null;
     let leaseLost = false;

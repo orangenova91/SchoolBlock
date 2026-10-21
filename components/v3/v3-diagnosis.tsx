@@ -52,8 +52,8 @@ export function V3QuickCheckBox({ quick }: { quick: QuickCheckResult }) {
             ? `빠른 검사 실패: 이 조건으로는 최소 ${quick.minUnplaced}시간이 배치될 수 없습니다.`
             : "빠른 검사 실패: 입력끼리 서로 맞지 않아 시간표를 만들 수 없습니다."
           : warns.length
-            ? "빠른 검사 통과 (주의할 점이 있습니다)"
-            : "빠른 검사 통과: 세어 보는 방법으로는 문제가 없습니다."}
+            ? "빠른 검사 (주의할 점이 있습니다)"
+            : "빠른 검사: 세어 보는 방법으로는 문제가 없습니다."}
         <span className="ml-1.5 text-xs font-normal opacity-70">(검사 {seconds(quick.ms)})</span>
       </p>
       {errors.length + warns.length > 0 ? (

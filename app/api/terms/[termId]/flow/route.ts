@@ -37,11 +37,12 @@ export async function PATCH(request: Request, context: RouteContext) {
     body && typeof body === "object"
       ? (body as { maxReachedChapter?: unknown }).maxReachedChapter
       : undefined;
+  const lastChapter = term.logicVersion === "v3" ? 8 : 7;
   if (
     typeof raw !== "number" ||
     !Number.isInteger(raw) ||
     raw < 0 ||
-    raw > 7
+    raw > lastChapter
   ) {
     return NextResponse.json(
       { error: "올바르지 않은 요청입니다." },

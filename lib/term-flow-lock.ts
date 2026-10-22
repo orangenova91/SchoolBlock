@@ -7,9 +7,27 @@ export const FLOW_CHAPTER = {
   constraints: 5,
   preferences: 6,
   timetable: 7,
+  /** v3에만 있는 장 */
+  final: 8,
 } as const;
 
 export const LAST_FLOW_CHAPTER = FLOW_CHAPTER.timetable;
+
+/** 학기 목록에서 열 주소: 가장 멀리 간 단계 (FLOW_CHAPTER 키가 곧 주소 끝부분) */
+export function termResumeHref(
+  termId: string,
+  logicVersion: string | null | undefined,
+  maxReachedChapter = 0,
+): string {
+  const isV3 = logicVersion === "v3";
+  const last = isV3 ? FLOW_CHAPTER.final : LAST_FLOW_CHAPTER;
+  const chapter = Math.min(last, Math.max(0, Math.trunc(maxReachedChapter)));
+  const key =
+    (Object.keys(FLOW_CHAPTER) as (keyof typeof FLOW_CHAPTER)[]).find(
+      (k) => FLOW_CHAPTER[k] === chapter,
+    ) ?? "days";
+  return `${isV3 ? "/v3" : ""}/terms/${termId}/${key}`;
+}
 
 export const FLOW_CLAMPED_EVENT = "schoolblock:flow-clamped";
 

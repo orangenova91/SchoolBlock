@@ -9,6 +9,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
+import { termResumeHref } from "@/lib/term-flow-lock";
 import type { LogicVersion, Semester } from "@/lib/types";
 
 type TermListItem = {
@@ -19,6 +20,8 @@ type TermListItem = {
   semester: number;
   createdAt: string;
   logicVersion?: LogicVersion | null;
+  /** 가장 멀리 간 단계. 목록에서 누르면 이 단계가 열린다. */
+  maxReachedChapter?: number;
 };
 
 type EditDraft = {
@@ -526,7 +529,7 @@ export function HomeDashboard() {
                       </form>
                     ) : (
                       <Link
-                        href={`${term.logicVersion === "v3" ? "/v3" : ""}/terms/${term.id}/days`}
+                        href={termResumeHref(term.id, term.logicVersion, term.maxReachedChapter)}
                         className="min-w-0 flex-1"
                       >
                         <p className="flex items-center gap-2 font-medium text-zinc-900">

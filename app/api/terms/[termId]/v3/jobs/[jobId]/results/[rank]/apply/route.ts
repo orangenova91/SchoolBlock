@@ -28,12 +28,12 @@ export async function POST(request: Request, context: RouteContext) {
 
     const input = await loadV3Input(ctx.db, termId);
     if (v3InputHash(input) !== job.inputHash) {
-      return NextResponse.json({ error: "작업 뒤에 입력이 바뀌어 이 결과를 적용할 수 없습니다. 새로 생성해 주세요." }, { status: 409 });
+      return NextResponse.json({ error: "작업 뒤에 입력이 바뀌어 이 결과를 최종 시간표로 저장할 수 없습니다. 새로 생성해 주세요." }, { status: 409 });
     }
     const inst = buildInstance(input);
     const v = validateSolution(input, inst, result.solution);
     if (!v.ok) {
-      return NextResponse.json({ error: "검증에 실패한 결과라 적용하지 않았습니다.", violations: v.violations.slice(0, 10), unplaced: v.unplaced }, { status: 409 });
+      return NextResponse.json({ error: "검증에 실패한 결과라 저장하지 않았습니다.", violations: v.violations.slice(0, 10), unplaced: v.unplaced }, { status: 409 });
     }
 
     const cells = result.solution.cells;
@@ -70,7 +70,7 @@ export async function POST(request: Request, context: RouteContext) {
       return NextResponse.json({
         applied: true,
         version: null,
-        warning: `현재 시간표로 적용했지만, 확정 버전은 학기당 ${MAX_TIMETABLE_VERSIONS}개까지라 버전으로는 저장하지 않았습니다. 이전 버전을 삭제한 뒤 다시 적용해 주세요.`,
+        warning: `현재 시간표로 바꿨지만, 저장한 최종 시간표는 학기당 ${MAX_TIMETABLE_VERSIONS}개까지라 목록에는 남기지 않았습니다. 이전 것을 삭제한 뒤 다시 저장해 주세요.`,
         note,
       });
     }

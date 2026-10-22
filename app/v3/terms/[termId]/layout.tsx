@@ -38,7 +38,7 @@ export default async function V3TermLayout({ children, params }: V3TermLayoutPro
         .filter((part): part is string => Boolean(part))
         .join(" · ");
       if (typeof term.maxReachedChapter === "number" && Number.isInteger(term.maxReachedChapter)) {
-        maxReachedChapter = Math.min(7, Math.max(0, term.maxReachedChapter));
+        maxReachedChapter = Math.min(8, Math.max(0, term.maxReachedChapter));
       } else if (term.reachedTimetable === true) {
         maxReachedChapter = 7;
       } else if (term.reachedTimetable !== false) {
@@ -66,6 +66,7 @@ export default async function V3TermLayout({ children, params }: V3TermLayoutPro
           maxReachedChapter={maxReachedChapter}
           basePath="/v3/terms"
           labels={V3_LABELS}
+          withFinal
         />
       </Suspense>
       {children}

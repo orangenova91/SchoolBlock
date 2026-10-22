@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getAccountId, getSessionFromRequest } from "@/lib/session";
-import { parseLogicVersion, type Semester, type TermDocument } from "@/lib/types";
+import { FLOW_CHAPTER } from "@/lib/term-flow-lock";
+import {
+  parseLogicVersion,
+  type Semester,
+  type TermDocument,
+  type TimetableDocument,
+} from "@/lib/types";
 
 function isSemester(value: unknown): value is Semester {
   return value === 1 || value === 2;
@@ -34,6 +40,37 @@ export async function GET(request: Request) {
       .sort({ createdAt: -1 })
       .toArray();
 
+    // 단계 기록이 없는 예전 학기는 시간표가 있으면 시간표 생성 단계까지 간 것으로 본다 (학기 화면 layout과 같은 규칙)
+    const legacyIds = terms
+      .filter(
+        (term) =>
+          typeof term.maxReachedChapter !== "number" &&
+          typeof term.reachedTimetable !== "boolean",
+      )
+      .map((term) => term._id.toString());
+    const withTimetable = new Set(
+      legacyIds.length > 0
+        ? (
+            await db
+              .collection<TimetableDocument>("timetables")
+              .find({ termId: { $in: legacyIds } }, { projection: { termId: 1 } })
+              .toArray()
+          ).map((doc) => doc.termId)
+        : [],
+    );
+    const reachedChapter = (term: (typeof terms)[number]): number => {
+      if (
+        typeof term.maxReachedChapter === "number" &&
+        Number.isInteger(term.maxReachedChapter)
+      ) {
+        return term.maxReachedChapter;
+      }
+      if (typeof term.reachedTimetable === "boolean") {
+        return term.reachedTimetable ? FLOW_CHAPTER.timetable : 0;
+      }
+      return withTimetable.has(term._id.toString()) ? FLOW_CHAPTER.timetable : 0;
+    };
+
     return NextResponse.json({
       terms: terms.map((term) => ({
         id: term._id.toString(),
@@ -43,6 +80,7 @@ export async function GET(request: Request) {
         semester: term.semester,
         createdAt: term.createdAt,
         logicVersion: term.logicVersion ?? null,
+        maxReachedChapter: reachedChapter(term),
       })),
     });
   } catch (error) {

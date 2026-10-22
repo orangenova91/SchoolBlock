@@ -17,7 +17,7 @@ export async function GET(request: Request, context: RouteContext) {
     const ctx = await requireV3Term(request, termId);
     if (ctx instanceof NextResponse) return ctx;
     const hash = v3InputHash(await loadV3Input(ctx.db, termId));
-    const jobs = await ctx.db.collection<V3JobDocument>(JOBS).find({ termId }, { projection: { diagnosis: 0 } }).sort({ createdAt: -1 }).limit(20).toArray();
+    const jobs = await ctx.db.collection<V3JobDocument>(JOBS).find({ termId, hidden: { $ne: true } }, { projection: { diagnosis: 0 } }).sort({ createdAt: -1 }).limit(20).toArray();
     return NextResponse.json({ jobs: await Promise.all(jobs.map((j) => jobView(ctx.db, j, hash))) });
   } catch (error) {
     return serverError("jobs GET", error);

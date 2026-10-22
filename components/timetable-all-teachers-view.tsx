@@ -99,19 +99,7 @@ export function TimetableAllTeachersView({
   const [picked, setPicked] = useState<TimetableCellRef | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const dayHeaderRefs = useRef(new Map<Weekday, HTMLTableCellElement>());
   const pointerRef = useRef({ x: 0, y: 0 });
-
-  function scrollToDay(day: Weekday) {
-    const box = scrollRef.current;
-    const header = dayHeaderRefs.current.get(day);
-    if (!box || !header) return;
-    // Land the day's first column just right of the sticky teacher column.
-    const teacherColPx =
-      TEACHER_COL_REM *
-      parseFloat(getComputedStyle(document.documentElement).fontSize);
-    box.scrollTo({ left: header.offsetLeft - teacherColPx });
-  }
 
   const teacherNames = useMemo(
     () =>
@@ -270,19 +258,9 @@ export function TimetableAllTeachersView({
         </p>
       ) : (
         <>
-          <div className="mb-2 flex items-center justify-center gap-1.5">
-            <span className="text-xs text-zinc-500">요일로 이동</span>
-            {WEEKDAYS.map(({ key, label }) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => scrollToDay(key)}
-                className="rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <h3 className="mb-3 text-center text-sm font-semibold text-zinc-800">
+            전체 교사 시간표
+          </h3>
           <div
             ref={scrollRef}
             className={
@@ -319,10 +297,6 @@ export function TimetableAllTeachersView({
                   {WEEKDAYS.map(({ key, label }, dayIndex) => (
                     <th
                       key={key}
-                      ref={(el) => {
-                        if (el) dayHeaderRefs.current.set(key, el);
-                        else dayHeaderRefs.current.delete(key);
-                      }}
                       colSpan={periodCols}
                       className={`border border-zinc-200 px-1 py-1 text-xs font-medium text-zinc-700 ${
                         dayIndex % 2 === 0 ? "bg-zinc-100" : "bg-zinc-50"

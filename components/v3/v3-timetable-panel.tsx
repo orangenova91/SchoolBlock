@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { V3DiagnosisReport, V3QuickCheckBox, DIAGNOSE_HINT, DIAGNOSE_LABEL, type V3DiagnoseKind } from "@/components/v3/v3-diagnosis";
 import { V3TimetableView } from "@/components/v3/v3-timetable-view";
-import { V3Versions } from "@/components/v3/v3-versions";
 import {
   createDefaultClassCounts,
   createDefaultGradeDaySchedules,
@@ -93,6 +93,7 @@ const WEIGHT_ROWS: { key: keyof V3Weights; label: string; pref: "avoidLunchDoubl
 ];
 
 const ACTIVE = ["queued", "running", "stopping"];
+const DELETABLE = ["awaiting", "stopped", "done", "infeasible", "error"];
 const POLL_MS = 2500;
 
 type Checks = {
@@ -141,14 +142,16 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
   const [shownRank, setShownRank] = useState(0);
   const [engineKind, setEngineKind] = useState<EngineKind>("hybrid");
   const [autoContinue, setAutoContinue] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [progressId, setProgressId] = useState<string | null>(null);
+  const resultsRef = useRef<HTMLElement>(null);
   const [busy, setBusy] = useState(false);
   const [applying, setApplying] = useState<number | null>(null);
   const [schedules, setSchedules] = useState<GradeDaySchedules>(createDefaultGradeDaySchedules());
   const [classCounts, setClassCounts] = useState<GradeClassCounts>(createDefaultClassCounts());
   const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [current, setCurrent] = useState<{ message: string; cellCount: number } | null>(null);
   const [fixedSetKeys, setFixedSetKeys] = useState<Set<string>>(new Set());
-  const [versionsKey, setVersionsKey] = useState(0);
+  const router = useRouter();
   const finishedDiagnoses = useRef<string | null>(null);
 
   const loadChecks = useCallback(async () => {
@@ -165,14 +168,6 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
     setJobs(data.jobs);
     return data.jobs;
   }, [api]);
-
-  const loadCurrent = useCallback(async () => {
-    const res = await fetch(`/api/terms/${termId}/timetable`);
-    const data = await readJson<{ cells?: TimetableCell[]; message?: string | null; status?: string }>(res);
-    if (res.ok && data.status === "ready" && Array.isArray(data.cells) && data.cells.length) {
-      setCurrent({ message: data.message ?? "", cellCount: data.cells.length });
-    } else setCurrent(null);
-  }, [termId]);
 
   // 처음 불러오기
   useEffect(() => {
@@ -205,7 +200,7 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
           const fixed = [...(setBlocks.cells ?? []), ...(setBlocks.partialCells ?? [])];
           setFixedSetKeys(new Set(fixed.map((c) => `${c.grade}|${c.set}|${c.day}|${c.period}`)));
         }
-        await Promise.all([loadChecks(), loadCurrent()]);
+        await loadChecks();
         const list = await loadJobs();
         if (!cancelled) setSelectedId((prev) => prev ?? list.find((j) => j.kind !== "diagnose")?.id ?? null);
       } catch (e) {
@@ -217,7 +212,7 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [api, termId, loadChecks, loadJobs, loadCurrent]);
+  }, [api, termId, loadChecks, loadJobs]);
 
   // 계산 중인 작업이 있으면 2.5초마다 상태를 읽는다
   const anyActive = jobs.some((j) => ACTIVE.includes(j.status));
@@ -283,6 +278,7 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
       const data = await readJson<{ job: V3JobView; boundJobId: string | null }>(res);
       if (!res.ok) throw new Error(data.error ?? "작업을 만들지 못했습니다.");
       setSelectedId(data.job.id);
+      setProgressId(data.job.id);
       setNotice(
         `#${data.job.number} ${KIND_LABEL[kind]} 작업을 대기열에 넣었습니다.${data.boundJobId ? " 목표 기준을 정하려고 이론상 최선 계산도 함께 넣었습니다." : ""}`,
       );
@@ -331,17 +327,38 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
       await loadJobs();
     });
 
+  const deleteJob = (job: V3JobView) => {
+    const warn = job.status === "awaiting" ? "\n승인 대기 중인 작업이라, 지우면 더 이어 계산할 수 없습니다." : "";
+    if (!window.confirm(`#${job.number} ${KIND_LABEL[job.kind]} 작업을 삭제할까요?\n저장한 최종 시간표는 그대로 남습니다.${warn}`)) return;
+    void act(async () => {
+      const res = await fetch(`${api}/jobs/${job.id}`, { method: "DELETE" });
+      const data = await readJson<object>(res);
+      if (!res.ok) throw new Error(data.error ?? "삭제하지 못했습니다.");
+      setProgressId(null);
+      setSelectedId((id) => (id === job.id ? null : id));
+      setNotice(`#${job.number} ${KIND_LABEL[job.kind]} 작업을 삭제했습니다.`);
+      await loadJobs();
+    });
+  };
+
   const applyResult = (job: V3JobView, rank: number) => {
+    if (
+      !window.confirm(
+        `#${job.number} ${KIND_LABEL[job.kind]}의 ${rank + 1}번 결과를 최종 시간표로 저장할까요?\n현재 시간표가 이 결과로 바뀌고, 저장한 뒤 9. 최종 시간표로 이동합니다.`,
+      )
+    )
+      return;
     setApplying(rank);
     void act(async () => {
       const res = await fetch(`${api}/jobs/${job.id}/results/${rank}/apply`, { method: "POST" });
       const data = await readJson<{ version: number | null; warning?: string; note: string }>(res);
-      if (!res.ok) throw new Error(data.error ?? "적용하지 못했습니다.");
-      setNotice(
-        data.warning ?? `${rank + 1}번 결과를 현재 시간표로 적용하고 확정 버전 ${data.version}로 저장했습니다. (${data.note})`,
-      );
-      await loadCurrent();
-      setVersionsKey((k) => k + 1);
+      if (!res.ok) throw new Error(data.error ?? "저장하지 못했습니다.");
+      // 저장 개수가 꽉 차 목록에 남지 않았으면 경고를 보이도록 이 화면에 남는다
+      if (data.version === null) {
+        setNotice(data.warning ?? `${rank + 1}번 결과를 현재 시간표로 바꿨습니다. (${data.note})`);
+        return;
+      }
+      router.push(`/v3/terms/${termId}/final?saved=${data.version}`);
     }).finally(() => setApplying(null));
   };
 
@@ -371,6 +388,18 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
   const blocked = checks ? checks.quick.blocking || checks.quick.minUnplaced > 0 : true;
   const engineJobs = useMemo(() => jobs.filter((j) => j.kind !== "diagnose"), [jobs]);
   const diagnoseJobs = useMemo(() => jobs.filter((j) => j.kind === "diagnose"), [jobs]);
+  const modalJob = engineJobs.find((j) => j.id === progressId) ?? null;
+
+  function openJob(job: V3JobView) {
+    setSelectedId(job.id);
+    setProgressId(job.id);
+  }
+
+  function showResults(job: V3JobView) {
+    setSelectedId(job.id);
+    setProgressId(null);
+    requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }
 
   if (loading) {
     return (
@@ -381,14 +410,117 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
   }
 
   return (
-    <div className="flex w-full flex-col gap-6">
+    <div className="relative flex w-full flex-col gap-6">
       <header className="text-center">
         <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">시간표 생성 (v3)</h1>
         <p className="mt-2 text-sm text-zinc-600">
           모든 수업을 빠짐없이 배치한 시간표만 만듭니다. 점수는 피하고 싶은 일(점심 연강·3연강·같은 날 교과)이 생긴 건수에
           중요도를 곱해 더한 값이라 <b>낮을수록 좋습니다</b>.
         </p>
+        <div className="mt-4 flex flex-col items-center gap-2">
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/v3/terms/${termId}/preferences`}
+              className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
+            >
+              이전
+            </Link>
+            <button
+              type="button"
+              disabled={busy || blocked}
+              onClick={() => void startJob(engineKind)}
+              className="rounded-lg bg-zinc-900 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              시간표 생성
+            </button>
+            <button
+              type="button"
+              aria-label="생성 설정"
+              title="생성 설정"
+              onClick={() => setSettingsOpen(true)}
+              className="rounded-lg border border-zinc-300 bg-white p-2.5 text-zinc-700 transition hover:bg-zinc-50"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-5 w-5"
+                aria-hidden="true"
+              >
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+            <Link
+              href={`/v3/terms/${termId}/final`}
+              className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
+            >
+              다음
+            </Link>
+          </div>
+          {blocked ? <p className="text-xs font-medium text-red-700">빠른 검사 오류를 먼저 고쳐야 생성할 수 있습니다.</p> : null}
+        </div>
       </header>
+
+      {modalJob ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="계산 진행"
+          onClick={() => setProgressId(null)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") setProgressId(null);
+          }}
+        >
+          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+            <JobDetail
+              job={modalJob}
+              busy={busy}
+              onStop={() => void stopJob(modalJob)}
+              onContinue={() => void continueJob(modalJob)}
+              onToggleAuto={(v) => void toggleJobAuto(modalJob, v)}
+              onDiagnose={(k) => void startDiagnosis(k)}
+            />
+            <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+              {DELETABLE.includes(modalJob.status) ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => deleteJob(modalJob)}
+                  className="mr-auto rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                >
+                  작업 삭제
+                </button>
+              ) : null}
+              {ACTIVE.includes(modalJob.status) ? (
+                <span className="mr-auto text-xs text-white">닫아도 계산은 계속됩니다. 작업 목록에서 다시 볼 수 있습니다.</span>
+              ) : null}
+              {modalJob.results.length ? (
+                <button
+                  type="button"
+                  onClick={() => showResults(modalJob)}
+                  className="rounded-lg bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-zinc-800"
+                >
+                  결과 보기
+                </button>
+              ) : null}
+              <button
+                type="button"
+                autoFocus
+                onClick={() => setProgressId(null)}
+                className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+              >
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {error ? (
         <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-center text-sm text-red-700" role="alert">
@@ -403,21 +535,36 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
 
       {checks ? <V3QuickCheckBox quick={checks.quick} /> : null}
 
-      <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-        <h2 className="text-base font-semibold text-zinc-900">시간표 생성</h2>
+      {settingsOpen ? (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="v3-settings-title"
+        onClick={() => setSettingsOpen(false)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") setSettingsOpen(false);
+        }}
+      >
+      <section
+        className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <h2 id="v3-settings-title" className="text-base font-semibold text-zinc-900">생성 설정</h2>
+          <button
+            type="button"
+            autoFocus
+            onClick={() => setSettingsOpen(false)}
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            닫기
+          </button>
+        </div>
         <p className="mt-1 text-sm text-zinc-600">
-          방법을 고른 뒤 시간표 생성을 누르면 5분씩 계산하고 진행 상황을 보여 줍니다. 언제든 멈출 수 있고, 멈추면 그때까지 찾은 가장 좋은 결과를 보여
-          줍니다. 결과는 서로 30칸 이상 다른 좋은 시간표 3개를 모읍니다. 조건별 가중치 설정을 이용해 사용자가 원하는 방향의 시간표로 생성할 수 있습니다.
+          여기서 고른 계산 방법과 조건별 가중치는 시간표 생성 버튼을 누를 때 적용됩니다. 생성은 5분씩 계산하며, 언제든 멈추면 그때까지 찾은 가장
+          좋은 결과를 보여 줍니다. 결과는 서로 30칸 이상 다른 좋은 시간표 3개를 모읍니다.
         </p>
-        {blocked ? <p className="mt-4 text-xs font-medium text-red-700">빠른 검사 오류를 먼저 고쳐야 생성할 수 있습니다.</p> : null}
-        <button
-          type="button"
-          disabled={busy || blocked}
-          onClick={() => void startJob(engineKind)}
-          className="mt-4 w-full rounded-xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          시간표 생성
-        </button>
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
           {ENGINES.map((engine) => {
             const time = checks?.estimate?.methods[engine.kind];
@@ -507,34 +654,32 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
           </span>
         </label>
       </section>
-
-      {current ? (
-        <div className="rounded-xl border border-zinc-200 bg-white px-4 py-3 text-sm text-zinc-700">
-          현재 적용된 시간표: {current.message || "(메모 없음)"} · 수업 {current.cellCount}칸
-        </div>
+      </div>
       ) : null}
 
       {engineJobs.length ? (
-        <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
-          <h2 className="text-base font-semibold text-zinc-900">작업</h2>
+        <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm min-[1440px]:absolute min-[1440px]:top-0 min-[1440px]:right-full min-[1440px]:mr-4 min-[1440px]:max-h-[calc(100vh-10rem)] min-[1440px]:w-60 min-[1440px]:overflow-y-auto min-[1440px]:p-4">
+          <h2 className="text-base font-semibold text-zinc-900">작업 목록</h2>
           <ul className="mt-3 divide-y divide-zinc-100">
             {engineJobs.map((j) => (
               <li key={j.id}>
                 <button
                   type="button"
-                  onClick={() => setSelectedId(j.id)}
-                  className={`flex w-full flex-wrap items-center gap-2 rounded-lg px-2 py-2 text-left text-sm transition ${
+                  onClick={() => openJob(j)}
+                  className={`flex w-full flex-col gap-0.5 rounded-lg px-2 py-2 text-left text-sm transition ${
                     j.id === selectedId ? "bg-zinc-100" : "hover:bg-zinc-50"
                   }`}
                 >
-                  <span className="font-medium text-zinc-900">
-                    #{j.number} {KIND_LABEL[j.kind]}
+                  <span className="flex items-center gap-2">
+                    <span className="font-medium text-zinc-900">
+                      #{j.number} {KIND_LABEL[j.kind]}
+                    </span>
+                    <StatusChip job={j} />
                   </span>
-                  <StatusChip job={j} />
                   <span className="text-xs text-zinc-500">
                     {jobSummary(j)}
+                    {j.inputChanged ? <span className="ml-1 whitespace-nowrap text-amber-700">· 입력이 바뀜</span> : null}
                   </span>
-                  {j.inputChanged ? <span className="text-xs text-amber-700">입력이 바뀜</span> : null}
                 </button>
               </li>
             ))}
@@ -542,30 +687,40 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
         </section>
       ) : null}
 
-      {selected && selected.kind !== "diagnose" ? (
-        <JobDetail
-          job={selected}
-          busy={busy}
-          onStop={() => void stopJob(selected)}
-          onContinue={() => void continueJob(selected)}
-          onToggleAuto={(v) => void toggleJobAuto(selected, v)}
-          onDiagnose={(k) => void startDiagnosis(k)}
-        />
-      ) : null}
-
       {selected && results.length ? (
-        <section className="flex flex-col gap-4">
-          <h2 className="text-center text-base font-semibold text-zinc-900">결과 비교 (#{selected.number})</h2>
+        <section ref={resultsRef} className="flex scroll-mt-44 flex-col gap-4">
+          <div className="flex items-center justify-center gap-2">
+            <h2 className="text-base font-semibold text-zinc-900">결과 비교 (#{selected.number})</h2>
+            <button
+              type="button"
+              onClick={() => openJob(selected)}
+              className="rounded-lg border border-zinc-300 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+            >
+              작업 정보
+            </button>
+          </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {results.map((r) => (
               <div
                 key={r.rank}
-                className={`flex flex-col gap-2 rounded-xl border bg-white p-4 text-sm shadow-sm ${
-                  r.rank === shownRank ? "border-zinc-900 ring-1 ring-zinc-900" : "border-zinc-200"
+                role="button"
+                tabIndex={0}
+                aria-pressed={r.rank === shownRank}
+                onClick={() => setShownRank(r.rank)}
+                onKeyDown={(e) => {
+                  if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+                  e.preventDefault();
+                  setShownRank(r.rank);
+                }}
+                className={`flex cursor-pointer flex-col gap-2 rounded-xl border bg-white p-4 text-sm shadow-sm transition ${
+                  r.rank === shownRank ? "border-zinc-900 ring-1 ring-zinc-900" : "border-zinc-200 hover:border-zinc-400"
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-semibold text-zinc-900">{r.rank + 1}번 결과</span>
+                  <span className="flex items-center gap-2 font-semibold text-zinc-900">
+                    {r.rank + 1}번 결과
+                    {r.rank === shownRank ? <span className="text-xs font-medium text-zinc-500">보는 중</span> : null}
+                  </span>
                   <span className="text-lg font-bold text-zinc-900">{r.metrics.score}점</span>
                 </div>
                 <JudgementLine judgement={r.judgement} />
@@ -576,29 +731,22 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
                 <div className="mt-auto flex gap-2">
                   <button
                     type="button"
-                    onClick={() => setShownRank(r.rank)}
-                    className="flex-1 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
-                  >
-                    {r.rank === shownRank ? "보는 중" : "시간표 보기"}
-                  </button>
-                  <button
-                    type="button"
                     disabled={busy || selected.inputChanged || ACTIVE.includes(selected.status)}
                     onClick={() => applyResult(selected, r.rank)}
                     className="flex-1 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {applying === r.rank ? "적용 중…" : "이 결과 적용"}
+                    {applying === r.rank ? "저장 중…" : "최종 시간표로 저장"}
                   </button>
                 </div>
               </div>
             ))}
           </div>
           {ACTIVE.includes(selected.status) ? (
-            <p className="text-center text-xs text-zinc-500">계산 중에는 적용할 수 없습니다. 멈추거나 구간이 끝난 뒤 적용해 주세요.</p>
+            <p className="text-center text-xs text-zinc-500">계산 중에는 저장할 수 없습니다. 멈추거나 구간이 끝난 뒤 저장해 주세요.</p>
           ) : selected.inputChanged ? (
-            <p className="text-center text-xs text-amber-700">작업 뒤에 입력이 바뀌어 적용할 수 없습니다. 새로 생성해 주세요.</p>
+            <p className="text-center text-xs text-amber-700">작업 뒤에 입력이 바뀌어 저장할 수 없습니다. 새로 생성해 주세요.</p>
           ) : (
-            <p className="text-center text-xs text-zinc-500">적용하면 현재 시간표가 되고 확정 버전으로도 저장됩니다. 메모는 자동으로 적힙니다.</p>
+            <p className="text-center text-xs text-zinc-500">저장하면 현재 시간표가 되고 &ldquo;9. 최종 시간표&rdquo;에 쌓입니다. 메모는 자동으로 적힙니다.</p>
           )}
           {results[shownRank]?.details && weights ? (
             <ScoreDetailsBox rank={shownRank} metrics={results[shownRank].metrics} details={results[shownRank].details!} weights={weights} />
@@ -614,8 +762,6 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
           ) : null}
         </section>
       ) : null}
-
-      <V3Versions termId={termId} refreshKey={versionsKey} schedules={schedules} classCounts={classCounts} teachers={teachers} />
 
       <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
         <h2 className="text-base font-semibold text-zinc-900">진단</h2>
@@ -864,7 +1010,7 @@ function JobDetail({
             ? `${PHASE_LABEL[job.progress?.phase ?? "start"] ?? "계산 중"}${job.progress?.message ? ` — ${job.progress.message}` : ""}`
             : job.status === "awaiting"
               ? job.results.length
-                ? "5분 계산이 끝났습니다. 아래 결과를 보고, 더 계산하려면 “5분 더 계산”을 눌러 주세요. (중단점은 30일 동안 보관합니다)"
+                ? "5분 계산이 끝났습니다. 결과를 보고, 더 계산하려면 “5분 더 계산”을 눌러 주세요. (중단점은 30일 동안 보관합니다)"
                 : "5분 계산이 끝났지만 아직 모든 수업을 놓은 시간표가 없습니다. 더 계산하려면 “5분 더 계산”을 눌러 주세요. (중단점은 30일 동안 보관합니다)"
               : job.status === "error"
                 ? `오류로 멈췄습니다: ${job.error ?? ""}`
@@ -895,7 +1041,7 @@ function JobDetail({
         </label>
       ) : null}
       {job.inputChanged ? (
-        <p className="mt-2 text-xs text-amber-700">이 작업을 만든 뒤 입력이 바뀌었습니다. 이어 돌리거나 적용할 수 없으니 새로 생성해 주세요.</p>
+        <p className="mt-2 text-xs text-amber-700">이 작업을 만든 뒤 입력이 바뀌었습니다. 이어 돌리거나 최종 시간표로 저장할 수 없으니 새로 생성해 주세요.</p>
       ) : null}
 
       {failed && (job.status === "infeasible" || (job.bestUnplaced ?? 0) > 0) ? (

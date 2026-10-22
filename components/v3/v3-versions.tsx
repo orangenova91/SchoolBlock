@@ -1,160 +1,83 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
 import type { TimetableVersionSummary } from "@/components/timetable-version-panel";
-import { V3TimetableView } from "@/components/v3/v3-timetable-view";
-import {
-  MAX_TIMETABLE_VERSIONS,
-  type GradeClassCounts,
-  type GradeDaySchedules,
-  type Teacher,
-  type TimetableCell,
-} from "@/lib/types";
+import { MAX_TIMETABLE_VERSIONS } from "@/lib/types";
 
-const formatDate = (value: string) => {
+export const formatVersionDate = (value: string) => {
   const date = new Date(value);
   return Number.isNaN(date.getTime())
     ? ""
     : new Intl.DateTimeFormat("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(date);
 };
 
+/** 메모 앞의 "v3 · "는 목록에서 빼고 보인다 */
+export const versionNote = (v: TimetableVersionSummary) => (v.note ?? "").replace(/^v3 · /, "");
+
 /**
- * v3 확정 버전 목록. 결과를 적용하면 확정 버전이 하나씩 쌓인다 (v1·v2와 같은 저장 공간).
- * 여기서는 보기·삭제만 한다 (확정은 "이 결과 적용"이 대신함).
+ * v3 저장한 최종 시간표 목록 (v1·v2의 확정 버전과 같은 저장 공간).
+ * 넓은 화면에서는 본문 왼쪽에 붙는다. 줄을 누르면 그 저장본을 고른다.
  */
 export function V3Versions({
-  termId,
-  refreshKey,
-  schedules,
-  classCounts,
-  teachers,
+  versions,
+  loading,
+  selectedId,
+  justSavedVersion,
+  onSelect,
 }: {
-  termId: string;
-  /** 적용할 때마다 바뀌어 목록을 다시 읽게 하는 값 */
-  refreshKey: number;
-  schedules: GradeDaySchedules;
-  classCounts: GradeClassCounts;
-  teachers: Teacher[];
+  versions: TimetableVersionSummary[];
+  loading: boolean;
+  selectedId: string | null;
+  /** 8장에서 방금 저장하고 넘어온 번호 */
+  justSavedVersion: number | null;
+  onSelect: (id: string) => void;
 }) {
-  const [versions, setVersions] = useState<TimetableVersionSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [shown, setShown] = useState<{ id: string; cells: TimetableCell[] } | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
-  const [message, setMessage] = useState("");
-
-  const fetchVersions = useCallback(async () => {
-    const res = await fetch(`/api/terms/${termId}/timetable/versions`);
-    const data = (await res.json().catch(() => ({}))) as { versions?: TimetableVersionSummary[] };
-    return res.ok && Array.isArray(data.versions) ? data.versions : null;
-  }, [termId]);
-
-  const load = useCallback(async () => {
-    const list = await fetchVersions();
-    if (list) setVersions(list);
-  }, [fetchVersions]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchVersions().then((list) => {
-      if (cancelled) return;
-      if (list) setVersions(list);
-      setLoading(false);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchVersions, refreshKey]);
-
-  async function show(id: string) {
-    if (shown?.id === id) {
-      setShown(null);
-      return;
-    }
-    setMessage("");
-    const res = await fetch(`/api/terms/${termId}/timetable/versions/${id}`);
-    const data = (await res.json().catch(() => ({}))) as { version?: { cells?: TimetableCell[] }; error?: string };
-    if (!res.ok || !data.version) {
-      setMessage(data.error ?? "확정 버전을 불러오지 못했습니다.");
-      return;
-    }
-    setShown({ id, cells: Array.isArray(data.version.cells) ? data.version.cells : [] });
-  }
-
-  async function remove(v: TimetableVersionSummary) {
-    if (!window.confirm(`확정 ${v.versionNumber} 버전을 삭제할까요?`)) return;
-    setDeleting(v.id);
-    setMessage("");
-    try {
-      const res = await fetch(`/api/terms/${termId}/timetable/versions/${v.id}`, { method: "DELETE" });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) {
-        setMessage(data.error ?? "삭제하지 못했습니다.");
-        return;
-      }
-      if (shown?.id === v.id) setShown(null);
-      setMessage(`확정 ${v.versionNumber} 버전을 삭제했습니다.`);
-      await load();
-    } finally {
-      setDeleting(null);
-    }
-  }
-
   return (
-    <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+    <section className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm min-[1440px]:absolute min-[1440px]:top-0 min-[1440px]:right-full min-[1440px]:mr-4 min-[1440px]:max-h-[calc(100vh-10rem)] min-[1440px]:w-60 min-[1440px]:overflow-y-auto min-[1440px]:p-4">
       <div className="flex items-baseline justify-between gap-2">
-        <h2 className="text-base font-semibold text-zinc-900">확정 버전</h2>
+        <h2 className="text-base font-semibold text-zinc-900">저장한 최종 시간표</h2>
         <span className="text-xs text-zinc-500">
           {versions.length}/{MAX_TIMETABLE_VERSIONS}
         </span>
       </div>
-      <p className="mt-1 text-sm text-zinc-600">
-        &ldquo;이 결과 적용&rdquo;을 누를 때마다 하나씩 저장됩니다. 가장 최근에 적용한 것이 현재 시간표입니다.
-      </p>
-      {message ? <p className="mt-2 text-sm text-zinc-700">{message}</p> : null}
       {loading ? (
         <p className="mt-3 text-sm text-zinc-500" role="status">
           불러오는 중…
         </p>
       ) : versions.length === 0 ? (
-        <p className="mt-3 text-sm text-zinc-500">아직 적용한 결과가 없습니다.</p>
+        <p className="mt-3 text-sm text-zinc-500">아직 저장한 최종 시간표가 없습니다.</p>
       ) : (
         <ul className="mt-3 divide-y divide-zinc-100">
-          {versions.map((v) => (
-            <li key={v.id} className="flex flex-wrap items-center gap-2 py-2">
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-zinc-900">
-                  확정 {v.versionNumber}
-                  <span className="ml-2 text-xs font-normal text-zinc-500">{formatDate(v.createdAt)}</span>
-                </p>
-                <p className="text-xs text-zinc-600">
-                  {v.note ?? ""} {v.note ? "· " : ""}점심 연강 {v.lunchDoubleCount} · 3연강 {v.tripleRunCount} · 같은 날 교과{" "}
-                  {v.sameDaySubjectViolationCount}
-                </p>
-              </div>
+          {versions.map((v, i) => (
+            <li key={v.id}>
               <button
                 type="button"
-                onClick={() => void show(v.id)}
-                className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-800 hover:bg-zinc-50"
+                aria-pressed={v.id === selectedId}
+                onClick={() => onSelect(v.id)}
+                className={`flex w-full flex-col gap-0.5 rounded-lg px-2 py-2 text-left text-sm transition ${
+                  v.id === selectedId ? "bg-zinc-100" : "hover:bg-zinc-50"
+                }`}
               >
-                {shown?.id === v.id ? "닫기" : "보기"}
-              </button>
-              <button
-                type="button"
-                disabled={deleting === v.id}
-                onClick={() => void remove(v)}
-                className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-              >
-                {deleting === v.id ? "삭제 중…" : "삭제"}
+                <span className="flex flex-wrap items-center gap-1.5">
+                  <span className="font-medium text-zinc-900">저장 {v.versionNumber}</span>
+                  {i === 0 ? (
+                    <span className="rounded bg-zinc-900 px-1.5 py-0.5 text-[10px] font-semibold text-white">가장 최근</span>
+                  ) : null}
+                  {v.versionNumber === justSavedVersion ? (
+                    <span className="text-[10px] font-semibold text-emerald-700">방금 저장</span>
+                  ) : null}
+                </span>
+                <span className="text-xs text-zinc-500">
+                  {formatVersionDate(v.createdAt)}
+                  {versionNote(v) ? ` · ${versionNote(v)}` : ""}
+                </span>
+                <span className="text-xs text-zinc-500">
+                  점심 {v.lunchDoubleCount} · 3연강 {v.tripleRunCount} · 같은 날 {v.sameDaySubjectViolationCount}
+                </span>
               </button>
             </li>
           ))}
         </ul>
       )}
-      {shown ? (
-        <div className="mt-4">
-          <V3TimetableView cells={shown.cells} schedules={schedules} classCounts={classCounts} teachers={teachers} />
-        </div>
-      ) : null}
     </section>
   );
 }

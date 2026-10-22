@@ -47,7 +47,7 @@ export type V3JobDocument = {
   _id: ObjectId;
   termId: string;
   accountId: string;
-  /** 학기 안 일련번호 (화면 표시용) */
+  /** 학기 안 일련번호 (화면 표시용). 생성 작업과 진단 작업은 따로 센다 */
   number: number;
   kind: V3JobKind;
   diagnose?: DiagnoseKind;
@@ -81,6 +81,8 @@ export type V3JobDocument = {
   /** 진단 작업의 보고서 */
   diagnosis?: unknown;
   error?: string | null;
+  /** 화면에서 삭제한 작업. 번호와 하한(lowerBound)은 다른 작업이 계속 쓰므로 문서는 남긴다 */
+  hidden?: boolean;
 };
 
 export type V3JobResultDocument = { _id?: ObjectId; jobId: string; termId: string; rank: number } & StoredResult;
@@ -108,7 +110,9 @@ export async function createJob(
 ): Promise<V3JobDocument> {
   const waiting = await jobs(db).countDocuments({ termId: a.termId, status: "queued" });
   if (waiting >= MAX_QUEUED_PER_TERM) throw new JobLimitError(`이 시간표는 이미 대기 중인 작업이 ${waiting}개입니다 (최대 ${MAX_QUEUED_PER_TERM}개).`);
-  const last = await jobs(db).find({ termId: a.termId }).sort({ number: -1 }).limit(1).next();
+  // 번호는 생성 작업(혼합·탐색·정수계획)끼리, 진단끼리 따로 센다 (화면 목록에는 생성 작업만 보임)
+  const sameLane: Filter<V3JobDocument> = a.kind === "diagnose" ? { kind: "diagnose" } : { kind: { $ne: "diagnose" } };
+  const last = await jobs(db).find({ termId: a.termId, ...sameLane }).sort({ number: -1 }).limit(1).next();
   const now = new Date();
   const doc: V3JobDocument = {
     _id: new ObjectId(),
@@ -330,7 +334,7 @@ export function goalAfterApproval(job: Pick<V3JobDocument, "status" | "goal" | "
 
 export async function approveContinue(db: Db, jobId: ObjectId, currentInputHash: string): Promise<V3JobDocument> {
   const job = await jobs(db).findOne({ _id: jobId });
-  if (!job) throw new JobStateError("작업이 없습니다.");
+  if (!job || job.hidden) throw new JobStateError("작업이 없습니다.");
   if (job.kind === "diagnose") throw new JobStateError("진단 작업은 이어 돌릴 수 없습니다. 새로 실행해 주세요.");
   if (!["awaiting", "stopped", "done"].includes(job.status)) throw new JobStateError("지금 상태에서는 이어 돌릴 수 없습니다.");
   if (job.inputHash !== currentInputHash) throw new JobStateError("작업 뒤에 입력이 바뀌어 이어 돌릴 수 없습니다. 새로 실행해 주세요.");
@@ -346,6 +350,25 @@ export async function approveContinue(db: Db, jobId: ObjectId, currentInputHash:
   );
   if (!r) throw new JobStateError("작업 상태가 바뀌었습니다. 다시 시도해 주세요.");
   return r;
+}
+
+/** 삭제할 수 있는 상태: 작업자가 붙잡고 있지 않은 작업 */
+export const HIDEABLE_STATUSES: V3JobStatus[] = ["awaiting", "stopped", "done", "infeasible", "error"];
+
+/** 작업 삭제(목록에서 숨김). 결과와 중단점은 지워 이어 돌리거나 적용할 수 없게 한다 */
+export async function hideJob(db: Db, jobId: ObjectId): Promise<void> {
+  const job = await jobs(db).findOne({ _id: jobId });
+  if (!job) throw new JobStateError("작업이 없습니다.");
+  if (job.kind === "diagnose") throw new JobStateError("진단 작업은 삭제할 수 없습니다.");
+  const r = await jobs(db).updateOne(
+    { _id: jobId, status: { $in: HIDEABLE_STATUSES } },
+    { $set: { hidden: true, autoContinue: false, updatedAt: new Date() } },
+  );
+  if (!r.matchedCount) throw new JobStateError("계산 중인 작업은 삭제할 수 없습니다. 먼저 멈춰 주세요.");
+  await Promise.all([
+    db.collection(JOB_RESULTS).deleteMany({ jobId: String(jobId) }),
+    db.collection(CHECKPOINTS).deleteMany({ jobId: String(jobId) }),
+  ]);
 }
 
 export async function setAutoContinue(db: Db, jobId: ObjectId, value: boolean) {

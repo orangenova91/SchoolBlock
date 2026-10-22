@@ -54,8 +54,8 @@ export function V3TimetableView({
           [
             { key: "class", label: "학반별" },
             { key: "teacher", label: "교사별" },
-            { key: "grade", label: "학년 전체" },
-            { key: "allTeachers", label: "전체 교사" },
+            { key: "grade", label: "전체 학년 시간표" },
+            { key: "allTeachers", label: "전체 교사 시간표" },
           ] as const
         ).map((tab) => (
           <button key={tab.key} type="button" onClick={() => setViewMode(tab.key)} className={tabClass(viewMode === tab.key)}>

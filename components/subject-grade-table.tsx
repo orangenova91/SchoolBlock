@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef } from "react";
 import {
   DEFAULT_SUBJECT_SET,
   MAX_SUBJECT_UNITS,
@@ -45,6 +46,23 @@ export function SubjectGradeTable({
 
   function addRow() {
     onChange([...(subjects.length > 0 ? subjects : []), createEmptySubject()]);
+  }
+
+  // 표가 "저장하고 다음" 양식 안에 있어 Enter가 다음 단계로 넘어가므로, 교과명·단위수 칸의 Enter는
+  // 다음 줄 교과명으로 옮긴다 (마지막 줄이면 교과명이 있을 때만 새 줄을 만든다)
+  const nameInputs = useRef<(HTMLInputElement | null)[]>([]);
+  const focusNameIndex = useRef<number | null>(null);
+
+  function handleEnter(event: React.KeyboardEvent<HTMLInputElement>, index: number) {
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    if (index < rows.length - 1) {
+      nameInputs.current[index + 1]?.focus();
+      return;
+    }
+    if (!rows[index]?.name.trim()) return;
+    focusNameIndex.current = index + 1;
+    addRow();
   }
 
   function removeRow(index: number) {
@@ -104,9 +122,17 @@ export function SubjectGradeTable({
                 </td>
                 <td className="px-2 py-1.5">
                   <input
+                    ref={(el) => {
+                      nameInputs.current[index] = el;
+                      if (el && focusNameIndex.current === index) {
+                        focusNameIndex.current = null;
+                        el.focus();
+                      }
+                    }}
                     type="text"
                     value={row.name}
                     onChange={(e) => updateRow(index, { name: e.target.value })}
+                    onKeyDown={(e) => handleEnter(e, index)}
                     placeholder="예: 국어"
                     aria-label={`${grade}학년 교과명 ${index + 1}`}
                     className="w-full rounded-md border border-zinc-300 px-2 py-1.5 text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
@@ -124,6 +150,7 @@ export function SubjectGradeTable({
                       if (n < MIN_SUBJECT_UNITS || n > MAX_SUBJECT_UNITS) return;
                       updateRow(index, { units: n });
                     }}
+                    onKeyDown={(e) => handleEnter(e, index)}
                     aria-label={`${grade}학년 단위수 ${index + 1}`}
                     className="w-full rounded-md border border-zinc-300 px-1 py-1.5 text-center text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
                   />

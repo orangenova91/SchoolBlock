@@ -38,6 +38,7 @@ function toSummary(doc: TimetableVersionDocument & { _id: ObjectId }) {
     lunchDoubleCount: doc.lunchDoubleCount,
     tripleRunCount: doc.tripleRunCount,
     sameDaySubjectViolationCount: doc.sameDaySubjectViolationCount,
+    note: doc.note ?? null,
   };
 }
 

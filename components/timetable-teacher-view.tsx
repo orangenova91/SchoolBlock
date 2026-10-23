@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { TimetableGrid } from "@/components/timetable-grid";
 import { subjectSetBadgeClass } from "@/lib/subjects";
+import { hasTeacherGroupSections, teacherSections } from "@/lib/teachers";
 import { anyGradeHasPeriod, cellsForTeacher, maxPeriodsAllGrades } from "@/lib/timetable";
 import {
   type GradeDaySchedules,
@@ -15,6 +16,8 @@ type TimetableTeacherViewProps = {
   cells: TimetableCell[];
   schedules: GradeDaySchedules;
   teachers: Teacher[];
+  /** v3 교사 그룹 순서. 있으면 검색 목록을 그룹 순서로 보이고 그룹명을 붙인다 (없으면 가나다순) */
+  groups?: string[];
 };
 
 function cellsAt(
@@ -29,13 +32,13 @@ export function TimetableTeacherView({
   cells,
   schedules,
   teachers,
+  groups,
 }: TimetableTeacherViewProps) {
   const [query, setQuery] = useState("");
 
-  const teacherNames = useMemo(
-    () => [...new Set(teachers.map((t) => t.name).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko")),
-    [teachers],
-  );
+  const sections = useMemo(() => teacherSections(teachers, groups), [teachers, groups]);
+  const showGroupLabels = hasTeacherGroupSections(sections);
+  const teacherNames = useMemo(() => sections.flatMap((s) => s.names), [sections]);
 
   const trimmedQuery = query.trim();
   const selectedTeacher = teacherNames.find((name) => name === trimmedQuery);
@@ -63,9 +66,15 @@ export function TimetableTeacherView({
             className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-center text-sm text-zinc-900 outline-none focus:border-zinc-500 focus:ring-2 focus:ring-zinc-200"
           />
           <datalist id="teacher-view-options">
-            {teacherNames.map((name) => (
-              <option key={name} value={name} />
-            ))}
+            {sections.flatMap((section) =>
+              section.names.map((name) => (
+                <option
+                  key={name}
+                  value={name}
+                  label={showGroupLabels ? (section.group ?? "그룹 없음") : undefined}
+                />
+              )),
+            )}
           </datalist>
         </label>
       </div>

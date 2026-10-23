@@ -1,0 +1,41 @@
+import { NextResponse } from "next/server";
+import { findTermJob, jobNotFound, requireV3Term, serverError } from "@/lib/v3/api";
+import { JOB_RESULTS, knownLowerBound, type V3JobResultDocument } from "@/lib/v3/jobs";
+import { cellSignature, diffCells } from "@/lib/v3/results";
+import { judge } from "@/lib/v3/score";
+import { loadV3Input } from "@/lib/v3/input";
+import { buildInstance } from "@/lib/v3/instance";
+import { scoreDetails } from "@/lib/v3/validate";
+
+type RouteContext = { params: Promise<{ termId: string; jobId: string }> };
+
+/** 작업의 결과 3개 (시간표 칸 포함). 1위와 다른 칸 수, 목표 판정을 함께 준다 */
+export async function GET(request: Request, context: RouteContext) {
+  const { termId, jobId } = await context.params;
+  try {
+    const ctx = await requireV3Term(request, termId);
+    if (ctx instanceof NextResponse) return ctx;
+    const job = await findTermJob(ctx.db, termId, jobId);
+    if (!job) return jobNotFound();
+    const docs = await ctx.db.collection<V3JobResultDocument>(JOB_RESULTS).find({ jobId: String(job._id) }).sort({ rank: 1 }).toArray();
+    const known = await knownLowerBound(ctx.db, termId, job.inputHash);
+    const lower = job.lowerBound === null ? known : known === null ? job.lowerBound : Math.max(job.lowerBound, known);
+    // 점수 내역(어느 수업 때문인지)은 지금 입력 기준으로 센다 (입력이 바뀐 작업은 화면에서 이미 "입력이 바뀜"으로 표시됨)
+    const inst = buildInstance(await loadV3Input(ctx.db, termId));
+    const top = docs[0] ? cellSignature(docs[0].solution.cells) : null;
+    return NextResponse.json({
+      results: docs.map((d) => ({
+        rank: d.rank,
+        metrics: d.metrics,
+        foundAtMs: d.foundAtMs,
+        judgement: judge(d.metrics, { lower, proven: false }),
+        diffFromTop: top ? diffCells(top, cellSignature(d.solution.cells)) : 0,
+        cells: d.solution.cells,
+        details: scoreDetails(inst, d.solution),
+        occurrences: d.solution.occurrences,
+      })),
+    });
+  } catch (error) {
+    return serverError("results GET", error);
+  }
+}

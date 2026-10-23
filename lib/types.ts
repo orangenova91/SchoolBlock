@@ -1,10 +1,23 @@
+import type { V2Weights } from "@/lib/v2-weights";
+
 export type Semester = 1 | 2;
+
+/**
+ * 시간표 생성 로직 버전. 필드가 없으면 기존 로직(v1)으로 처리한다.
+ * "v2"는 비교 검토용 개선 로직(lib/timetable-improved.ts)을 쓴다.
+ */
+export type LogicVersion = "v2" | "v3";
+
+export function parseLogicVersion(value: unknown): LogicVersion | undefined {
+  return value === "v2" || value === "v3" ? value : undefined;
+}
 
 export type TermInput = {
   timetableName: string;
   school: string;
   academicYear: number;
   semester: Semester;
+  logicVersion?: LogicVersion;
 };
 
 export type TermDocument = TermInput & {
@@ -222,13 +235,19 @@ export type TeacherAssignments = Record<Grade, AssignmentItem[]>;
 export type Teacher = {
   name: string;
   assignments: TeacherAssignments;
+  /** v3 교사 그룹화: 속한 그룹명 (한 그룹에만) */
+  group?: string;
 };
 
 export type TeachersDocument = {
   termId: string;
   teachers: Teacher[];
+  /** v3 교사 그룹 목록. 아직 교사가 없는 그룹도 남긴다 */
+  groups?: string[];
   updatedAt: Date;
 };
+
+export const MAX_TEACHER_GROUP_NAME = 30;
 
 export const MIN_ASSIGNMENT_HOURS = 1;
 export const MAX_ASSIGNMENT_HOURS = 40;
@@ -401,6 +420,8 @@ export type TimetableVersionDocument = {
   lunchDoubleCount: number;
   tripleRunCount: number;
   sameDaySubjectViolationCount: number;
+  /** 버전 설명 (선택). 비교용 샘플 등에 조건을 적어 둔다. */
+  note?: string;
 };
 
 export const MAX_TIMETABLE_VERSIONS = 20;
@@ -454,4 +475,6 @@ export type GenerationPreferences = {
 export type GenerationPreferencesDocument = GenerationPreferences & {
   termId: string;
   updatedAt: Date;
+  /** v2 시간표 전용 선호 조건 가중치. v1은 읽지 않는다. */
+  v2Weights?: V2Weights;
 };

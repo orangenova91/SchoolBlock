@@ -1,0 +1,248 @@
+import assert from "node:assert/strict";
+import { estimateMethods } from "@/lib/v3/estimate";
+import { hybridWarmMs } from "@/lib/v3/engines/hybrid";
+import { describe, it } from "node:test";
+import loadHighs from "highs";
+import type { TimetableCell } from "@/lib/types";
+import { tinyInput } from "@/lib/v3/fixtures";
+import { effectiveWeights, v3InputHash } from "@/lib/v3/input";
+import { buildInstance, setDayBounds } from "@/lib/v3/instance";
+import { buildModel, decodeSolution, encodeSolution, type V3Model } from "@/lib/v3/model";
+import { quickCheck } from "@/lib/v3/quick-check";
+import { cellSignature, isDistinct, TopResults } from "@/lib/v3/results";
+import { judge, nearThreshold, strictThreshold } from "@/lib/v3/score";
+import { validateSolution, type V3Solution } from "@/lib/v3/validate";
+
+async function solve(m: V3Model, seconds = 30) {
+  const highs = await loadHighs();
+  const model = highs.createModel({
+    numCols: m.numCols, numRows: m.numRows, colCost: m.cost, colLower: m.lower, colUpper: m.upper,
+    rowLower: m.rowLower, rowUpper: m.rowUpper, integrality: m.integrality,
+    matrix: { format: "csr", numRows: m.numRows, numCols: m.numCols, starts: m.starts, indices: m.indices, values: m.values },
+  } as never);
+  try {
+    model.options.set({ output_flag: false, time_limit: seconds, mip_rel_gap: 0 });
+    model.run();
+    return { status: model.getModelStatus(), x: Float64Array.from(model.getSolution().colValue), objective: model.getObjectiveValue() };
+  } finally {
+    model.dispose();
+  }
+}
+
+describe("v3 입력 지문", () => {
+  it("선 수업·배정 불가 순서가 달라도 같은 지문", () => {
+    const pins = [
+      { grade: 1 as const, classNo: 1, day: "mon" as const, period: 1, subjectName: "국어", teacherName: "김국어" },
+      { grade: 1 as const, classNo: 2, day: "tue" as const, period: 2, subjectName: "수학", teacherName: "이수학" },
+    ];
+    assert.equal(v3InputHash(tinyInput({ pins })), v3InputHash(tinyInput({ pins: [...pins].reverse() })));
+  });
+  it("반별 시수 순서가 바뀌면 다른 지문", () => {
+    const a = tinyInput();
+    const b = structuredClone(a);
+    a.teachers[0].assignments[1][0].classHours = [5, 3];
+    b.teachers[0].assignments[1][0].classHours = [3, 5];
+    assert.notEqual(v3InputHash(a), v3InputHash(b));
+  });
+  it("추가 조건에서 끈 항목은 중요도 0", () => {
+    const input = tinyInput();
+    input.preferences.avoidTriplePeriod = false;
+    assert.deepEqual(effectiveWeights(input), { lunch: 3, triple: 0, sameDay: 3 });
+  });
+});
+
+describe("H12 같은 SET 요일 배분 (층층이 채우기)", () => {
+  const inst = buildInstance(tinyInput());
+  const bounds = (units: number, fixed: { day: "mon" | "tue" | "wed" | "thu" | "fri"; period: number }[] = []) =>
+    Object.fromEntries([...setDayBounds(inst, { ...inst.sets[0], units, fixed })].map(([d, b]) => [d, [b.lo, b.hi]]));
+  it("주 3회, 고정 없음 → 요일마다 0~1회", () => {
+    assert.deepEqual(bounds(3), { mon: [0, 1], tue: [0, 1], wed: [0, 1], thu: [0, 1], fri: [0, 1] });
+  });
+  it("주 3회, 화요일 2회 고정 → 화요일은 그대로 2회, 다른 요일 0~1회", () => {
+    assert.deepEqual(bounds(3, [{ day: "tue", period: 1 }, { day: "tue", period: 3 }]), { mon: [0, 1], tue: [2, 2], wed: [0, 1], thu: [0, 1], fri: [0, 1] });
+  });
+  it("주 7회 → 모든 요일 1회 이상 2회 이하", () => {
+    assert.deepEqual(new Set(Object.values(bounds(7)).map(String)), new Set(["1,2"]));
+  });
+  it("주 11회 → 모든 요일 2회 이상 3회 이하", () => {
+    assert.deepEqual(new Set(Object.values(bounds(11)).map(String)), new Set(["2,3"]));
+  });
+});
+
+describe("점수와 목표 판정", () => {
+  it("근접 기준: 10%와 6점 중 너그러운 쪽", () => {
+    assert.equal(nearThreshold(24), 30);
+    assert.equal(nearThreshold(52), 58);
+    assert.equal(nearThreshold(100), 110);
+    assert.equal(strictThreshold(24), 27);
+    assert.equal(strictThreshold(100), 105);
+  });
+  it("판정", () => {
+    const m = (score: number, unplaced = 0) => ({ unplaced, lunch: 0, triple: 0, sameDay: 0, score });
+    assert.deepEqual(judge(m(30), { lower: 24, proven: true }), { complete: true, near: true, strict: false, optimal: false, gapToNear: 0, threshold: 30 });
+    assert.equal(judge(m(34), { lower: 24, proven: true }).gapToNear, 4);
+    assert.equal(judge(m(24), { lower: 24, proven: false }).optimal, true);
+    assert.equal(judge(m(24, 1), { lower: 24, proven: true }).near, false);
+    assert.equal(judge(m(24), { lower: null, proven: false }).near, null);
+  });
+  it("하한을 몰라도 0점은 최선, 6점 이하는 달성 (점수는 0 이상)", () => {
+    const m = (score: number, unplaced = 0) => ({ unplaced, lunch: 0, triple: 0, sameDay: 0, score });
+    const zero = judge(m(0), { lower: null, proven: false });
+    assert.equal(zero.optimal, true);
+    assert.equal(zero.near, true);
+    assert.equal(zero.strict, true);
+    const five = judge(m(5), { lower: null, proven: false });
+    assert.deepEqual([five.near, five.strict, five.optimal, five.gapToNear], [true, null, false, 0]);
+    // 0 기준으로 못 미치면 진짜 하한을 알기 전까지 모름 (목표까지 몇 점인지 말하지 않음)
+    assert.deepEqual([judge(m(7), { lower: null, proven: false }).near, judge(m(7), { lower: null, proven: false }).gapToNear], [null, null]);
+    assert.equal(judge(m(0, 2), { lower: null, proven: false }).optimal, false);
+  });
+});
+
+describe("상위 3개 결과", () => {
+  const base = new Map(Array.from({ length: 200 }, (_, i) => [`c${i}`, "x"]));
+  const variant = (n: number, tag: string) => new Map([...base].map(([k, v], i) => [k, i < n ? `${tag}${i}` : v]));
+  it("30칸·5% 이상 달라야 다른 결과", () => {
+    assert.equal(isDistinct(base, variant(10, "a")), false);
+    assert.equal(isDistinct(base, variant(40, "a")), true);
+  });
+  it("비슷하면 같거나 좋을 때만 대신하고, 더 좋은 결과는 잃지 않는다", () => {
+    const top = new TopResults<string>();
+    top.offer({ score: 30, signature: base, foundAtMs: 1, payload: "A" });
+    assert.equal(top.offer({ score: 31, signature: variant(10, "a"), foundAtMs: 2, payload: "A-worse" }), false);
+    // 같은 점수의 비슷한 결과는 바꿔 끼우지만 "나아짐"은 아니다
+    assert.equal(top.offer({ score: 30, signature: variant(10, "b"), foundAtMs: 3, payload: "A-same" }), false);
+    assert.deepEqual(top.list.map((r) => r.payload), ["A-same"]);
+    top.offer({ score: 35, signature: variant(60, "c"), foundAtMs: 4, payload: "B" });
+    top.offer({ score: 40, signature: variant(120, "d"), foundAtMs: 5, payload: "C" });
+    top.offer({ score: 45, signature: variant(200, "e"), foundAtMs: 6, payload: "D" });
+    assert.deepEqual(top.list.map((r) => r.payload), ["A-same", "B", "C"]);
+    assert.equal(top.fullAtOrBelow(40), true);
+  });
+  it("시간표 칸 서명", () => {
+    const cells: TimetableCell[] = [{ grade: 1, classNo: 1, day: "mon", period: 1, subjectName: "국어", teacherName: "김국어", kind: "common" }];
+    assert.equal(cellSignature(cells).get("1|1|mon|1"), "국어|김국어");
+  });
+});
+
+describe("빠른 검사", () => {
+  it("학년 전체 SET 밖 칸보다 많은 교사 수업 → 확정 부족", () => {
+    // 1학년 칸 15, SET 2회 → SET 밖 13칸. 국어 교사는 두 반 7시간씩 = 14시간
+    const r = quickCheck(buildInstance(tinyInput({ koreanHours: 7 })));
+    const w = r.warnings.find((x) => x.rule === "teacherGrade" && x.severity === "error");
+    assert.ok(w, JSON.stringify(r.warnings));
+    assert.equal(w.need - w.have, 1);
+    assert.ok(r.minUnplaced >= 1);
+  });
+  it("교사의 수업할 수 없는 칸은 여유 칸 + 그 교사가 맡지 않는 학년 전체 SET 회차까지만 허용 (일반 규칙)", () => {
+    // 1학년 15칸, SET 2회 → SET 밖 13칸. 국어 6시간씩 두 반 = 12시간 → 여유 1칸, 김국어가 맡지 않는 SET 2회 → 최대 3칸
+    const slot = (day: "mon" | "tue" | "wed" | "thu" | "fri", period: number) => ({ teacherName: "김국어", day, period });
+    const three = quickCheck(buildInstance(tinyInput({ koreanHours: 6, forbidden: [slot("mon", 1), slot("tue", 1), slot("wed", 1)] })));
+    const warn = three.warnings.find((x) => x.rule === "teacherGradeBlocked");
+    assert.equal(warn?.severity, "warn", JSON.stringify(three.warnings));
+    assert.equal(three.minUnplaced, 0);
+    const four = quickCheck(buildInstance(tinyInput({ koreanHours: 6, forbidden: [slot("mon", 1), slot("tue", 1), slot("wed", 1), slot("thu", 1)] })));
+    const err = four.warnings.find((x) => x.rule === "teacherGradeBlocked" && x.severity === "error");
+    assert.ok(err, JSON.stringify(four.warnings));
+    assert.equal(err.need - err.have, 1);
+    assert.ok(four.minUnplaced >= 1);
+  });
+  it("고정 SET과 겹친 선 수업은 빼지 않고 오류로 막는다 (v1·v2와 다름: 정확한 완성)", async () => {
+    const inst = buildInstance(tinyInput({
+      fixed: [{ day: "mon", period: 1 }],
+      pins: [{ grade: 1, classNo: 1, day: "mon", period: 1, subjectName: "국어", teacherName: "김국어" }],
+    }));
+    assert.equal(inst.pinConflicts.length, 1);
+    assert.equal(inst.pins.length, 1);
+    const r = quickCheck(inst);
+    assert.ok(r.blocking);
+    assert.ok(r.warnings.some((w) => w.rule === "pinConflict" && w.severity === "error"));
+    assert.equal((await solve(buildModel(inst))).status, 8);
+  });
+  it("문제없는 입력은 확정 부족 없음", () => {
+    const r = quickCheck(buildInstance(tinyInput()));
+    assert.equal(r.minUnplaced, 0);
+    assert.equal(r.blocking, false);
+  });
+});
+
+describe("모델과 검증기", () => {
+  it("정수계획 해를 시간표로 바꾸면 검증기를 통과하고, 모델 목적값 = 검증기 점수", async () => {
+    const input = tinyInput({ rotated: true, fixed: [{ day: "wed", period: 3 }] });
+    const inst = buildInstance(input);
+    const m = buildModel(inst);
+    const r = await solve(m);
+    assert.equal(r.status, 7);
+    const sol = decodeSolution(inst, m, r.x);
+    const v = validateSolution(input, inst, sol);
+    assert.equal(v.ok, true, JSON.stringify(v.violations));
+    assert.ok(Math.abs(v.metrics.score - r.objective) < 1e-6, `${v.metrics.score} vs ${r.objective}`);
+    assert.ok(sol.occurrences.some((o) => o.day === "wed" && o.period === 3), "고정 회차 유지");
+    // 순환: 두 교사가 1회씩
+    const phys = sol.occurrences.map((o) => o.bySubject["A물리"][0]).sort();
+    assert.deepEqual(phys, ["정물리", "최물리"].sort());
+    // 해 → 변수 → 해 왕복
+    const x2 = encodeSolution(inst, m, sol);
+    assert.deepEqual(decodeSolution(inst, m, x2).cells.length, sol.cells.length);
+  });
+
+  it("같은 회차에서 한 교사가 두 과목을 맡으면 교사 겹침(H3)·담당 오류(H10)", async () => {
+    const input = tinyInput({ rotated: true });
+    const inst = buildInstance(input);
+    const m = buildModel(inst);
+    const sol: V3Solution = decodeSolution(inst, m, (await solve(m)).x);
+    sol.occurrences[0].bySubject["A물리"] = ["한화학"];
+    const codes = new Set(validateSolution(input, inst, sol).violations.map((x) => x.code));
+    assert.ok(codes.has("H3") && codes.has("H10"), [...codes].join(","));
+  });
+
+  it("같은 SET을 같은 날 두 번 두면 H12, 수업을 빼면 미배치", async () => {
+    const input = tinyInput();
+    const inst = buildInstance(input);
+    const m = buildModel(inst);
+    const sol = decodeSolution(inst, m, (await solve(m)).x);
+    const [a, b] = sol.occurrences;
+    const moveTo = a.day;
+    for (const c of sol.cells) if (c.kind === "set" && c.day === b.day && c.period === b.period) c.day = moveTo;
+    b.day = moveTo;
+    const removed = sol.cells.findIndex((c) => c.kind === "common");
+    sol.cells.splice(removed, 1);
+    const v = validateSolution(input, inst, sol);
+    assert.ok(v.violations.some((x) => x.code === "H12"), JSON.stringify(v.violations));
+    assert.equal(v.unplaced, 1);
+    assert.equal(v.ok, false);
+  });
+
+  it("배정 불가를 지키지 못하는 고정 SET은 모델이 불가로 판정", async () => {
+    const input = tinyInput({ fixed: [{ day: "mon", period: 1 }], forbidden: [{ teacherName: "한화학", day: "mon", period: 1 }] });
+    const inst = buildInstance(input);
+    assert.ok(quickCheck(inst).warnings.some((w) => w.rule === "fixedConflict"));
+    assert.equal((await solve(buildModel(inst))).status, 8);
+  });
+});
+
+describe("계산 시간 안내 (lib/v3/estimate.ts)", () => {
+  const size = (classes: number, o: Partial<{ forbidden: number; pins: number; fixedSet: number }> = {}) =>
+    ({ classes, teachers: classes * 2, lessons: classes * 30, avgLoad: 15, forbidden: 0, pins: 0, fixedSet: 0, sets: 9, ...o });
+  it("반 수로 규모를 나누고 규모에 맞는 방법을 추천", () => {
+    assert.deepEqual([estimateMethods(size(12)).tier, estimateMethods(size(12)).recommended], ["small", "hybrid"]);
+    assert.deepEqual([estimateMethods(size(13)).tier, estimateMethods(size(13)).recommended], ["medium", "hybrid"]);
+    assert.deepEqual([estimateMethods(size(31)).tier, estimateMethods(size(31)).recommended], ["large", "hybrid"]);
+  });
+  it("더 걸릴 수 있는 조건을 알려 준다", () => {
+    assert.equal(estimateMethods(size(20)).slower.length, 0);
+    const e = estimateMethods(size(20, { forbidden: 100, pins: 40, fixedSet: 3 }));
+    assert.equal(e.slower.length, 3, JSON.stringify(e.slower));
+  });
+});
+
+describe("혼합의 시작 해 탐색 시간", () => {
+  const inst = (n: number) => ({ classCounts: { 1: n, 2: n, 3: n } as const });
+  it("30반 이하는 20초, 큰 학교는 구간의 25%", () => {
+    assert.equal(hybridWarmMs(inst(10), 300_000), 20_000);
+    assert.equal(hybridWarmMs(inst(11), 300_000), 75_000);
+    // 짧은 구간에서는 기존 규칙(25%, 10초 이상)보다 길어지지 않는다
+    assert.equal(hybridWarmMs(inst(4), 20_000), 10_000);
+  });
+});
+

@@ -1,0 +1,5 @@
+{"id":"real-lunchset","kind":"meta","axis":"현실 조합","label":"SET 점심 앞뒤 + 전 교과 동일교과 금지 + 선 수업 10%","buildMs":5,"classes":21,"teachers":46,"loadMin":12,"loadAvg":14.6,"loadMax":18,"commonLessons":448,"setShare":[0,38,63],"setCells":32,"forbidden":0,"pins":45,"bans":18,"setPlaced":true}
+{"id":"real-lunchset","kind":"check","totalMs":686,"quickMs":15,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":671,"lessons":403,"log10Estimate":216}
+{"id":"real-lunchset","kind":"run","run":0,"sec":16,"unplaced":0,"lunch":7,"triple":1,"sameDay":0,"stop":"stall"}
+{"id":"real-lunchset","kind":"run","run":1,"sec":16,"unplaced":0,"lunch":7,"triple":1,"sameDay":0,"stop":"stall"}
+{"id":"real-lunchset","kind":"run","run":2,"sec":16,"unplaced":0,"lunch":7,"triple":1,"sameDay":0,"stop":"stall"}

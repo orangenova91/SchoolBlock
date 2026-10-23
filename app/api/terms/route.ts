@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getAccountId, getSessionFromRequest } from "@/lib/session";
-import type { Semester, TermDocument } from "@/lib/types";
+import { FLOW_CHAPTER } from "@/lib/term-flow-lock";
+import type { Semester, TermDocument, TimetableDocument } from "@/lib/types";
 
 function isSemester(value: unknown): value is Semester {
   return value === 1 || value === 2;
@@ -34,6 +35,37 @@ export async function GET(request: Request) {
       .sort({ createdAt: -1 })
       .toArray();
 
+    // 단계 기록이 없는 예전 학기는 시간표가 있으면 시간표 생성 단계까지 간 것으로 본다 (학기 화면 layout과 같은 규칙)
+    const legacyIds = terms
+      .filter(
+        (term) =>
+          typeof term.maxReachedChapter !== "number" &&
+          typeof term.reachedTimetable !== "boolean",
+      )
+      .map((term) => term._id.toString());
+    const withTimetable = new Set(
+      legacyIds.length > 0
+        ? (
+            await db
+              .collection<TimetableDocument>("timetables")
+              .find({ termId: { $in: legacyIds } }, { projection: { termId: 1 } })
+              .toArray()
+          ).map((doc) => doc.termId)
+        : [],
+    );
+    const reachedChapter = (term: (typeof terms)[number]): number => {
+      if (
+        typeof term.maxReachedChapter === "number" &&
+        Number.isInteger(term.maxReachedChapter)
+      ) {
+        return term.maxReachedChapter;
+      }
+      if (typeof term.reachedTimetable === "boolean") {
+        return term.reachedTimetable ? FLOW_CHAPTER.timetable : 0;
+      }
+      return withTimetable.has(term._id.toString()) ? FLOW_CHAPTER.timetable : 0;
+    };
+
     return NextResponse.json({
       terms: terms.map((term) => ({
         id: term._id.toString(),
@@ -42,6 +74,8 @@ export async function GET(request: Request) {
         academicYear: term.academicYear,
         semester: term.semester,
         createdAt: term.createdAt,
+        logicVersion: term.logicVersion ?? null,
+        maxReachedChapter: reachedChapter(term),
       })),
     });
   } catch (error) {
@@ -83,10 +117,8 @@ export async function POST(request: Request) {
     );
   }
 
-  const { timetableName, academicYear, semester } = body as Record<
-    string,
-    unknown
-  >;
+  const { timetableName, academicYear, semester } =
+    body as Record<string, unknown>;
 
   if (typeof timetableName !== "string" || timetableName.trim().length === 0) {
     return NextResponse.json(
@@ -134,6 +166,8 @@ export async function POST(request: Request) {
     semester: semesterValue,
     ownerId: accountId,
     createdAt: new Date(),
+    // 새 시간표는 v3만 만든다 (요청의 logicVersion은 보지 않는다). 예전 v1·v2 시간표는 그대로 열 수 있다.
+    logicVersion: "v3",
   };
 
   try {

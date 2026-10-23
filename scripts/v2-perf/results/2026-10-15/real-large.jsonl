@@ -1,0 +1,2 @@
+{"id":"real-large","kind":"meta","axis":"현실 조합","label":"큰 학교: 학년당 12반, 교사 평균 17, 요일 불가 20% + 무작위 10%, 선 수업 10%","buildMs":101,"classes":36,"teachers":78,"loadMin":13,"loadAvg":14.8,"loadMax":20,"commonLessons":768,"setShare":[0,38,63],"setCells":32,"forbidden":269,"pins":88,"bans":8,"setPlaced":true}
+{"id":"real-large","kind":"check","totalMs":866,"quickMs":14,"quickMin":1,"exactStatus":"infeasible","exactMin":1,"exactMs":852,"lessons":680,"log10Estimate":null}

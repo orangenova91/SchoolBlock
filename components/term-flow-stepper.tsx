@@ -29,6 +29,9 @@ const CHAPTERS: Chapter[] = [
   { key: "timetable", label: "시간표 생성", href: (id) => `/terms/${id}/timetable`, subCount: 0 },
 ];
 
+/** v3에만 있는 마지막 장 */
+const FINAL_CHAPTER: Chapter = { key: "final", label: "최종 시간표", href: (id) => `/terms/${id}/final`, subCount: 0 };
+
 /** Maps the current pathname (+ ?step= for subjects) to a chapter index and, for two-part chapters, a sub-index. */
 function resolveCurrent(
   pathname: string,
@@ -53,6 +56,7 @@ function resolveCurrent(
   if (pathname.endsWith("/timetable")) {
     return { chapterIndex: FLOW_CHAPTER.timetable, subIndex: 0 };
   }
+  if (pathname.endsWith("/final")) return { chapterIndex: FLOW_CHAPTER.final, subIndex: 0 };
   return null;
 }
 
@@ -60,12 +64,22 @@ export function TermFlowStepper({
   termId,
   termLabel,
   maxReachedChapter = 0,
+  basePath = "/terms",
+  labels,
+  withFinal = false,
 }: {
   termId: string;
   termLabel?: string;
   /** 한 번이라도 연 가장 먼 장. 이 값 이하로는 스테퍼로 이동할 수 있다. */
   maxReachedChapter?: number;
+  /** 단계 링크의 앞부분 (v3: "/v3/terms") */
+  basePath?: string;
+  /** 단계 이름 바꾸기 (v3: SET 고정 배치) */
+  labels?: Partial<Record<string, string>>;
+  /** 9장 "최종 시간표" 표시 (v3) */
+  withFinal?: boolean;
 }) {
+  const chapters = withFinal ? [...CHAPTERS, FINAL_CHAPTER] : CHAPTERS;
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const current = resolveCurrent(pathname, searchParams.get("step"));
@@ -115,10 +129,15 @@ export function TermFlowStepper({
         }`}
       >
         <ol className="flex min-w-max items-start justify-center gap-1.5">
-          {CHAPTERS.map((chapter, i) => {
+          {chapters.map((base, i) => {
+            const chapter = {
+              ...base,
+              label: labels?.[base.key] ?? base.label,
+              href: (id: string) => base.href(id).replace(/^\/terms/, basePath),
+            };
             const status =
               i < chapterIndex ? "done" : i === chapterIndex ? "current" : "upcoming";
-            const isLast = i === CHAPTERS.length - 1;
+            const isLast = i === chapters.length - 1;
             const visitedAhead = status === "upcoming" && i <= maxReached;
             const canJump = status === "done" || visitedAhead;
 

@@ -5,6 +5,7 @@ import type {
   GradeDaySchedules,
   GradeClassCounts,
   GradeSubjects,
+  LogicVersion,
   Semester,
   SetBlockCell,
   SetTeacherAssignment,
@@ -19,6 +20,7 @@ import type {
   GenerationPreferencesDocument,
   SetBlocksDocument,
 } from "@/lib/types";
+import { parseV2Weights, type V2Weights } from "@/lib/v2-weights";
 
 /**
  * 학기(term)에 딸린 설정값 묶음. 생성된 시간표 결과(timetables 컬렉션)는
@@ -29,13 +31,16 @@ export type TermBundle = {
   timetableName: string;
   academicYear: number;
   semester: Semester;
+  /** 없으면 기존 로직. 구버전 파일과 호환되도록 선택 필드로 둔다. */
+  logicVersion?: LogicVersion;
   teachers?: Teacher[];
   subjects?: GradeSubjects;
   daySchedule?: {
     classCounts: GradeClassCounts;
     grades: GradeDaySchedules;
   };
-  preferences?: GenerationPreferences;
+  /** v2Weights는 v2 시간표 전용 (없으면 기본값). */
+  preferences?: GenerationPreferences & { v2Weights?: V2Weights };
   setBlocks?: {
     cells: SetBlockCell[];
     partialCells?: SetBlockCell[];
@@ -83,6 +88,7 @@ export async function collectTermBundle(
     timetableName: term.timetableName,
     academicYear: term.academicYear,
     semester: term.semester,
+    ...(term.logicVersion ? { logicVersion: term.logicVersion } : {}),
     teachers: teachersDoc?.teachers,
     subjects: subjectsDoc?.subjects,
     daySchedule: scheduleDoc
@@ -95,6 +101,9 @@ export async function collectTermBundle(
           avoidTriplePeriod: preferencesDoc.avoidTriplePeriod,
           avoidSameDaySubject: preferencesDoc.avoidSameDaySubject,
           sameDaySubjectBans: preferencesDoc.sameDaySubjectBans,
+          ...(preferencesDoc.v2Weights
+            ? { v2Weights: preferencesDoc.v2Weights }
+            : {}),
         }
       : undefined,
     setBlocks: setBlocksDoc
@@ -138,12 +147,16 @@ export type InsertTermBundleMeta = {
   timetableName: string;
   academicYear: number;
   semester: Semester;
+  logicVersion?: LogicVersion;
 };
 
 /** 번들 데이터로 새 학기(term) + 딸린 설정 문서들을 함께 생성한다. */
 export async function insertTermBundle(
   db: Db,
-  bundle: Omit<TermBundle, "version" | "timetableName" | "academicYear" | "semester">,
+  bundle: Omit<
+    TermBundle,
+    "version" | "timetableName" | "academicYear" | "semester" | "logicVersion"
+  >,
   meta: InsertTermBundleMeta,
 ): Promise<TermDocument & { _id: ObjectId }> {
   const now = new Date();
@@ -156,6 +169,7 @@ export async function insertTermBundle(
     semester: meta.semester,
     ownerId: meta.ownerId,
     createdAt: now,
+    ...(meta.logicVersion ? { logicVersion: meta.logicVersion } : {}),
   };
 
   const insertResult = await terms.insertOne(newTermDoc);
@@ -202,6 +216,9 @@ export async function insertTermBundle(
           avoidTriplePeriod: bundle.preferences.avoidTriplePeriod,
           avoidSameDaySubject: bundle.preferences.avoidSameDaySubject,
           sameDaySubjectBans: bundle.preferences.sameDaySubjectBans,
+          ...(parseV2Weights(bundle.preferences.v2Weights)
+            ? { v2Weights: parseV2Weights(bundle.preferences.v2Weights)! }
+            : {}),
           updatedAt: now,
         }),
     );

@@ -131,6 +131,8 @@ export async function POST(request: Request) {
       timetableName,
       academicYear,
       semester: body.semester,
+      // v1·v2로 내보낸 파일도 v3로 가져온다 (입력 형식은 같다)
+      logicVersion: "v3",
     });
 
     return NextResponse.json(
@@ -141,6 +143,7 @@ export async function POST(request: Request) {
         academicYear: created.academicYear,
         semester: created.semester,
         createdAt: created.createdAt,
+        logicVersion: created.logicVersion ?? null,
       },
       { status: 201 },
     );

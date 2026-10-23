@@ -1,0 +1,5 @@
+{"id":"bans-none","kind":"meta","axis":"제약","label":"동일 교과 금지 없음","buildMs":48,"classes":21,"teachers":46,"loadMin":12,"loadAvg":14.6,"loadMax":18,"commonLessons":448,"setShare":[0,38,63],"setCells":32,"forbidden":0,"pins":0,"bans":0,"setPlaced":true}
+{"id":"bans-none","kind":"check","totalMs":190,"quickMs":14,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":175,"lessons":448,"log10Estimate":253}
+{"id":"bans-none","kind":"run","run":0,"sec":16,"unplaced":0,"lunch":1,"triple":0,"sameDay":0,"stop":"stall"}
+{"id":"bans-none","kind":"run","run":1,"sec":16,"unplaced":0,"lunch":1,"triple":0,"sameDay":0,"stop":"stall"}
+{"id":"bans-none","kind":"run","run":2,"sec":16,"unplaced":0,"lunch":1,"triple":0,"sameDay":0,"stop":"stall"}

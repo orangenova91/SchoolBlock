@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { shortSubjectName, subjectSetBadgeClass } from "@/lib/subjects";
+import { hasTeacherGroupSections, teacherSections } from "@/lib/teachers";
 import {
   fixedLessonKeys,
   isFixedLesson,
@@ -22,6 +23,7 @@ import {
   type GradeDaySchedules,
   type SubjectBlockCell,
   type Teacher,
+  type TeacherForbiddenSlot,
   type TimetableCell,
   type Weekday,
 } from "@/lib/types";
@@ -30,14 +32,22 @@ type TimetableAllTeachersViewProps = {
   cells: TimetableCell[];
   schedules: GradeDaySchedules;
   teachers: Teacher[];
+  /** v3 교사 그룹 순서. 있으면 그룹별로 머리줄을 넣어 나눈다 (없으면 가나다순) */
+  groups?: string[];
   /** 선 수업(교과 블록) placements, used to mark lessons still at their fixed slot. */
   subjectBlocks?: SubjectBlockCell[];
   swapEnabled?: boolean;
+  /** 맞바꾸기 미리보기에 쓰는 배정 불가 시간 (없으면 서버가 저장 때만 검사) */
+  forbiddenSlots?: TeacherForbiddenSlot[];
+  /** 집을 수도, 맞바꿀 대상이 될 수도 없는 수업 (v3: 선 수업 배치) */
+  isLocked?: (cell: TimetableCell) => boolean;
   swapping?: boolean;
   onSwap?: (from: TimetableCellRef, to: TimetableCellRef) => void;
   /** Swap every lesson of one weekday+period column with another column. */
   onSwapSlots?: (from: TimetableSlotRef, to: TimetableSlotRef) => void;
 };
+
+const LOCKED_REASON = "선 수업 배치로 고정한 수업입니다.";
 
 const EDGE_PX = 48;
 const MAX_SCROLL_PER_FRAME = 3;
@@ -116,11 +126,14 @@ export function TimetableAllTeachersView({
   cells,
   schedules,
   teachers,
+  groups,
   subjectBlocks = [],
   swapEnabled = false,
   swapping = false,
   onSwap,
   onSwapSlots,
+  forbiddenSlots,
+  isLocked,
 }: TimetableAllTeachersViewProps) {
   const [picked, setPicked] = useState<TimetableCellRef | null>(null);
   const [pickedSlot, setPickedSlot] = useState<TimetableSlotRef | null>(null);
@@ -130,13 +143,9 @@ export function TimetableAllTeachersView({
   const scrollRef = useRef<HTMLDivElement>(null);
   const pointerRef = useRef({ x: 0, y: 0 });
 
-  const teacherNames = useMemo(
-    () =>
-      [...new Set(teachers.map((t) => t.name).filter(Boolean))].sort((a, b) =>
-        a.localeCompare(b, "ko"),
-      ),
-    [teachers],
-  );
+  const sections = useMemo(() => teacherSections(teachers, groups), [teachers, groups]);
+  const showGroupHeaders = hasTeacherGroupSections(sections);
+  const teacherNames = useMemo(() => sections.flatMap((s) => s.names), [sections]);
 
   const periodCols = useMemo(() => maxPeriodsAllGrades(schedules), [schedules]);
   const periods = useMemo(
@@ -177,15 +186,19 @@ export function TimetableAllTeachersView({
       const key = refKey(ref);
       if (seen.has(key)) continue;
       seen.add(key);
+      if (isLocked?.(cell)) {
+        blocked.set(key, LOCKED_REASON);
+        continue;
+      }
       const result = swapSameClassCommonCells(cells, picked, ref, {
-        forbiddenSlots: [],
+        forbiddenSlots: forbiddenSlots ?? [],
         schedules,
       });
       if ("error" in result) blocked.set(key, result.error);
       else valid.add(key);
     }
     return { valid, blocked };
-  }, [picked, cells, schedules]);
+  }, [picked, cells, schedules, forbiddenSlots, isLocked]);
 
   // Teacher forbidden slots are only checked by the server, as for cell swaps.
   const slotHints = useMemo(() => {
@@ -290,7 +303,7 @@ export function TimetableAllTeachersView({
   }
 
   function handlePick(cell: TimetableCell) {
-    if (!swapEnabled || swapping || cell.kind !== "common") return;
+    if (!swapEnabled || swapping || cell.kind !== "common" || isLocked?.(cell)) return;
     setPickedSlot(null);
     const ref = toRef(cell);
     if (!picked) {
@@ -331,7 +344,9 @@ export function TimetableAllTeachersView({
                 } 초록 교시 번호를 누르면 두 교시의 모든 수업(SET·선 수업 포함)을 통째로 바꾸고, 주황 교시는 바꿀 수 없습니다. Esc 또는 같은 교시를 다시 누르면 취소합니다.`
               : picked
                 ? `${picked.grade}-${picked.classNo} ${picked.subjectName}을 집었습니다. 초록 칸은 맞바꿀 수 있고, 주황 칸은 그 시간에 다른 수업이 있어 조정할 수 없습니다. Esc 또는 같은 칸을 다시 누르면 취소합니다.`
-                : `공통 수업을 클릭해 집고, 같은 학반의 다른 칸을 클릭하면 시간을 맞바꿉니다. SET 수업은 이동할 수 없습니다.${
+                : `공통 수업을 클릭해 집고, 같은 학반의 다른 칸을 클릭하면 시간을 맞바꿉니다. SET 수업${
+                    isLocked ? "과 선 수업(🔒)" : ""
+                  }은 이동할 수 없습니다.${
                     slotSwapEnabled
                       ? " 위쪽 교시 번호를 클릭하면 그 교시 전체를 다른 교시와 바꿀 수 있습니다."
                       : ""
@@ -477,7 +492,22 @@ export function TimetableAllTeachersView({
                 </tr>
               </thead>
               <tbody>
-                {teacherNames.map((name) => {
+                {sections.map((section) => (
+                  <Fragment key={section.group ?? "__none__"}>
+                {showGroupHeaders ? (
+                  <tr>
+                    <td
+                      colSpan={1 + periodCols * WEEKDAYS.length}
+                      className="border border-zinc-300 bg-zinc-100 p-0 text-left"
+                    >
+                      <span className="sticky left-0 inline-block px-2 py-1 text-xs font-semibold text-zinc-900">
+                        {section.group ?? "그룹 없음"}
+                        <span className="ml-1.5 font-normal text-zinc-500">{section.names.length}명</span>
+                      </span>
+                    </td>
+                  </tr>
+                ) : null}
+                {section.names.map((name) => {
                   const teacherCells = cellsByTeacher.get(name) ?? [];
                   return (
                     <tr key={name}>
@@ -535,26 +565,22 @@ export function TimetableAllTeachersView({
                                 const isTarget = swapHints.valid.has(key);
                                 const isBlocked = swapHints.blocked.has(key);
                                 const blockedReason = swapHints.blocked.get(key);
+                                const locked = swapEnabled && Boolean(isLocked?.(c));
+                                const movable = swapEnabled && c.kind === "common" && !locked;
                                 const fixed = isFixedLesson(c, fixedKeys);
                                 return (
                                   <div
                                     key={i}
-                                    role={
-                                      swapEnabled && c.kind === "common"
-                                        ? "button"
-                                        : undefined
-                                    }
-                                    tabIndex={
-                                      swapEnabled && c.kind === "common"
-                                        ? 0
-                                        : undefined
-                                    }
+                                    role={movable ? "button" : undefined}
+                                    tabIndex={movable ? 0 : undefined}
                                     title={
                                       blockedReason
                                         ? `조정 불가 · ${blockedReason}`
-                                        : `${c.grade}학년 ${c.classNo}반 ${c.subjectName} · ${name}${
-                                            fixed ? " · 선 수업(고정)" : ""
-                                          }`
+                                        : locked
+                                          ? `${c.grade}학년 ${c.classNo}반 ${c.subjectName} · ${name} · ${LOCKED_REASON}`
+                                          : `${c.grade}학년 ${c.classNo}반 ${c.subjectName} · ${name}${
+                                              fixed ? " · 선 수업(고정)" : ""
+                                            }`
                                     }
                                     onClick={() => handlePick(c)}
                                     onKeyDown={(event) => {
@@ -567,9 +593,11 @@ export function TimetableAllTeachersView({
                                       }
                                     }}
                                     className={`truncate ${
-                                      swapEnabled && c.kind === "common"
+                                      movable
                                         ? "cursor-pointer select-none rounded-sm px-0.5"
-                                        : ""
+                                        : locked
+                                          ? "cursor-not-allowed"
+                                          : ""
                                     } ${isSource ? "bg-zinc-900 text-white" : ""} ${
                                       isTarget
                                         ? "bg-emerald-100 ring-1 ring-emerald-500"
@@ -581,6 +609,7 @@ export function TimetableAllTeachersView({
                                     }`}
                                   >
                                     <span className="block font-medium">
+                                      {locked ? "🔒" : ""}
                                       {c.grade}-{c.classNo}
                                       {fixed ? <FixedDot /> : null}
                                     </span>
@@ -597,6 +626,8 @@ export function TimetableAllTeachersView({
                     </tr>
                   );
                 })}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           </div>

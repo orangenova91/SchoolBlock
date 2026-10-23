@@ -65,6 +65,7 @@ export async function POST() {
         timetableName: DEMO_TIMETABLE_NAME_NO_SET,
         academicYear,
         semester: 1,
+        logicVersion: "v3",
       }),
       insertTermBundle(db, buildDemoTermBundleWithSet(), {
         ownerId: accountId,
@@ -72,6 +73,7 @@ export async function POST() {
         timetableName: DEMO_TIMETABLE_NAME_WITH_SET,
         academicYear,
         semester: 1,
+        logicVersion: "v3",
       }),
     ]);
 

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { TermForm } from "@/components/term-form";
 import { getServerSession } from "@/lib/session";
 
+/** 새 시간표는 v3로만 만든다 (예전 v1·v2 주소로 들어와도 같다) */
 export default async function NewTimetablePage() {
   const session = await getServerSession();
   if (!session) redirect("/login");
@@ -18,7 +19,7 @@ export default async function NewTimetablePage() {
             시간표명, 학년도, 학기를 입력해 주세요.
           </p>
         </header>
-        <TermForm school={session.username} />
+        <TermForm school={session.username} logicVersion="v3" />
         <Link
           href="/"
           className="text-sm font-medium text-zinc-600 transition hover:text-zinc-900"

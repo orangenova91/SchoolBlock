@@ -1,0 +1,376 @@
+/**
+ * v3 작업(Job) 저장과 상태 전이 (docs/v3-execution-design.md 2절, docs/v3-data-api-design.md 3·4절).
+ *
+ * 상태: queued(대기) → running(실행) → [구간 끝] queued(사전 승인) / awaiting(승인 대기) / done(완료)
+ *       running → stopping(중지 요청) → stopped,  불가 증명 → infeasible,  오류 → error
+ * 상태 바꾸기는 "지금 상태가 맞을 때만" 바꾸는 조건부 갱신으로 해서, 화면 요청과 작업자가 동시에 바꿔도 꼬이지 않는다.
+ */
+import { ObjectId, type Db, type Filter } from "mongodb";
+import type { V3Metrics } from "@/lib/v3/score";
+import type { EngineCheckpoint, EngineKind, EngineOutcome, StoredResult } from "@/lib/v3/engines/types";
+import type { StopGoal } from "@/lib/v3/engines/stop-rules";
+
+export const JOBS = "v3Jobs";
+export const JOB_RESULTS = "v3JobResults";
+export const CHECKPOINTS = "v3Checkpoints";
+
+export const SEGMENT_MS = 5 * 60_000;
+export const MAX_MS = 30 * 60_000;
+export const EXTEND_MS = 5 * 60_000;
+export const DIAGNOSE_BUDGET_MS = 10 * 60_000;
+/** 생성할 때 자동으로 넣는 하한 계산의 시간 (하한은 보통 1분 안에 거의 다 오르고 그 뒤로는 거의 그대로) */
+export const AUTO_BOUND_MS = 2 * 60_000;
+// 작업자가 이 시간 동안 소식이 없으면 끊긴 것으로 보고 다른 작업자가 이어 받는다 (시험용으로 V3_LEASE_MS 로 줄일 수 있음)
+export const LEASE_MS = Number(process.env.V3_LEASE_MS ?? 60_000);
+export const CHECKPOINT_TTL_DAYS = 30;
+export const MAX_QUEUED_PER_TERM = 3;
+
+/** bound: 이론상 최선(하한) 계산 — 생성 작업을 만들면 같은 입력의 하한이 없을 때 함께 대기열에 넣는다 */
+export type DiagnoseKind = "feasibility" | "relax" | "fixedLoss" | "dataLimit" | "bound";
+export type V3JobKind = EngineKind | "diagnose";
+export type V3JobStatus = "queued" | "running" | "stopping" | "awaiting" | "stopped" | "done" | "infeasible" | "error";
+
+export type V3JobProgress = {
+  phase: string;
+  message?: string;
+  bestScore: number | null;
+  bestUnplaced: number | null;
+  lowerBound: number | null;
+  results: number;
+  iterations: number;
+  /** 이번 구간 경과 */
+  segmentMs: number;
+  at: Date;
+};
+
+export type V3JobDocument = {
+  _id: ObjectId;
+  termId: string;
+  accountId: string;
+  /** 학기 안 일련번호 (화면 표시용). 생성 작업과 진단 작업은 따로 센다 */
+  number: number;
+  kind: V3JobKind;
+  diagnose?: DiagnoseKind;
+  inputHash: string;
+  status: V3JobStatus;
+  /** 사전 승인: 켜져 있으면 구간이 끝나도 묻지 않고 계속 (최대 시간까지) */
+  autoContinue: boolean;
+  /**
+   * 조기 종료 목표 (없으면 strict). strict: 엄격 기준 안의 서로 다른 결과 3개.
+   * 엄격 기준 3개로 끝난 작업을 사용자가 추가 탐색하면 optimal(이론상 최선과 같은 점수 3개)로 바뀐다.
+   */
+  goal?: StopGoal;
+  segmentMs: number;
+  /** 최대 시간 (30분 + 추가 승인분) */
+  maxMs: number;
+  /** 지금까지 쓴 계산 시간 (모든 구간 합) */
+  elapsedMs: number;
+  segments: number;
+  seed: number;
+  queuedAt: Date;
+  createdAt: Date;
+  updatedAt: Date;
+  startedAt?: Date;
+  finishedAt?: Date;
+  stopRequested: boolean;
+  lease?: { workerId: string; until: Date } | null;
+  progress?: V3JobProgress | null;
+  lowerBound: number | null;
+  /** 결과 요약 (점수 순) — 진행 조회에서 시간표 칸 없이 보여 줄 것 */
+  summary: { results: { metrics: V3Metrics; foundAtMs: number }[]; bestUnplaced: number | null; stopReason: string | null };
+  /** 진단 작업의 보고서 */
+  diagnosis?: unknown;
+  error?: string | null;
+  /** 화면에서 삭제한 작업. 번호와 하한(lowerBound)은 다른 작업이 계속 쓰므로 문서는 남긴다 */
+  hidden?: boolean;
+};
+
+export type V3JobResultDocument = { _id?: ObjectId; jobId: string; termId: string; rank: number } & StoredResult;
+export type V3CheckpointDocument = { _id?: ObjectId; jobId: string; termId: string; checkpoint: EngineCheckpoint; savedAt: Date; expiresAt: Date };
+
+export class JobLimitError extends Error {}
+export class JobStateError extends Error {}
+
+const jobs = (db: Db) => db.collection<V3JobDocument>(JOBS);
+
+export async function ensureJobIndexes(db: Db) {
+  await Promise.all([
+    jobs(db).createIndex({ status: 1, queuedAt: 1 }),
+    jobs(db).createIndex({ termId: 1, createdAt: -1 }),
+    jobs(db).createIndex({ status: 1, "lease.until": 1 }),
+    db.collection(JOB_RESULTS).createIndex({ jobId: 1, rank: 1 }),
+    db.collection(CHECKPOINTS).createIndex({ jobId: 1 }, { unique: true }),
+    db.collection(CHECKPOINTS).createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 }),
+  ]);
+}
+
+export async function createJob(
+  db: Db,
+  a: { termId: string; accountId: string; kind: V3JobKind; diagnose?: DiagnoseKind; inputHash: string; autoContinue?: boolean; seed?: number; budgetMs?: number },
+): Promise<V3JobDocument> {
+  const waiting = await jobs(db).countDocuments({ termId: a.termId, status: "queued" });
+  if (waiting >= MAX_QUEUED_PER_TERM) throw new JobLimitError(`이 시간표는 이미 대기 중인 작업이 ${waiting}개입니다 (최대 ${MAX_QUEUED_PER_TERM}개).`);
+  // 번호는 생성 작업(혼합·탐색·정수계획)끼리, 진단끼리 따로 센다 (화면 목록에는 생성 작업만 보임)
+  const sameLane: Filter<V3JobDocument> = a.kind === "diagnose" ? { kind: "diagnose" } : { kind: { $ne: "diagnose" } };
+  const last = await jobs(db).find({ termId: a.termId, ...sameLane }).sort({ number: -1 }).limit(1).next();
+  const now = new Date();
+  const doc: V3JobDocument = {
+    _id: new ObjectId(),
+    termId: a.termId,
+    accountId: a.accountId,
+    number: (last?.number ?? 0) + 1,
+    kind: a.kind,
+    ...(a.diagnose ? { diagnose: a.diagnose } : {}),
+    inputHash: a.inputHash,
+    status: "queued",
+    autoContinue: a.autoContinue ?? false,
+    segmentMs: a.kind === "diagnose" ? a.budgetMs ?? DIAGNOSE_BUDGET_MS : SEGMENT_MS,
+    maxMs: a.kind === "diagnose" ? a.budgetMs ?? DIAGNOSE_BUDGET_MS : MAX_MS,
+    elapsedMs: 0,
+    segments: 0,
+    seed: a.seed ?? Math.floor(Math.random() * 1e9),
+    queuedAt: now,
+    createdAt: now,
+    updatedAt: now,
+    stopRequested: false,
+    lease: null,
+    progress: null,
+    lowerBound: null,
+    summary: { results: [], bestUnplaced: null, stopReason: null },
+    error: null,
+  };
+  await jobs(db).insertOne(doc);
+  return doc;
+}
+
+/**
+ * 가장 오래 기다린 대기 작업을 하나 가져간다. 같은 학기에 이미 실행 중인 작업이 있으면 건너뛴다(학기당 실행 1).
+ * 임대가 끝난(작업자가 끊긴) 실행 작업도 다시 가져가 중단점에서 이어 간다.
+ */
+/** 하한 계산 작업인가 (같은 학기의 생성 작업과 동시에 돌 수 있음) */
+export function isBoundJob(job: Pick<V3JobDocument, "kind" | "diagnose">): boolean {
+  return job.kind === "diagnose" && job.diagnose === "bound";
+}
+
+/** 같은 줄(하한 계산 / 그 밖의 작업)의 작업만 고르는 조건. 학기당 한 줄에 하나씩만 실행한다 */
+function laneFilter(job: Pick<V3JobDocument, "kind" | "diagnose">): Filter<V3JobDocument> {
+  const bound: Filter<V3JobDocument> = { kind: "diagnose", diagnose: "bound" };
+  return isBoundJob(job) ? bound : { $nor: [bound] };
+}
+
+export async function claimNextJob(db: Db, workerId: string): Promise<V3JobDocument | null> {
+  const now = new Date();
+  // 끊긴 작업 되살리기
+  await jobs(db).updateMany(
+    { status: { $in: ["running", "stopping"] }, "lease.until": { $lt: now } },
+    [{ $set: { status: { $cond: [{ $eq: ["$status", "stopping"] }, "stopped", "queued"] }, lease: null, updatedAt: now } }],
+  );
+  const candidates = await jobs(db).find({ status: "queued" }).sort({ queuedAt: 1 }).limit(20).toArray();
+  for (const c of candidates) {
+    // 같은 학기는 한 번에 하나씩. 다만 이론상 최선(하한) 계산은 따로 세어, 빈자리가 있으면 생성 작업과 동시에 돈다
+    const busy = await jobs(db).countDocuments({ termId: c.termId, status: { $in: ["running", "stopping"] }, ...laneFilter(c) });
+    if (busy > 0) continue;
+    const claimed = await jobs(db).findOneAndUpdate(
+      { _id: c._id, status: "queued" },
+      { $set: { status: "running", lease: { workerId, until: new Date(Date.now() + LEASE_MS) }, startedAt: c.startedAt ?? now, updatedAt: now } },
+      { returnDocument: "after" },
+    );
+    if (!claimed) continue;
+    // 동시에 같은 학기 작업을 가져간 작업자가 있으면 늦은 쪽이 돌려놓는다
+    const other = await jobs(db).findOne({ termId: c.termId, status: { $in: ["running", "stopping"] }, _id: { $ne: c._id }, ...laneFilter(c) });
+    if (other) {
+      await jobs(db).updateOne({ _id: c._id, "lease.workerId": workerId }, { $set: { status: "queued", lease: null } });
+      continue;
+    }
+    return claimed;
+  }
+  return null;
+}
+
+/** 실행 중 2~3초마다: 임대 연장 + 진행 저장. 중지 요청 여부를 돌려준다 (임대를 잃었으면 null) */
+export async function heartbeat(db: Db, jobId: ObjectId, workerId: string, progress: V3JobProgress | null): Promise<{ stopRequested: boolean } | null> {
+  const r = await jobs(db).findOneAndUpdate(
+    { _id: jobId, "lease.workerId": workerId, status: { $in: ["running", "stopping"] } },
+    { $set: { "lease.until": new Date(Date.now() + LEASE_MS), updatedAt: new Date(), ...(progress ? { progress } : {}) } },
+    { returnDocument: "after", projection: { stopRequested: 1 } },
+  );
+  return r ? { stopRequested: r.stopRequested } : null;
+}
+
+export async function loadCheckpoint(db: Db, jobId: ObjectId): Promise<EngineCheckpoint | null> {
+  const doc = await db.collection<V3CheckpointDocument>(CHECKPOINTS).findOne({ jobId: String(jobId) });
+  return doc?.checkpoint ?? null;
+}
+
+/** 구간 다음 상태 (순수 함수 — 테스트 대상) */
+export function nextStatusAfterSegment(job: Pick<V3JobDocument, "kind" | "autoContinue" | "maxMs" | "stopRequested">, elapsedMs: number, stopReason: EngineOutcome["stopReason"] | "done"): V3JobStatus {
+  if (stopReason === "user" || job.stopRequested) return "stopped";
+  if (stopReason === "infeasible") return "infeasible";
+  if (job.kind === "diagnose" || stopReason === "early" || stopReason === "optimal" || stopReason === "done") return "done";
+  if (elapsedMs >= job.maxMs - 1000) return "done";
+  return job.autoContinue ? "queued" : "awaiting";
+}
+
+/** 구간 결과 저장: 결과 3개, 중단점(30일), 요약, 다음 상태. 임대를 가진 작업자만 저장할 수 있다 */
+export async function finishSegment(db: Db, job: V3JobDocument, workerId: string, outcome: EngineOutcome): Promise<V3JobStatus | null> {
+  const fresh = await jobs(db).findOne({ _id: job._id, "lease.workerId": workerId });
+  if (!fresh) return null;
+  const jobId = String(job._id);
+  const now = new Date();
+  await db.collection(JOB_RESULTS).deleteMany({ jobId });
+  if (outcome.results.length) {
+    await db.collection<V3JobResultDocument>(JOB_RESULTS).insertMany(outcome.results.map((r, rank) => ({ jobId, termId: job.termId, rank, ...r })));
+  }
+  await db.collection<V3CheckpointDocument>(CHECKPOINTS).updateOne(
+    { jobId },
+    { $set: { jobId, termId: job.termId, checkpoint: outcome.checkpoint, savedAt: now, expiresAt: new Date(now.getTime() + CHECKPOINT_TTL_DAYS * 86_400_000) } },
+    { upsert: true },
+  );
+  const elapsedMs = outcome.checkpoint.elapsedMs;
+  const status = nextStatusAfterSegment(fresh, elapsedMs, outcome.stopReason);
+  await jobs(db).updateOne(
+    { _id: job._id, "lease.workerId": workerId },
+    {
+      $set: {
+        status,
+        lease: null,
+        elapsedMs,
+        lowerBound: outcome.lowerBound,
+        updatedAt: now,
+        ...(status === "queued" ? { queuedAt: now } : {}),
+        ...(status === "done" || status === "stopped" || status === "infeasible" ? { finishedAt: now } : {}),
+        stopRequested: false,
+        summary: {
+          results: outcome.results.map((r) => ({ metrics: r.metrics, foundAtMs: r.foundAtMs })),
+          bestUnplaced: outcome.results.length ? 0 : (outcome.bestIncomplete?.unplaced ?? null),
+          stopReason: outcome.stopReason,
+        },
+      },
+      $inc: { segments: 1 },
+    },
+  );
+  return status;
+}
+
+/** 진단 작업 끝: 보고서 저장 */
+export async function finishDiagnosis(db: Db, job: V3JobDocument, workerId: string, report: unknown, stopped: boolean): Promise<void> {
+  const now = new Date();
+  const lb = (report as { lowerBound?: unknown } | null)?.lowerBound;
+  await jobs(db).updateOne(
+    { _id: job._id, "lease.workerId": workerId },
+    {
+      $set: {
+        status: stopped ? "stopped" : "done", lease: null, diagnosis: report, updatedAt: now, finishedAt: now, stopRequested: false,
+        ...(typeof lb === "number" ? { lowerBound: lb } : {}),
+      },
+      $inc: { segments: 1 },
+    },
+  );
+}
+
+/** 같은 학기·같은 입력에서 지금까지 증명된 가장 높은 하한 (없으면 null). 모든 작업의 하한은 같은 문제의 하한이라 서로 나눠 쓸 수 있다 */
+export async function knownLowerBound(db: Db, termId: string, inputHash: string): Promise<number | null> {
+  const best = await jobs(db).find({ termId, inputHash, lowerBound: { $ne: null } }, { projection: { lowerBound: 1 } }).sort({ lowerBound: -1 }).limit(1).next();
+  // 하한 계산 작업은 도중에 증명한 하한도 진행 상황에 남긴다 (끝까지 기다리지 않고 바로 쓴다)
+  const live = await jobs(db)
+    .find({ termId, inputHash, kind: "diagnose", diagnose: "bound", "progress.lowerBound": { $ne: null } }, { projection: { progress: 1 } })
+    .sort({ "progress.lowerBound": -1 })
+    .limit(1)
+    .next();
+  const values = [best?.lowerBound, live?.progress?.lowerBound].filter((v): v is number => typeof v === "number");
+  return values.length ? Math.max(...values) : null;
+}
+
+/** 같은 입력의 하한 계산이 진행 중이거나 하한을 얻고 끝났는가 */
+export async function hasBoundJob(db: Db, termId: string, inputHash: string): Promise<boolean> {
+  const base = { termId, inputHash, kind: "diagnose" as const, diagnose: "bound" as const };
+  // 끝났지만 하한을 못 얻은 작업(중지·메모리 등)은 없는 것으로 본다.
+  // 2026-10-18 이전 방식(항목별 최소 없이 전체 계산만)으로 얻은 하한은 약할 수 있어 새 방식으로 한 번 다시 계산한다 (diagnosis.items 유무)
+  return (await jobs(db).countDocuments({
+    $or: [
+      { ...base, status: { $in: ["queued", "running", "stopping"] } },
+      { ...base, status: "done", lowerBound: { $ne: null }, "diagnosis.items": { $exists: true } },
+    ],
+  })) > 0;
+}
+
+export async function failJob(db: Db, jobId: ObjectId, workerId: string | null, error: string, status: V3JobStatus = "error") {
+  const now = new Date();
+  await jobs(db).updateOne(
+    workerId ? { _id: jobId, "lease.workerId": workerId } : { _id: jobId },
+    { $set: { status, error, lease: null, updatedAt: now, finishedAt: now } },
+  );
+}
+
+// ── 화면에서 오는 요청 (M5 API가 사용) ──
+
+/** 중지: 대기·승인 대기 중이면 바로 중지, 실행 중이면 중지 요청 (작업자가 1초 안에 처리) */
+export async function requestStop(db: Db, jobId: ObjectId): Promise<V3JobStatus> {
+  const now = new Date();
+  const idle = await jobs(db).findOneAndUpdate({ _id: jobId, status: { $in: ["queued", "awaiting"] } }, { $set: { status: "stopped", updatedAt: now, finishedAt: now } }, { returnDocument: "after" });
+  if (idle) return idle.status;
+  const running = await jobs(db).findOneAndUpdate({ _id: jobId, status: "running" }, { $set: { status: "stopping", stopRequested: true, updatedAt: now } }, { returnDocument: "after" });
+  if (running) return running.status;
+  const job = await jobs(db).findOne({ _id: jobId });
+  if (!job) throw new JobStateError("작업이 없습니다.");
+  return job.status;
+}
+
+/**
+ * 이어 돌리기 승인 (5분). 승인 대기·중지·완료 상태에서, 입력이 그대로이고 중단점이 있을 때만.
+ * 최대 시간을 다 썼으면 5분을 더한다.
+ */
+/** 이 작업이 목표를 다 이뤄 더 계산할 것이 없는가 (최적해 3개를 찾았거나, 정수계획이 최선을 증명함) */
+export function jobFinishedForGood(job: Pick<V3JobDocument, "status" | "goal" | "summary">): boolean {
+  if (job.status !== "done") return false;
+  return job.summary.stopReason === "optimal" || (job.summary.stopReason === "early" && job.goal === "optimal");
+}
+
+/** 추가 탐색을 승인하면 목표가 어떻게 되는가: 엄격 기준 3개로 끝났으면 최적해 3개로 올린다 */
+export function goalAfterApproval(job: Pick<V3JobDocument, "status" | "goal" | "summary">): StopGoal {
+  if (job.status === "done" && job.summary.stopReason === "early") return "optimal";
+  return job.goal ?? "strict";
+}
+
+export async function approveContinue(db: Db, jobId: ObjectId, currentInputHash: string): Promise<V3JobDocument> {
+  const job = await jobs(db).findOne({ _id: jobId });
+  if (!job || job.hidden) throw new JobStateError("작업이 없습니다.");
+  if (job.kind === "diagnose") throw new JobStateError("진단 작업은 이어 돌릴 수 없습니다. 새로 실행해 주세요.");
+  if (!["awaiting", "stopped", "done"].includes(job.status)) throw new JobStateError("지금 상태에서는 이어 돌릴 수 없습니다.");
+  if (job.inputHash !== currentInputHash) throw new JobStateError("작업 뒤에 입력이 바뀌어 이어 돌릴 수 없습니다. 새로 실행해 주세요.");
+  if (jobFinishedForGood(job)) throw new JobStateError("이미 최선과 같은 시간표를 찾아 더 계산할 것이 없습니다.");
+  const ck = await db.collection(CHECKPOINTS).countDocuments({ jobId: String(jobId) });
+  if (!ck) throw new JobStateError("중단점이 없어(만료됨) 이어 돌릴 수 없습니다. 새로 실행해 주세요.");
+  const maxMs = job.elapsedMs >= job.maxMs - 1000 ? job.elapsedMs + EXTEND_MS : job.maxMs;
+  const now = new Date();
+  const r = await jobs(db).findOneAndUpdate(
+    { _id: jobId, status: job.status },
+    { $set: { status: "queued", queuedAt: now, updatedAt: now, maxMs, goal: goalAfterApproval(job), stopRequested: false, error: null }, $unset: { finishedAt: "" } },
+    { returnDocument: "after" },
+  );
+  if (!r) throw new JobStateError("작업 상태가 바뀌었습니다. 다시 시도해 주세요.");
+  return r;
+}
+
+/** 삭제할 수 있는 상태: 작업자가 붙잡고 있지 않은 작업 */
+export const HIDEABLE_STATUSES: V3JobStatus[] = ["awaiting", "stopped", "done", "infeasible", "error"];
+
+/** 작업 삭제(목록에서 숨김). 결과와 중단점은 지워 이어 돌리거나 적용할 수 없게 한다 */
+export async function hideJob(db: Db, jobId: ObjectId): Promise<void> {
+  const job = await jobs(db).findOne({ _id: jobId });
+  if (!job) throw new JobStateError("작업이 없습니다.");
+  if (job.kind === "diagnose") throw new JobStateError("진단 작업은 삭제할 수 없습니다.");
+  const r = await jobs(db).updateOne(
+    { _id: jobId, status: { $in: HIDEABLE_STATUSES } },
+    { $set: { hidden: true, autoContinue: false, updatedAt: new Date() } },
+  );
+  if (!r.matchedCount) throw new JobStateError("계산 중인 작업은 삭제할 수 없습니다. 먼저 멈춰 주세요.");
+  await Promise.all([
+    db.collection(JOB_RESULTS).deleteMany({ jobId: String(jobId) }),
+    db.collection(CHECKPOINTS).deleteMany({ jobId: String(jobId) }),
+  ]);
+}
+
+export async function setAutoContinue(db: Db, jobId: ObjectId, value: boolean) {
+  await jobs(db).updateOne({ _id: jobId }, { $set: { autoContinue: value, updatedAt: new Date() } });
+}

@@ -1,0 +1,5 @@
+{"id":"set-partial","kind":"meta","axis":"SET","label":"2학년 SET 하나를 부분 SET 두 개로","buildMs":150,"classes":21,"teachers":46,"loadMin":12,"loadAvg":14.6,"loadMax":18,"commonLessons":448,"setShare":[0,38,63],"setCells":36,"forbidden":0,"pins":0,"bans":8,"setPlaced":true}
+{"id":"set-partial","kind":"check","totalMs":189,"quickMs":19,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":170,"lessons":448,"log10Estimate":254}
+{"id":"set-partial","kind":"run","run":0,"sec":16,"unplaced":0,"lunch":1,"triple":1,"sameDay":0,"stop":"stall"}
+{"id":"set-partial","kind":"run","run":1,"sec":16,"unplaced":0,"lunch":1,"triple":1,"sameDay":0,"stop":"stall"}
+{"id":"set-partial","kind":"run","run":2,"sec":16,"unplaced":0,"lunch":1,"triple":1,"sameDay":0,"stop":"stall"}

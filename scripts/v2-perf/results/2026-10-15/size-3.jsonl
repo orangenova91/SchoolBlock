@@ -1,0 +1,5 @@
+{"id":"size-3","kind":"meta","axis":"규모","label":"학년당 3반 (9개 반)","buildMs":22,"classes":9,"teachers":20,"loadMin":12,"loadAvg":14.4,"loadMax":18,"commonLessons":192,"setShare":[0,38,63],"setCells":32,"forbidden":0,"pins":0,"bans":8,"setPlaced":true}
+{"id":"size-3","kind":"check","totalMs":312,"quickMs":12,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":298,"lessons":192,"log10Estimate":110}
+{"id":"size-3","kind":"run","run":0,"sec":4,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}
+{"id":"size-3","kind":"run","run":1,"sec":3.7,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}
+{"id":"size-3","kind":"run","run":2,"sec":4.3,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}

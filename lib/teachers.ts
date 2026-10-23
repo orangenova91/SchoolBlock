@@ -4,6 +4,7 @@ import {
   GRADES,
   MAX_ASSIGNMENT_HOURS,
   MAX_CELL_HOURS,
+  MAX_TEACHER_GROUP_NAME,
   MIN_ASSIGNMENT_HOURS,
   MIN_CELL_HOURS,
   createDefaultClassCounts,
@@ -206,7 +207,54 @@ export function ensureTeachers(
     assignments: ensureAssignments(
       (t as Teacher | undefined)?.assignments ?? createEmptyTeacherAssignments(),
     ),
+    ...groupField(t?.group),
   }));
+}
+
+/** 그룹명이 있을 때만 group 필드를 붙인다 */
+function groupField(value: unknown): { group?: string } {
+  const group = typeof value === "string" ? value.trim().slice(0, MAX_TEACHER_GROUP_NAME) : "";
+  return group ? { group } : {};
+}
+
+export type TeacherSection = {
+  /** null = 그룹 없음 (그룹을 하나도 안 만들었으면 전체가 이 한 구역) */
+  group: string | null;
+  names: string[];
+};
+
+/**
+ * 시간표 보기·엑셀의 교사 줄 순서.
+ * 그룹이 있으면 그룹 순서 → 그룹 안은 교사 배정 명단 순서, 그룹 없는 교사는 맨 끝. 빈 구역은 뺀다.
+ * 그룹이 없으면 (v1·v2 포함) 가나다순 한 구역.
+ */
+export function teacherSections(teachers: Teacher[], groups: string[] = []): TeacherSection[] {
+  const seen = new Set<string>();
+  const list: { name: string; group: string | null }[] = [];
+  for (const t of teachers) {
+    const name = t.name.trim();
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    list.push({ name, group: t.group && groups.includes(t.group) ? t.group : null });
+  }
+  if (groups.length === 0) {
+    return [{ group: null, names: list.map((x) => x.name).sort((a, b) => a.localeCompare(b, "ko")) }];
+  }
+  return [...groups, null]
+    .map((group) => ({ group, names: list.filter((x) => x.group === group).map((x) => x.name) }))
+    .filter((section) => section.names.length > 0);
+}
+
+/** 구역 머리줄을 보일지: 실제 그룹에 든 교사가 있을 때만 */
+export const hasTeacherGroupSections = (sections: TeacherSection[]) => sections.some((s) => s.group !== null);
+
+/** 저장할 그룹 목록: 이름 정리·중복 제거 후, 교사가 쓰는데 목록에 없는 그룹을 덧붙인다 */
+export function sanitizeTeacherGroups(value: unknown, teachers: Teacher[]): string[] {
+  const names = (Array.isArray(value) ? value : [])
+    .map((v) => groupField(v).group)
+    .concat(teachers.map((t) => groupField(t.group).group))
+    .filter((v): v is string => Boolean(v));
+  return [...new Set(names)];
 }
 
 export function parseTeachersFromClipboard(text: string): Teacher[] {
@@ -240,8 +288,9 @@ export function parseTeachers(value: unknown): Teacher[] | null {
 
   for (const item of value) {
     if (!item || typeof item !== "object") return null;
-    const { name, assignments } = item as Record<string, unknown>;
+    const { name, assignments, group } = item as Record<string, unknown>;
     if (typeof name !== "string") return null;
+    if (group !== undefined && group !== null && typeof group !== "string") return null;
     if (assignments !== undefined) {
       if (!assignments || typeof assignments !== "object") return null;
       for (const grade of GRADES) {
@@ -313,6 +362,7 @@ export function sanitizeTeachers(teachers: Teacher[]): Teacher[] {
     .map((t) => ({
       name: t.name.trim(),
       assignments: ensureAssignments(t.assignments),
+      ...groupField(t.group),
     }))
     .filter((t) => t.name.length > 0);
 }
@@ -323,6 +373,7 @@ export function withEditTeacherRows(teachers: Teacher[]): Teacher[] {
     ? sanitized.map((t) => ({
         name: t.name,
         assignments: ensureAssignments(t.assignments),
+        ...groupField(t.group),
       }))
     : [createEmptyTeacher()];
 }

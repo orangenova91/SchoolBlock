@@ -18,12 +18,17 @@ export async function findOwnedTerm(
   });
 }
 
-/** 시간표 생성 페이지에 들어왔음을 기록해 스테퍼 앞·뒤 이동을 연다. */
+/** 시간표 생성 페이지에 들어왔음을 기록해 스테퍼 앞·뒤 이동을 연다. 더 먼 장(v3 최종 시간표)을 연 기록은 낮추지 않는다. */
 export async function markTermReachedTimetable(
   termId: string,
   ownerId: string,
 ): Promise<void> {
-  await setTermMaxReachedChapter(termId, ownerId, 7);
+  if (!ObjectId.isValid(termId)) return;
+  const db = await getDb();
+  await db.collection<TermDocument>("terms").updateOne(
+    { _id: new ObjectId(termId), ownerId },
+    { $max: { maxReachedChapter: 7 } },
+  );
 }
 
 export async function setTermMaxReachedChapter(
@@ -32,7 +37,7 @@ export async function setTermMaxReachedChapter(
   chapterIndex: number,
 ): Promise<void> {
   if (!ObjectId.isValid(termId)) return;
-  if (!Number.isInteger(chapterIndex) || chapterIndex < 0 || chapterIndex > 7) {
+  if (!Number.isInteger(chapterIndex) || chapterIndex < 0 || chapterIndex > 8) {
     return;
   }
   const db = await getDb();

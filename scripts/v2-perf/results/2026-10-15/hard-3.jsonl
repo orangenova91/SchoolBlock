@@ -1,0 +1,2 @@
+{"id":"hard-3","kind":"meta","axis":"극단 조합","label":"학년당 7반, 교사 평균 20, 요일 불가 30% + 오전만 30%, SET 몰림","buildMs":4,"classes":21,"teachers":41,"loadMin":13,"loadAvg":16.4,"loadMax":22,"commonLessons":448,"setShare":[0,38,63],"setCells":32,"forbidden":91,"pins":0,"bans":8,"setPlaced":true}
+{"id":"hard-3","kind":"check","totalMs":1158,"quickMs":10,"quickMin":1,"exactStatus":"infeasible","exactMin":1,"exactMs":1148,"lessons":448,"log10Estimate":null}

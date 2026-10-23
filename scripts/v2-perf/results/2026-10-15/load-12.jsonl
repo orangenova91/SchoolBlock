@@ -1,0 +1,5 @@
+{"id":"load-12","kind":"meta","axis":"교사 수","label":"교사 평균 12시간 (교사 많음)","buildMs":47,"classes":21,"teachers":60,"loadMin":10,"loadAvg":11.2,"loadMax":13,"commonLessons":448,"setShare":[0,38,63],"setCells":32,"forbidden":0,"pins":0,"bans":8,"setPlaced":true}
+{"id":"load-12","kind":"check","totalMs":178,"quickMs":14,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":164,"lessons":448,"log10Estimate":267}
+{"id":"load-12","kind":"run","run":0,"sec":3.4,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}
+{"id":"load-12","kind":"run","run":1,"sec":3.3,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}
+{"id":"load-12","kind":"run","run":2,"sec":3.1,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}

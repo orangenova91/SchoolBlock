@@ -9,6 +9,7 @@ export type TimetableVersionSummary = {
   lunchDoubleCount: number;
   tripleRunCount: number;
   sameDaySubjectViolationCount: number;
+  note?: string | null;
 };
 
 function formatDate(value: string) {
@@ -104,6 +105,15 @@ export function TimetableVersionPanel({
                     >
                       확정 {version.versionNumber}
                     </p>
+                    {version.note ? (
+                      <p
+                        className={`mt-0.5 text-[11px] leading-snug ${
+                          selected ? "text-zinc-100" : "text-zinc-700"
+                        }`}
+                      >
+                        {version.note}
+                      </p>
+                    ) : null}
                     <p
                       className={`mt-0.5 text-[11px] ${
                         selected ? "text-zinc-300" : "text-zinc-500"

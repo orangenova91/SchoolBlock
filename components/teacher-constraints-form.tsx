@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useTermHref } from "@/lib/use-term-href";
 import { useRouter } from "next/navigation";
 import { ForbiddenPaintGrid } from "@/components/forbidden-paint-grid";
 import {
@@ -51,6 +52,7 @@ type TeacherConstraintsFormProps = {
 
 export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) {
   const router = useRouter();
+  const termHref = useTermHref();
   const [term, setTerm] = useState<TermSummary | null>(null);
   const [teachers, setTeachers] = useState<Teacher[]>(createDefaultTeachers());
   const [subjects, setSubjects] = useState<GradeSubjects>(
@@ -430,7 +432,7 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
     );
     // Full navigation so a stale client bundle cannot skip to /timetable.
     if (ok) {
-      window.location.assign(`/terms/${termId}/preferences`);
+      window.location.assign(termHref(termId, `preferences`));
     }
   }
 
@@ -589,7 +591,7 @@ export function TeacherConstraintsForm({ termId }: TeacherConstraintsFormProps) 
       <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
         <button
           type="button"
-          onClick={() => router.push(`/terms/${termId}/blocks`)}
+          onClick={() => router.push(termHref(termId, `blocks`))}
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
         >
           이전

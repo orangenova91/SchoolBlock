@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { shortSubjectName, subjectSetBadgeClass } from "@/lib/subjects";
 import { maxPeriodsAllGrades } from "@/lib/timetable";
 import {
@@ -46,6 +46,7 @@ export function TimetableGradeView({
   schedules,
   classCounts,
 }: TimetableGradeViewProps) {
+  const [fullscreen, setFullscreen] = useState(false);
   const periodCols = useMemo(
     () => maxPeriodsAllGrades(schedules),
     [schedules],
@@ -72,6 +73,20 @@ export function TimetableGradeView({
     return map;
   }, [cells]);
 
+  useEffect(() => {
+    if (!fullscreen) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setFullscreen(false);
+    }
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [fullscreen]);
+
   if (cells.length === 0) {
     return (
       <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
@@ -83,7 +98,22 @@ export function TimetableGradeView({
   }
 
   return (
-    <section className="rounded-2xl border border-zinc-200 bg-white p-4 text-zinc-900 shadow-sm">
+    <section
+      className={
+        fullscreen
+          ? "fixed inset-0 z-[60] flex flex-col bg-white p-4 text-zinc-900"
+          : "rounded-2xl border border-zinc-200 bg-white p-4 text-zinc-900 shadow-sm"
+      }
+    >
+      <div className="mb-3 flex justify-end">
+        <button
+          type="button"
+          onClick={() => setFullscreen((open) => !open)}
+          className="shrink-0 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50"
+        >
+          {fullscreen ? "닫기" : "전체화면"}
+        </button>
+      </div>
       {rows.length === 0 ? (
         <p className="py-10 text-center text-sm text-zinc-500">
           등록된 반이 없습니다.
@@ -93,7 +123,13 @@ export function TimetableGradeView({
           <h3 className="mb-3 text-center text-sm font-semibold text-zinc-800">
             전체 학년 시간표
           </h3>
-          <div className="max-h-[75vh] overflow-auto rounded-lg border border-zinc-200">
+          <div
+            className={
+              fullscreen
+                ? "min-h-0 flex-1 overflow-auto rounded-lg border border-zinc-200"
+                : "max-h-[75vh] overflow-auto rounded-lg border border-zinc-200"
+            }
+          >
             <table
               className="min-w-full table-fixed border-collapse text-center"
               style={{

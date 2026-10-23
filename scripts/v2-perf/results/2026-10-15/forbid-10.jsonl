@@ -1,0 +1,5 @@
+{"id":"forbid-10","kind":"meta","axis":"제약","label":"배정 불가 무작위 10%","buildMs":45,"classes":21,"teachers":46,"loadMin":12,"loadAvg":14.6,"loadMax":18,"commonLessons":448,"setShare":[0,38,63],"setCells":32,"forbidden":118,"pins":0,"bans":8,"setPlaced":true}
+{"id":"forbid-10","kind":"check","totalMs":308,"quickMs":15,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":293,"lessons":448,"log10Estimate":232}
+{"id":"forbid-10","kind":"run","run":0,"sec":16,"unplaced":0,"lunch":2,"triple":0,"sameDay":0,"stop":"stall"}
+{"id":"forbid-10","kind":"run","run":1,"sec":30,"unplaced":0,"lunch":2,"triple":0,"sameDay":0,"stop":"timeout"}
+{"id":"forbid-10","kind":"run","run":2,"sec":16,"unplaced":0,"lunch":3,"triple":0,"sameDay":0,"stop":"stall"}

@@ -1,0 +1,5 @@
+{"id":"set-avoidlunch","kind":"meta","axis":"SET","label":"SET 배치: 점심 앞뒤 교시 회피","buildMs":5,"classes":21,"teachers":46,"loadMin":12,"loadAvg":14.6,"loadMax":18,"commonLessons":448,"setShare":[0,38,63],"setCells":32,"forbidden":0,"pins":0,"bans":8,"setPlaced":true}
+{"id":"set-avoidlunch","kind":"check","totalMs":226,"quickMs":18,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":206,"lessons":448,"log10Estimate":254}
+{"id":"set-avoidlunch","kind":"run","run":0,"sec":16,"unplaced":0,"lunch":1,"triple":4,"sameDay":0,"stop":"stall"}
+{"id":"set-avoidlunch","kind":"run","run":1,"sec":24,"unplaced":0,"lunch":1,"triple":4,"sameDay":0,"stop":"stall"}
+{"id":"set-avoidlunch","kind":"run","run":2,"sec":16,"unplaced":0,"lunch":1,"triple":4,"sameDay":0,"stop":"stall"}

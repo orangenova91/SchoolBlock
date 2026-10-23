@@ -1,0 +1,5 @@
+{"id":"set-low","kind":"meta","axis":"SET","label":"SET 비중 낮음 (2학년 19%, 3학년 38%)","buildMs":22,"classes":21,"teachers":45,"loadMin":13,"loadAvg":14.9,"loadMax":16,"commonLessons":546,"setShare":[0,19,38],"setCells":18,"forbidden":0,"pins":0,"bans":9,"setPlaced":true}
+{"id":"set-low","kind":"check","totalMs":313,"quickMs":18,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":295,"lessons":546,"log10Estimate":343}
+{"id":"set-low","kind":"run","run":0,"sec":3.7,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}
+{"id":"set-low","kind":"run","run":1,"sec":3.4,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}
+{"id":"set-low","kind":"run","run":2,"sec":4.2,"unplaced":0,"lunch":0,"triple":0,"sameDay":0,"stop":"zero"}

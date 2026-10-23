@@ -1,0 +1,5 @@
+{"id":"pin-20","kind":"meta","axis":"제약","label":"선 수업 20%","buildMs":48,"classes":21,"teachers":46,"loadMin":12,"loadAvg":14.6,"loadMax":18,"commonLessons":448,"setShare":[0,38,63],"setCells":32,"forbidden":0,"pins":97,"bans":8,"setPlaced":true}
+{"id":"pin-20","kind":"check","totalMs":283,"quickMs":14,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":267,"lessons":351,"log10Estimate":171}
+{"id":"pin-20","kind":"run","run":0,"sec":24,"unplaced":0,"lunch":9,"triple":3,"sameDay":0,"stop":"stall"}
+{"id":"pin-20","kind":"run","run":1,"sec":16,"unplaced":0,"lunch":9,"triple":3,"sameDay":0,"stop":"stall"}
+{"id":"pin-20","kind":"run","run":2,"sec":16,"unplaced":0,"lunch":9,"triple":3,"sameDay":0,"stop":"stall"}

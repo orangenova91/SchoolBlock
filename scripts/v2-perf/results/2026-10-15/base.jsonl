@@ -1,0 +1,5 @@
+{"id":"base","kind":"meta","axis":"기준","label":"학년당 7반 · 교사 평균 16시간 · SET 보통 · 자동 SET 배치 · 국수영 동일교과 금지","buildMs":56,"classes":21,"teachers":46,"loadMin":12,"loadAvg":14.6,"loadMax":18,"commonLessons":448,"setShare":[0,38,63],"setCells":32,"forbidden":0,"pins":0,"bans":8,"setPlaced":true}
+{"id":"base","kind":"check","totalMs":232,"quickMs":18,"quickMin":0,"exactStatus":"feasible","exactMin":0,"exactMs":213,"lessons":448,"log10Estimate":253}
+{"id":"base","kind":"run","run":0,"sec":16,"unplaced":0,"lunch":1,"triple":0,"sameDay":0,"stop":"stall"}
+{"id":"base","kind":"run","run":1,"sec":16,"unplaced":0,"lunch":1,"triple":0,"sameDay":0,"stop":"stall"}
+{"id":"base","kind":"run","run":2,"sec":16,"unplaced":0,"lunch":1,"triple":0,"sameDay":0,"stop":"stall"}

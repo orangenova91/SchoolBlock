@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useTermHref } from "@/lib/use-term-href";
 import { useRouter } from "next/navigation";
 import {
   alignAssignmentToSubject,
@@ -69,7 +70,25 @@ type TermSummary = {
 
 type TeachersFormProps = {
   termId: string;
+  /** "교사 명단" 제목 오른쪽에 붙는 버튼 (v3: 교사 그룹화). 저장 전 입력 중인 명단·그룹을 받아 바꿀 수 있다 */
+  rosterAction?: (roster: TeacherRoster) => ReactNode;
 };
+
+export type TeacherRoster = {
+  teachers: Teacher[];
+  groups: string[];
+  /** 바꾼 명단·그룹은 교사 배정의 저장 버튼으로 함께 저장된다 */
+  onChange: (teachers: Teacher[], groups: string[]) => void;
+};
+
+/** CSV·붙여넣기로 명단을 새로 받을 때, 같은 이름 교사의 그룹을 이어 준다 */
+function carryGroups(next: Teacher[], prev: Teacher[]): Teacher[] {
+  const byName = new Map(prev.filter((t) => t.group).map((t) => [t.name.trim(), t.group]));
+  return next.map((t) => {
+    const group = t.group ?? byName.get(t.name.trim());
+    return group ? { ...t, group } : t;
+  });
+}
 
 type DragSubjectPayload = {
   grade: Grade;
@@ -982,10 +1001,12 @@ function AssignmentHoursEditor({
   );
 }
 
-export function TeachersForm({ termId }: TeachersFormProps) {
+export function TeachersForm({ termId, rosterAction }: TeachersFormProps) {
   const router = useRouter();
+  const termHref = useTermHref();
   const [term, setTerm] = useState<TermSummary | null>(null);
   const [teachers, setTeachers] = useState<Teacher[]>(createDefaultTeachers());
+  const [groups, setGroups] = useState<string[]>([]);
   const [subjects, setSubjects] = useState<GradeSubjects>(
     createDefaultGradeSubjects(),
   );
@@ -1007,6 +1028,11 @@ export function TeachersForm({ termId }: TeachersFormProps) {
   const csvFileRef = useRef<HTMLInputElement>(null);
   const [dragTeacherIndex, setDragTeacherIndex] = useState<number | null>(null);
   const [dropTeacherIndex, setDropTeacherIndex] = useState<number | null>(null);
+  /** 교사 줄을 끌어 그룹 머리줄 위에 있을 때 그 구역 */
+  const [dropSectionKey, setDropSectionKey] = useState<string | null>(null);
+  const nameInputs = useRef<(HTMLInputElement | null)[]>([]);
+  /** 새 줄이 그려지면 커서를 줄 교사 줄 (배열 위치) */
+  const focusNameIndex = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1025,6 +1051,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
         const teachersData = (await teachersRes.json()) as {
           term?: TermSummary;
           teachers?: Teacher[];
+          groups?: string[];
           error?: string;
         };
         const subjectsData = (await subjectsRes.json()) as {
@@ -1085,6 +1112,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
               ? withEditTeacherRows(loadedTeachers)
               : createDefaultTeachers(),
           );
+          setGroups(Array.isArray(teachersData.groups) ? teachersData.groups : []);
           setStatus("idle");
         }
       } catch {
@@ -1207,6 +1235,18 @@ export function TeachersForm({ termId }: TeachersFormProps) {
     setMessage("");
   }
 
+  /** index 교사 바로 다음에 같은 그룹의 빈 줄을 넣는다 (그룹 구역에서도 바로 아래에 보인다) */
+  function insertRowAfter(index: number) {
+    setTeachers((prev) => {
+      const base = prev.length > 0 ? [...prev] : [createEmptyTeacher()];
+      const group = groupOf(base[index]);
+      base.splice(index + 1, 0, group ? { ...createEmptyTeacher(), group } : createEmptyTeacher());
+      return base;
+    });
+    setStatus("idle");
+    setMessage("");
+  }
+
   function removeRow(index: number) {
     setTeachers((prev) => {
       const base = prev.length > 0 ? prev : [createEmptyTeacher()];
@@ -1217,20 +1257,24 @@ export function TeachersForm({ termId }: TeachersFormProps) {
     setMessage("");
   }
 
-  function moveTeacher(fromIndex: number, toIndex: number) {
-    if (fromIndex === toIndex) return;
+  /** 그룹 목록에 있는 그룹만 인정한다 (없으면 "그룹 없음") */
+  const groupOf = (teacher: Teacher | undefined) =>
+    teacher?.group && groups.includes(teacher.group) ? teacher.group : undefined;
+
+  /**
+   * fromIndex 교사를 toIndex 자리로 옮기고 소속 그룹을 group으로 맞춘다.
+   * toIndex가 null이면 맨 끝으로 (같은 그룹 안의 순서는 배열 순서를 따른다).
+   */
+  function moveTeacher(fromIndex: number, toIndex: number | null, group: string | undefined) {
     setTeachers((prev) => {
       const base = prev.length > 0 ? [...prev] : [createEmptyTeacher()];
-      if (
-        fromIndex < 0 ||
-        toIndex < 0 ||
-        fromIndex >= base.length ||
-        toIndex >= base.length
-      ) {
-        return base;
-      }
+      if (fromIndex < 0 || fromIndex >= base.length) return base;
+      if (toIndex !== null && (toIndex < 0 || toIndex >= base.length)) return base;
+      if (toIndex === fromIndex && groupOf(base[fromIndex]) === group) return base;
       const [moved] = base.splice(fromIndex, 1);
-      base.splice(toIndex, 0, moved);
+      const placed = { ...moved, group };
+      if (toIndex === null) base.push(placed);
+      else base.splice(toIndex, 0, placed);
       return base;
     });
     setStatus("idle");
@@ -1274,12 +1318,39 @@ export function TeachersForm({ termId }: TeachersFormProps) {
     setDragTeacherIndex(null);
     setDropTeacherIndex(null);
     if (!Number.isInteger(fromIndex)) return;
-    moveTeacher(fromIndex, index);
+    // 다른 그룹 교사 위에 놓으면 그 그룹으로 옮긴다
+    moveTeacher(fromIndex, index, groupOf(teachers[index]));
   }
 
   function handleTeacherDragEnd() {
     setDragTeacherIndex(null);
     setDropTeacherIndex(null);
+    setDropSectionKey(null);
+  }
+
+  function handleSectionDragOver(event: React.DragEvent<HTMLElement>, key: string) {
+    const types = Array.from(event.dataTransfer.types);
+    if (!types.includes(TEACHER_DRAG_MIME) || types.includes(DRAG_MIME)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+    setDropSectionKey(key);
+  }
+
+  /** 그룹 머리줄에 놓으면 그 그룹의 맨 위로 (빈 그룹이면 그냥 그 그룹으로) */
+  function handleSectionDrop(
+    event: React.DragEvent<HTMLElement>,
+    group: string | undefined,
+    firstIndex: number | null,
+  ) {
+    event.preventDefault();
+    const fromIndex = Number(event.dataTransfer.getData(TEACHER_DRAG_MIME));
+    setDragTeacherIndex(null);
+    setDropTeacherIndex(null);
+    setDropSectionKey(null);
+    if (!Number.isInteger(fromIndex)) return;
+    const toIndex =
+      firstIndex === null ? null : fromIndex < firstIndex ? firstIndex - 1 : firstIndex;
+    moveTeacher(fromIndex, toIndex, group);
   }
 
   function handlePaste(event: React.ClipboardEvent<HTMLElement>) {
@@ -1294,7 +1365,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
 
     event.preventDefault();
     event.stopPropagation();
-    setTeachers(parsed);
+    setTeachers((prev) => carryGroups(parsed, prev));
     setStatus("idle");
     setMessage("");
   }
@@ -1351,7 +1422,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
         gradeClassCounts,
       ),
     }));
-    setTeachers(withEditTeacherRows(next));
+    setTeachers(withEditTeacherRows(carryGroups(next, teachers)));
     setCsvPreview(null);
     setStatus("idle");
     setMessage(
@@ -1402,11 +1473,12 @@ export function TeachersForm({ termId }: TeachersFormProps) {
       const response = await fetch(`/api/terms/${termId}/teachers`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ teachers: sanitized }),
+        body: JSON.stringify({ teachers: sanitized, groups }),
       });
 
       const data = (await response.json()) as {
         teachers?: Teacher[];
+        groups?: string[];
         error?: string;
       };
 
@@ -1427,6 +1499,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
         ),
       }));
       setTeachers(withEditTeacherRows(saved));
+      if (Array.isArray(data.groups)) setGroups(data.groups);
       setStatus("success");
       setMessage(successMessage);
       return true;
@@ -1470,7 +1543,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
       return;
     }
     const ok = await saveTeachers("교사 명단이 저장되었습니다.");
-    if (ok) router.push(`/terms/${termId}/sets`);
+    if (ok) router.push(termHref(termId, `sets`));
   }
 
   const hoursBySubject = useMemo(() => assignedHoursMap(teachers), [teachers]);
@@ -1522,6 +1595,47 @@ export function TeachersForm({ termId }: TeachersFormProps) {
         }))
       : [createEmptyTeacher()];
 
+  // 그룹이 있으면 그룹 순서대로 구역을 나누고 "그룹 없음"은 맨 아래. 순 번호는 구역마다 1부터.
+  // 각 줄은 teachers 배열의 원래 위치(index)로 편집한다.
+  type RosterItem =
+    | { type: "section"; key: string; label: string; group: string | undefined; count: number; firstIndex: number | null }
+    | { type: "row"; row: Teacher; index: number; no: number };
+  const rosterItems: RosterItem[] =
+    groups.length === 0
+      ? rows.map((row, index) => ({ type: "row", row, index, no: index + 1 }))
+      : [...groups, undefined].flatMap((group): RosterItem[] => {
+          const members = rows
+            .map((row, index) => ({ row, index }))
+            .filter(({ row }) => groupOf(row) === group);
+          return [
+            {
+              type: "section",
+              key: group === undefined ? "none" : `group:${group}`,
+              label: group ?? "그룹 없음",
+              group,
+              count: members.length,
+              firstIndex: members[0]?.index ?? null,
+            },
+            ...members.map(({ row, index }, i): RosterItem => ({ type: "row", row, index, no: i + 1 })),
+          ];
+        });
+
+  // 교사명 칸의 Enter는 "저장하고 다음"으로 넘어가지 않고, 화면에서 바로 아래 교사(같은 그룹)로 옮긴다.
+  // 그룹의 마지막 줄이면 교사명이 있을 때만 같은 그룹에 새 줄을 넣는다.
+  function handleNameEnter(event: React.KeyboardEvent<HTMLInputElement>, index: number) {
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    const at = rosterItems.findIndex((item) => item.type === "row" && item.index === index);
+    const next = rosterItems[at + 1];
+    if (next?.type === "row") {
+      nameInputs.current[next.index]?.focus();
+      return;
+    }
+    if (!rows[index]?.name.trim()) return;
+    focusNameIndex.current = index + 1;
+    insertRowAfter(index);
+  }
+
   return (
     <form onSubmit={handleSubmit} className="flex w-full flex-col gap-6">
       <header className="text-center">
@@ -1546,9 +1660,29 @@ export function TeachersForm({ termId }: TeachersFormProps) {
 
       <div className="grid w-full grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
         <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-          <h2 className="mb-3 text-center text-base font-semibold text-zinc-900">
-            교사 명단
-          </h2>
+          <div className="relative mb-3 flex items-center justify-center gap-2">
+            <h2 className="text-center text-base font-semibold text-zinc-900">
+              교사 명단
+            </h2>
+            {rosterAction?.({
+              teachers,
+              groups,
+              onChange: (nextTeachers, nextGroups) => {
+                setTeachers(nextTeachers);
+                setGroups(nextGroups);
+                setStatus("idle");
+                setMessage("");
+              },
+            })}
+            <button
+              type="button"
+              onClick={() => void handleSaveTeachers()}
+              disabled={status === "saving"}
+              className="absolute right-0 top-1/2 -translate-y-1/2 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {status === "saving" ? "저장 중…" : "저장하기"}
+            </button>
+          </div>
           <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
             <button
               type="button"
@@ -1584,7 +1718,31 @@ export function TeachersForm({ termId }: TeachersFormProps) {
               <span aria-hidden="true" />
             </div>
             <div className="flex min-w-[40rem] flex-col gap-3">
-              {rows.map((row, index) => {
+              {rosterItems.map((item) => {
+                if (item.type === "section") {
+                  return (
+                    <div
+                      key={item.key}
+                      onDragOver={(event) => handleSectionDragOver(event, item.key)}
+                      onDragLeave={() => setDropSectionKey((cur) => (cur === item.key ? null : cur))}
+                      onDrop={(event) => handleSectionDrop(event, item.group, item.firstIndex)}
+                      className={`flex items-center gap-2 rounded-lg border px-3 py-1.5 transition ${
+                        dropSectionKey === item.key
+                          ? "border-sky-400 bg-sky-50"
+                          : item.group === undefined
+                            ? "border-dashed border-zinc-300 bg-white"
+                            : "border-zinc-300 bg-zinc-100"
+                      } mt-2 first:mt-0`}
+                    >
+                      <span className="text-sm font-semibold text-zinc-900">{item.label}</span>
+                      <span className="text-xs text-zinc-500">{item.count}명</span>
+                      {item.count === 0 ? (
+                        <span className="text-xs text-zinc-400">· ⋮⋮로 교사를 끌어다 놓을 수 있습니다</span>
+                      ) : null}
+                    </div>
+                  );
+                }
+                const { row, index, no } = item;
                 const flatItems = GRADES.flatMap((grade) =>
                   (row.assignments[grade] ?? []).map((item) => {
                     const subject = subjects[grade]?.find(
@@ -1641,14 +1799,22 @@ export function TeachersForm({ termId }: TeachersFormProps) {
                     </button>
 
                     <span className="pt-2 text-center text-xs tabular-nums text-zinc-500">
-                      {index + 1}
+                      {no}
                     </span>
 
                     <div className="pt-0.5">
                       <input
+                        ref={(el) => {
+                          nameInputs.current[index] = el;
+                          if (el && focusNameIndex.current === index) {
+                            focusNameIndex.current = null;
+                            el.focus();
+                          }
+                        }}
                         type="text"
                         value={row.name}
                         onChange={(e) => updateRowName(index, e.target.value)}
+                        onKeyDown={(e) => handleNameEnter(e, index)}
                         onPaste={handlePaste}
                         placeholder="예: 김선생"
                         aria-label={`교사명 ${index + 1}`}
@@ -1832,7 +1998,7 @@ export function TeachersForm({ termId }: TeachersFormProps) {
       <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center">
         <button
           type="button"
-          onClick={() => router.push(`/terms/${termId}/subjects?step=2`)}
+          onClick={() => router.push(termHref(termId, `subjects?step=2`))}
           className="rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-800 transition hover:bg-zinc-50"
         >
           이전

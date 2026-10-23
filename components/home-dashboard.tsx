@@ -9,7 +9,8 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import type { Semester } from "@/lib/types";
+import { termResumeHref } from "@/lib/term-flow-lock";
+import type { LogicVersion, Semester } from "@/lib/types";
 
 type TermListItem = {
   id: string;
@@ -18,6 +19,9 @@ type TermListItem = {
   academicYear: number;
   semester: number;
   createdAt: string;
+  logicVersion?: LogicVersion | null;
+  /** 가장 멀리 간 단계. 목록에서 누르면 이 단계가 열린다. */
+  maxReachedChapter?: number;
 };
 
 type EditDraft = {
@@ -182,6 +186,7 @@ export function HomeDashboard() {
         academicYear: data.academicYear ?? term.academicYear,
         semester: data.semester ?? term.semester,
         createdAt: data.createdAt ?? new Date().toISOString(),
+        logicVersion: data.logicVersion ?? null,
       };
 
       setTerms((prev) => [created, ...prev]);
@@ -239,6 +244,7 @@ export function HomeDashboard() {
         academicYear: data.academicYear ?? new Date().getFullYear(),
         semester: data.semester ?? 1,
         createdAt: data.createdAt ?? new Date().toISOString(),
+        logicVersion: data.logicVersion ?? null,
       };
 
       setTerms((prev) => [created, ...prev]);
@@ -349,6 +355,10 @@ export function HomeDashboard() {
         >
           새 시간표 작성
         </Link>
+        <p className="mt-2 text-xs text-zinc-500">
+          SET 수업도 자동으로 배치하고, 여러 방법으로 오래 계산해 가장 좋은
+          결과 3개를 보여 줍니다.
+        </p>
       </section>
 
       <section className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
@@ -506,11 +516,21 @@ export function HomeDashboard() {
                       </form>
                     ) : (
                       <Link
-                        href={`/terms/${term.id}/days`}
+                        href={termResumeHref(term.id, term.logicVersion, term.maxReachedChapter)}
                         className="min-w-0 flex-1"
                       >
-                        <p className="font-medium text-zinc-900">
-                          {term.timetableName || "(이름 없음)"}
+                        <p className="flex items-center gap-2 font-medium text-zinc-900">
+                          <span className="truncate">
+                            {term.timetableName || "(이름 없음)"}
+                          </span>
+                          {term.logicVersion === "v3" ? null : (
+                            <span
+                              title="예전 방식으로 만든 시간표입니다"
+                              className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-semibold text-zinc-600 ring-1 ring-zinc-200"
+                            >
+                              {term.logicVersion === "v2" ? "v2" : "v1"}
+                            </span>
+                          )}
                         </p>
                         <p className="mt-1 text-sm text-zinc-600">
                           {term.school} · {term.academicYear}학년도 ·{" "}

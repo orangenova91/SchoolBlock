@@ -1,5 +1,6 @@
 "use client";
 
+import { useTermHref } from "@/lib/use-term-href";
 import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { PeriodPaintGrid } from "@/components/period-paint-grid";
@@ -31,6 +32,7 @@ type DayScheduleFormProps = {
 
 export function DayScheduleForm({ termId }: DayScheduleFormProps) {
   const router = useRouter();
+  const termHref = useTermHref();
   const [term, setTerm] = useState<TermSummary | null>(null);
   const [grades, setGrades] = useState<GradeDaySchedules>(
     createDefaultGradeDaySchedules(),
@@ -138,7 +140,7 @@ export function DayScheduleForm({ termId }: DayScheduleFormProps) {
         return;
       }
 
-      router.push(`/terms/${termId}/subjects`);
+      router.push(termHref(termId, `subjects`));
     } catch {
       setStatus("error");
       setMessage("서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.");

@@ -355,22 +355,9 @@ export function HomeDashboard() {
         >
           새 시간표 작성
         </Link>
-        <Link
-          href="/new?logic=v2"
-          className="mt-2 inline-flex w-full items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 transition hover:bg-zinc-100"
-        >
-          새 시간표 작성(v2)
-        </Link>
-        <Link
-          href="/new?logic=v3"
-          className="mt-2 inline-flex w-full items-center justify-center rounded-lg border border-zinc-300 bg-white px-4 py-2.5 text-sm font-medium text-zinc-900 transition hover:bg-zinc-100"
-        >
-          새 시간표 작성(v3)
-        </Link>
         <p className="mt-2 text-xs text-zinc-500">
-          v2는 개선된 시간표 생성 로직을 비교 검토하기 위한 시간표입니다.
-          v3는 SET 수업도 자동으로 배치하고, 여러 방법으로 오래 계산해 가장
-          좋은 결과 3개를 보여 줍니다.
+          SET 수업도 자동으로 배치하고, 여러 방법으로 오래 계산해 가장 좋은
+          결과 3개를 보여 줍니다.
         </p>
       </section>
 
@@ -536,15 +523,14 @@ export function HomeDashboard() {
                           <span className="truncate">
                             {term.timetableName || "(이름 없음)"}
                           </span>
-                          {term.logicVersion === "v2" ? (
-                            <span className="shrink-0 rounded bg-indigo-50 px-1.5 py-0.5 text-xs font-semibold text-indigo-700 ring-1 ring-indigo-200">
-                              v2
+                          {term.logicVersion === "v3" ? null : (
+                            <span
+                              title="예전 방식으로 만든 시간표입니다"
+                              className="shrink-0 rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-semibold text-zinc-600 ring-1 ring-zinc-200"
+                            >
+                              {term.logicVersion === "v2" ? "v2" : "v1"}
                             </span>
-                          ) : term.logicVersion === "v3" ? (
-                            <span className="shrink-0 rounded bg-emerald-50 px-1.5 py-0.5 text-xs font-semibold text-emerald-700 ring-1 ring-emerald-200">
-                              v3
-                            </span>
-                          ) : null}
+                          )}
                         </p>
                         <p className="mt-1 text-sm text-zinc-600">
                           {term.school} · {term.academicYear}학년도 ·{" "}

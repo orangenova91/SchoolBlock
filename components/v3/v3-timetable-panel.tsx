@@ -416,7 +416,7 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
   return (
     <div className="relative flex w-full flex-col gap-6">
       <header className="text-center">
-        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">시간표 생성 (v3)</h1>
+        <h1 className="text-2xl font-semibold tracking-tight text-zinc-900">시간표 생성</h1>
         <p className="mt-2 text-sm text-zinc-600">
           모든 수업을 빠짐없이 배치한 시간표만 만듭니다. 점수는 피하고 싶은 일(점심 연강·3연강·같은 날 교과)이 생긴 건수에
           중요도를 곱해 더한 값이라 <b>낮을수록 좋습니다</b>.

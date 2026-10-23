@@ -7,20 +7,30 @@ import { TimetableGrid } from "@/components/timetable-grid";
 import { TimetableTeacherView } from "@/components/timetable-teacher-view";
 import { subjectSetBadgeClass } from "@/lib/subjects";
 import { cellsForClass, maxPeriods } from "@/lib/timetable";
+import type { TimetableCellRef } from "@/lib/timetable-swap";
 import {
   GRADES,
   type Grade,
   type GradeClassCounts,
   type GradeDaySchedules,
   type Teacher,
+  type TeacherForbiddenSlot,
   type TimetableCell,
 } from "@/lib/types";
 
-type ViewMode = "class" | "teacher" | "grade" | "allTeachers";
+export type V3ViewMode = "class" | "teacher" | "grade" | "allTeachers";
+
+/** 9장 미세 조정: 전체 교사 시간표에서만 맞바꾼다 */
+export type V3FineTuneProps = {
+  swapping: boolean;
+  onSwap: (from: TimetableCellRef, to: TimetableCellRef) => void;
+  forbiddenSlots: TeacherForbiddenSlot[];
+  isLocked: (cell: TimetableCell) => boolean;
+};
 
 /**
  * v3 결과 보기. v1 시간표 화면의 보기(학반별·교사별·학년 전체·전체 교사)를 그대로 쓴다.
- * 결과를 적용하기 전 비교용이라 칸 바꾸기(미세 조정)는 끈다.
+ * 칸 바꾸기(미세 조정)는 fineTune을 줄 때만 전체 교사 시간표에서 켠다.
  */
 export function V3TimetableView({
   cells,
@@ -29,6 +39,8 @@ export function V3TimetableView({
   teachers,
   teacherGroups,
   fixedSetKeys,
+  defaultView = "class",
+  fineTune,
 }: {
   cells: TimetableCell[];
   schedules: GradeDaySchedules;
@@ -38,8 +50,11 @@ export function V3TimetableView({
   teacherGroups?: string[];
   /** 사용자가 고정한 SET 칸 ("학년|SET|요일|교시"). 나머지 SET 칸은 자동 배치 */
   fixedSetKeys?: Set<string>;
+  /** 처음 열 보기 탭 */
+  defaultView?: V3ViewMode;
+  fineTune?: V3FineTuneProps;
 }) {
-  const [viewMode, setViewMode] = useState<ViewMode>("class");
+  const [viewMode, setViewMode] = useState<V3ViewMode>(defaultView);
   const [viewGrade, setViewGrade] = useState<Grade>(1);
   const [viewClass, setViewClass] = useState(1);
   const periodRows = useMemo(() => maxPeriods(schedules, viewGrade), [schedules, viewGrade]);
@@ -144,7 +159,17 @@ export function V3TimetableView({
       ) : viewMode === "grade" ? (
         <TimetableGradeView cells={cells} schedules={schedules} classCounts={classCounts} />
       ) : (
-        <TimetableAllTeachersView cells={cells} schedules={schedules} teachers={teachers} groups={teacherGroups} />
+        <TimetableAllTeachersView
+          cells={cells}
+          schedules={schedules}
+          teachers={teachers}
+          groups={teacherGroups}
+          swapEnabled={Boolean(fineTune)}
+          swapping={fineTune?.swapping}
+          onSwap={fineTune?.onSwap}
+          forbiddenSlots={fineTune?.forbiddenSlots}
+          isLocked={fineTune?.isLocked}
+        />
       )}
     </div>
   );

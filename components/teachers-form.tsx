@@ -1030,6 +1030,9 @@ export function TeachersForm({ termId, rosterAction }: TeachersFormProps) {
   const [dropTeacherIndex, setDropTeacherIndex] = useState<number | null>(null);
   /** 교사 줄을 끌어 그룹 머리줄 위에 있을 때 그 구역 */
   const [dropSectionKey, setDropSectionKey] = useState<string | null>(null);
+  const nameInputs = useRef<(HTMLInputElement | null)[]>([]);
+  /** 새 줄이 그려지면 커서를 줄 교사 줄 (배열 위치) */
+  const focusNameIndex = useRef<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1228,6 +1231,18 @@ export function TeachersForm({ termId, rosterAction }: TeachersFormProps) {
       ...(prev.length > 0 ? prev : []),
       createEmptyTeacher(),
     ]);
+    setStatus("idle");
+    setMessage("");
+  }
+
+  /** index 교사 바로 다음에 같은 그룹의 빈 줄을 넣는다 (그룹 구역에서도 바로 아래에 보인다) */
+  function insertRowAfter(index: number) {
+    setTeachers((prev) => {
+      const base = prev.length > 0 ? [...prev] : [createEmptyTeacher()];
+      const group = groupOf(base[index]);
+      base.splice(index + 1, 0, group ? { ...createEmptyTeacher(), group } : createEmptyTeacher());
+      return base;
+    });
     setStatus("idle");
     setMessage("");
   }
@@ -1605,6 +1620,22 @@ export function TeachersForm({ termId, rosterAction }: TeachersFormProps) {
           ];
         });
 
+  // 교사명 칸의 Enter는 "저장하고 다음"으로 넘어가지 않고, 화면에서 바로 아래 교사(같은 그룹)로 옮긴다.
+  // 그룹의 마지막 줄이면 교사명이 있을 때만 같은 그룹에 새 줄을 넣는다.
+  function handleNameEnter(event: React.KeyboardEvent<HTMLInputElement>, index: number) {
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    const at = rosterItems.findIndex((item) => item.type === "row" && item.index === index);
+    const next = rosterItems[at + 1];
+    if (next?.type === "row") {
+      nameInputs.current[next.index]?.focus();
+      return;
+    }
+    if (!rows[index]?.name.trim()) return;
+    focusNameIndex.current = index + 1;
+    insertRowAfter(index);
+  }
+
   return (
     <form onSubmit={handleSubmit} className="flex w-full flex-col gap-6">
       <header className="text-center">
@@ -1629,7 +1660,7 @@ export function TeachersForm({ termId, rosterAction }: TeachersFormProps) {
 
       <div className="grid w-full grid-cols-1 gap-4 xl:grid-cols-[1.6fr_1fr]">
         <section className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
-          <div className="mb-3 flex items-center justify-center gap-2">
+          <div className="relative mb-3 flex items-center justify-center gap-2">
             <h2 className="text-center text-base font-semibold text-zinc-900">
               교사 명단
             </h2>
@@ -1643,6 +1674,14 @@ export function TeachersForm({ termId, rosterAction }: TeachersFormProps) {
                 setMessage("");
               },
             })}
+            <button
+              type="button"
+              onClick={() => void handleSaveTeachers()}
+              disabled={status === "saving"}
+              className="absolute right-0 top-1/2 -translate-y-1/2 rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-zinc-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {status === "saving" ? "저장 중…" : "저장하기"}
+            </button>
           </div>
           <div className="mb-3 flex flex-wrap items-center justify-center gap-2">
             <button
@@ -1765,9 +1804,17 @@ export function TeachersForm({ termId, rosterAction }: TeachersFormProps) {
 
                     <div className="pt-0.5">
                       <input
+                        ref={(el) => {
+                          nameInputs.current[index] = el;
+                          if (el && focusNameIndex.current === index) {
+                            focusNameIndex.current = null;
+                            el.focus();
+                          }
+                        }}
                         type="text"
                         value={row.name}
                         onChange={(e) => updateRowName(index, e.target.value)}
+                        onKeyDown={(e) => handleNameEnter(e, index)}
                         onPaste={handlePaste}
                         placeholder="예: 김선생"
                         aria-label={`교사명 ${index + 1}`}

@@ -6,7 +6,7 @@ import {
   insertTermBundle,
   type TermBundle,
 } from "@/lib/term-bundle";
-import { parseLogicVersion, type Semester } from "@/lib/types";
+import type { Semester } from "@/lib/types";
 
 function isSemester(value: unknown): value is Semester {
   return value === 1 || value === 2;
@@ -131,7 +131,8 @@ export async function POST(request: Request) {
       timetableName,
       academicYear,
       semester: body.semester,
-      logicVersion: parseLogicVersion(body.logicVersion),
+      // v1·v2로 내보낸 파일도 v3로 가져온다 (입력 형식은 같다)
+      logicVersion: "v3",
     });
 
     return NextResponse.json(

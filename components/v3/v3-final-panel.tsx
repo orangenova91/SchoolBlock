@@ -1,11 +1,20 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TimetableVersionSummary } from "@/components/timetable-version-panel";
 import { V3DownloadMenu } from "@/components/v3/v3-download-menu";
 import { V3TimetableView } from "@/components/v3/v3-timetable-view";
 import { formatVersionDate, V3Versions, versionNote } from "@/components/v3/v3-versions";
+import type { TimetableCellRef } from "@/lib/timetable-swap";
+import {
+  applyFineTuneSwap,
+  fineTuneMetrics,
+  isPinnedLesson,
+  pinnedLessonKeys,
+  type FineTuneContext,
+  type FineTuneSwap,
+} from "@/lib/v3/fine-tune";
 import {
   createDefaultClassCounts,
   createDefaultGradeDaySchedules,
@@ -106,6 +115,110 @@ export function V3FinalPanel({
   const selected = versions.find((v) => v.id === selectedId) ?? null;
   const cells = shown && shown.id === selectedId ? shown.cells : null;
 
+  // 미세 조정: 고른 저장본에서 시작해 화면에서 맞바꾸고, 저장하면 서버가 같은 규칙으로 다시 적용해 새 저장본을 만든다
+  const [tuneCtx, setTuneCtx] = useState<FineTuneContext | null>(null);
+  const [draft, setDraft] = useState<{
+    baseId: string;
+    baseNumber: number;
+    swaps: FineTuneSwap[];
+    /** 맞바꿀 때마다 쌓는 칸 목록 (첫 칸 = 시작한 저장본). 되돌리기에 쓴다 */
+    history: TimetableCell[][];
+  } | null>(null);
+  const [tuneBusy, setTuneBusy] = useState(false);
+  const pinned = useMemo(() => pinnedLessonKeys(tuneCtx?.pins ?? []), [tuneCtx]);
+  const isLocked = useCallback((cell: TimetableCell) => isPinnedLesson(pinned, cell), [pinned]);
+  const draftCells = draft ? draft.history[draft.history.length - 1] : null;
+  const dirty = (draft?.swaps.length ?? 0) > 0;
+  const draftMetrics = useMemo(() => {
+    if (!draft || !draftCells || !tuneCtx) return null;
+    const count = (c: TimetableCell[]) => {
+      const m = fineTuneMetrics(c, tuneCtx);
+      return { lunch: m.lunchDoubles.length, triple: m.tripleRuns.length, sameDay: m.sameDaySubjectViolations.length };
+    };
+    return { before: count(draft.history[0]), now: count(draftCells) };
+  }, [draft, draftCells, tuneCtx]);
+
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
+  /** 바꾼 내용이 있으면 버려도 되는지 묻는다 */
+  const confirmDiscard = () =>
+    !dirty || window.confirm("미세 조정한 내용이 저장되지 않고 사라집니다. 계속할까요?");
+
+  async function startFineTune() {
+    if (!selected || !cells) return;
+    setError("");
+    setNotice("");
+    let ctx = tuneCtx;
+    if (!ctx) {
+      setTuneBusy(true);
+      try {
+        const res = await fetch(`/api/terms/${termId}/v3/fine-tune`);
+        const data = (await res.json().catch(() => ({}))) as FineTuneContext & { error?: string };
+        if (!res.ok) {
+          setError(data.error ?? "미세 조정을 시작하지 못했습니다.");
+          return;
+        }
+        ctx = data;
+        setTuneCtx(data);
+      } finally {
+        setTuneBusy(false);
+      }
+    }
+    setDraft({ baseId: selected.id, baseNumber: selected.versionNumber, swaps: [], history: [cells] });
+  }
+
+  function swapInDraft(from: TimetableCellRef, to: TimetableCellRef) {
+    if (!draft || !draftCells || !tuneCtx) return;
+    const next = applyFineTuneSwap(draftCells, { from, to }, tuneCtx, pinned);
+    if ("error" in next) {
+      setError(next.error);
+      return;
+    }
+    setError("");
+    setDraft({ ...draft, swaps: [...draft.swaps, { from, to }], history: [...draft.history, next.cells] });
+  }
+
+  function undoSwap() {
+    if (!draft || draft.swaps.length === 0) return;
+    setDraft({ ...draft, swaps: draft.swaps.slice(0, -1), history: draft.history.slice(0, -1) });
+  }
+
+  function cancelFineTune() {
+    if (!confirmDiscard()) return;
+    setDraft(null);
+    setError("");
+  }
+
+  async function saveFineTune() {
+    if (!draft || !dirty) return;
+    setTuneBusy(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/terms/${termId}/v3/fine-tune`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ baseVersionId: draft.baseId, swaps: draft.swaps }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { id?: string; version?: number; error?: string };
+      if (!res.ok || !data.id) {
+        setError(data.error ?? "저장하지 못했습니다.");
+        return;
+      }
+      const list = await fetchVersions();
+      if (list) setVersions(list);
+      setDraft(null);
+      setSelectedId(data.id);
+      setNotice(`미세 조정한 시간표를 저장 ${data.version}(으)로 저장했습니다. 지금 현재 시간표입니다.`);
+    } finally {
+      setTuneBusy(false);
+    }
+  }
+
   async function remove(v: TimetableVersionSummary) {
     if (!window.confirm(`저장 ${v.versionNumber}을(를) 삭제할까요?\n삭제해도 현재 시간표는 바뀌지 않습니다.`)) return;
     setDeleting(true);
@@ -157,6 +270,10 @@ export function V3FinalPanel({
         selectedId={selectedId}
         justSavedVersion={savedVersion}
         onSelect={(id) => {
+          if (draft && id !== draft.baseId) {
+            if (!confirmDiscard()) return;
+            setDraft(null);
+          }
           setError("");
           setSelectedId(id);
         }}
@@ -195,23 +312,87 @@ export function V3FinalPanel({
                 {selected.tripleRunCount} · 같은 날 교과 {selected.sameDaySubjectViolationCount}
               </p>
             </div>
-            <button
-              type="button"
-              disabled={deleting}
-              onClick={() => void remove(selected)}
-              className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
-            >
-              {deleting ? "삭제 중…" : "이 저장본 삭제"}
-            </button>
+            {draft ? null : (
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  disabled={!cells || tuneBusy}
+                  onClick={() => void startFineTune()}
+                  className="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
+                >
+                  {tuneBusy ? "준비 중…" : "미세 조정"}
+                </button>
+                <button
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => void remove(selected)}
+                  className="rounded-lg border border-red-200 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+                >
+                  {deleting ? "삭제 중…" : "이 저장본 삭제"}
+                </button>
+              </div>
+            )}
           </div>
-          {cells ? (
+          {draft ? (
+            <div className="sticky top-40 z-30 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-sky-300 bg-sky-50 px-5 py-3 shadow-sm">
+              <div className="min-w-0 text-sm text-sky-950">
+                <p className="font-semibold">
+                  미세 조정 중 · 저장 {draft.baseNumber}에서 시작 · 맞바꾼 횟수 {draft.swaps.length}
+                </p>
+                {draftMetrics ? (
+                  <p className="mt-0.5 text-xs text-sky-900">
+                    점심 연강 {draftMetrics.before.lunch}→{draftMetrics.now.lunch} · 3연강 {draftMetrics.before.triple}→
+                    {draftMetrics.now.triple} · 같은 날 교과 {draftMetrics.before.sameDay}→{draftMetrics.now.sameDay}
+                  </p>
+                ) : null}
+                <p className="mt-0.5 text-xs text-sky-800">
+                  전체 교사 시간표에서 공통 수업을 클릭해 집고 같은 학반의 다른 칸을 클릭하면 맞바뀝니다. 저장하면 새 저장본이 되고
+                  현재 시간표가 됩니다.
+                </p>
+              </div>
+              <div className="flex shrink-0 gap-2">
+                <button
+                  type="button"
+                  disabled={!dirty || tuneBusy}
+                  onClick={undoSwap}
+                  className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  한 단계 되돌리기
+                </button>
+                <button
+                  type="button"
+                  disabled={tuneBusy}
+                  onClick={cancelFineTune}
+                  className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50"
+                >
+                  취소
+                </button>
+                <button
+                  type="button"
+                  disabled={!dirty || tuneBusy}
+                  onClick={() => void saveFineTune()}
+                  className="rounded-lg bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-700 disabled:opacity-50"
+                >
+                  {tuneBusy ? "저장 중…" : "새 저장본으로 저장"}
+                </button>
+              </div>
+            </div>
+          ) : null}
+          {draftCells || cells ? (
             <V3TimetableView
-              cells={cells}
+              key={draft ? `tune-${draft.baseId}` : "view"}
+              cells={draftCells ?? cells ?? []}
               schedules={schedules}
               classCounts={classCounts}
               teachers={teachers}
               teacherGroups={teacherGroups}
               fixedSetKeys={fixedSetKeys}
+              defaultView={draft ? "allTeachers" : "class"}
+              fineTune={
+                draft && tuneCtx
+                  ? { swapping: tuneBusy, onSwap: swapInDraft, forbiddenSlots: tuneCtx.forbiddenSlots, isLocked }
+                  : undefined
+              }
             />
           ) : (
             <p className="text-center text-sm text-zinc-600" role="status">

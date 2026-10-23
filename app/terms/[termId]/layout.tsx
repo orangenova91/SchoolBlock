@@ -21,7 +21,8 @@ function formatTermLabel(term: {
 }): string {
   return [
     term.timetableName?.trim() || null,
-    term.logicVersion === "v2" ? "v2" : term.logicVersion === "v3" ? "v3" : null,
+    // 예전 시간표만 버전을 붙인다 (v3는 새 기본)
+    term.logicVersion === "v2" ? "v2" : term.logicVersion === "v3" ? null : "v1",
     term.school,
     `${term.academicYear}학년도`,
     `${term.semester}학기`,

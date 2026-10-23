@@ -2,12 +2,7 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/mongodb";
 import { getAccountId, getSessionFromRequest } from "@/lib/session";
 import { FLOW_CHAPTER } from "@/lib/term-flow-lock";
-import {
-  parseLogicVersion,
-  type Semester,
-  type TermDocument,
-  type TimetableDocument,
-} from "@/lib/types";
+import type { Semester, TermDocument, TimetableDocument } from "@/lib/types";
 
 function isSemester(value: unknown): value is Semester {
   return value === 1 || value === 2;
@@ -122,7 +117,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const { timetableName, academicYear, semester, logicVersion } =
+  const { timetableName, academicYear, semester } =
     body as Record<string, unknown>;
 
   if (typeof timetableName !== "string" || timetableName.trim().length === 0) {
@@ -171,9 +166,9 @@ export async function POST(request: Request) {
     semester: semesterValue,
     ownerId: accountId,
     createdAt: new Date(),
+    // 새 시간표는 v3만 만든다 (요청의 logicVersion은 보지 않는다). 예전 v1·v2 시간표는 그대로 열 수 있다.
+    logicVersion: "v3",
   };
-  const version = parseLogicVersion(logicVersion);
-  if (version) doc.logicVersion = version;
 
   try {
     const db = await getDb();

@@ -17,6 +17,7 @@ import {
   WEEKDAYS,
   type GradeDaySchedules,
   type Teacher,
+  type TeacherForbiddenSlot,
   type TimetableCell,
   type Weekday,
 } from "@/lib/types";
@@ -28,9 +29,15 @@ type TimetableAllTeachersViewProps = {
   /** v3 교사 그룹 순서. 있으면 그룹별로 머리줄을 넣어 나눈다 (없으면 가나다순) */
   groups?: string[];
   swapEnabled?: boolean;
+  /** 맞바꾸기 미리보기에 쓰는 배정 불가 시간 (없으면 서버가 저장 때만 검사) */
+  forbiddenSlots?: TeacherForbiddenSlot[];
+  /** 집을 수도, 맞바꿀 대상이 될 수도 없는 수업 (v3: 선 수업 배치) */
+  isLocked?: (cell: TimetableCell) => boolean;
   swapping?: boolean;
   onSwap?: (from: TimetableCellRef, to: TimetableCellRef) => void;
 };
+
+const LOCKED_REASON = "선 수업 배치로 고정한 수업입니다.";
 
 const EDGE_PX = 48;
 const MAX_SCROLL_PER_FRAME = 3;
@@ -99,6 +106,8 @@ export function TimetableAllTeachersView({
   swapEnabled = false,
   swapping = false,
   onSwap,
+  forbiddenSlots,
+  isLocked,
 }: TimetableAllTeachersViewProps) {
   const [picked, setPicked] = useState<TimetableCellRef | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
@@ -135,15 +144,19 @@ export function TimetableAllTeachersView({
       const key = refKey(ref);
       if (seen.has(key)) continue;
       seen.add(key);
+      if (isLocked?.(cell)) {
+        blocked.set(key, LOCKED_REASON);
+        continue;
+      }
       const result = swapSameClassCommonCells(cells, picked, ref, {
-        forbiddenSlots: [],
+        forbiddenSlots: forbiddenSlots ?? [],
         schedules,
       });
       if ("error" in result) blocked.set(key, result.error);
       else valid.add(key);
     }
     return { valid, blocked };
-  }, [picked, cells, schedules]);
+  }, [picked, cells, schedules, forbiddenSlots, isLocked]);
 
   useEffect(() => {
     if (!swapEnabled || swapping) setPicked(null);
@@ -201,7 +214,7 @@ export function TimetableAllTeachersView({
   }, [picked]);
 
   function handlePick(cell: TimetableCell) {
-    if (!swapEnabled || swapping || cell.kind !== "common") return;
+    if (!swapEnabled || swapping || cell.kind !== "common" || isLocked?.(cell)) return;
     const ref = toRef(cell);
     if (!picked) {
       setPicked(ref);
@@ -235,7 +248,9 @@ export function TimetableAllTeachersView({
           <p className="min-w-0 flex-1 text-center text-xs text-zinc-500">
             {picked
               ? `${picked.grade}-${picked.classNo} ${picked.subjectName}을 집었습니다. 초록 칸은 맞바꿀 수 있고, 주황 칸은 그 시간에 다른 수업이 있어 조정할 수 없습니다. Esc 또는 같은 칸을 다시 누르면 취소합니다.`
-              : "공통 수업을 클릭해 집고, 같은 학반의 다른 칸을 클릭하면 시간을 맞바꿉니다. SET 수업은 이동할 수 없습니다."}
+              : `공통 수업을 클릭해 집고, 같은 학반의 다른 칸을 클릭하면 시간을 맞바꿉니다. SET 수업${
+                  isLocked ? "과 선 수업(🔒)" : ""
+                }은 이동할 수 없습니다.`}
           </p>
         ) : (
           <span className="min-w-0 flex-1" />
@@ -390,23 +405,19 @@ export function TimetableAllTeachersView({
                                 const isTarget = swapHints.valid.has(key);
                                 const isBlocked = swapHints.blocked.has(key);
                                 const blockedReason = swapHints.blocked.get(key);
+                                const locked = swapEnabled && Boolean(isLocked?.(c));
+                                const movable = swapEnabled && c.kind === "common" && !locked;
                                 return (
                                   <div
                                     key={i}
-                                    role={
-                                      swapEnabled && c.kind === "common"
-                                        ? "button"
-                                        : undefined
-                                    }
-                                    tabIndex={
-                                      swapEnabled && c.kind === "common"
-                                        ? 0
-                                        : undefined
-                                    }
+                                    role={movable ? "button" : undefined}
+                                    tabIndex={movable ? 0 : undefined}
                                     title={
                                       blockedReason
                                         ? `조정 불가 · ${blockedReason}`
-                                        : `${c.grade}학년 ${c.classNo}반 ${c.subjectName} · ${name}`
+                                        : locked
+                                          ? `${c.grade}학년 ${c.classNo}반 ${c.subjectName} · ${name} · ${LOCKED_REASON}`
+                                          : `${c.grade}학년 ${c.classNo}반 ${c.subjectName} · ${name}`
                                     }
                                     onClick={() => handlePick(c)}
                                     onKeyDown={(event) => {
@@ -419,9 +430,11 @@ export function TimetableAllTeachersView({
                                       }
                                     }}
                                     className={`truncate ${
-                                      swapEnabled && c.kind === "common"
+                                      movable
                                         ? "cursor-pointer select-none rounded-sm px-0.5"
-                                        : ""
+                                        : locked
+                                          ? "cursor-not-allowed"
+                                          : ""
                                     } ${isSource ? "bg-zinc-900 text-white" : ""} ${
                                       isTarget
                                         ? "bg-emerald-100 ring-1 ring-emerald-500"
@@ -433,6 +446,7 @@ export function TimetableAllTeachersView({
                                     }`}
                                   >
                                     <span className="block font-medium">
+                                      {locked ? "🔒" : ""}
                                       {c.grade}-{c.classNo}
                                     </span>
                                     <span className="block truncate">

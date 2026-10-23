@@ -34,7 +34,7 @@ export default async function V3TermLayout({ children, params }: V3TermLayoutPro
     } else if (term.logicVersion !== "v3") {
       notV3 = true;
     } else {
-      termLabel = [term.timetableName?.trim() || null, "v3", term.school, `${term.academicYear}학년도`, `${term.semester}학기`]
+      termLabel = [term.timetableName?.trim() || null, term.school, `${term.academicYear}학년도`, `${term.semester}학기`]
         .filter((part): part is string => Boolean(part))
         .join(" · ");
       if (typeof term.maxReachedChapter === "number" && Number.isInteger(term.maxReachedChapter)) {

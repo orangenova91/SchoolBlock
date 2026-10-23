@@ -150,6 +150,7 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
   const [schedules, setSchedules] = useState<GradeDaySchedules>(createDefaultGradeDaySchedules());
   const [classCounts, setClassCounts] = useState<GradeClassCounts>(createDefaultClassCounts());
   const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [teacherGroups, setTeacherGroups] = useState<string[]>([]);
   const [fixedSetKeys, setFixedSetKeys] = useState<Set<string>>(new Set());
   const router = useRouter();
   const finishedDiagnoses = useRef<string | null>(null);
@@ -185,7 +186,7 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
         const settings = await readJson<{ weights: V3Weights; choices: number[] }>(settingsRes);
         const prefsData = await readJson<{ preferences?: Prefs }>(prefsRes);
         const schedule = await readJson<{ grades?: GradeDaySchedules; classCounts?: GradeClassCounts }>(scheduleRes);
-        const teachersData = await readJson<{ teachers?: Teacher[] }>(teachersRes);
+        const teachersData = await readJson<{ teachers?: Teacher[]; groups?: string[] }>(teachersRes);
         if (cancelled) return;
         if (!settingsRes.ok) throw new Error(settings.error ?? "설정을 불러오지 못했습니다.");
         setWeights(settings.weights);
@@ -195,7 +196,10 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
           setSchedules(schedule.grades ?? createDefaultGradeDaySchedules());
           setClassCounts(schedule.classCounts ?? createDefaultClassCounts());
         }
-        if (teachersRes.ok) setTeachers(Array.isArray(teachersData.teachers) ? teachersData.teachers : []);
+        if (teachersRes.ok) {
+          setTeachers(Array.isArray(teachersData.teachers) ? teachersData.teachers : []);
+          setTeacherGroups(Array.isArray(teachersData.groups) ? teachersData.groups : []);
+        }
         if (setBlocksRes.ok) {
           const fixed = [...(setBlocks.cells ?? []), ...(setBlocks.partialCells ?? [])];
           setFixedSetKeys(new Set(fixed.map((c) => `${c.grade}|${c.set}|${c.day}|${c.period}`)));
@@ -757,6 +761,7 @@ export function V3TimetablePanel({ termId }: { termId: string }) {
               schedules={schedules}
               classCounts={classCounts}
               teachers={teachers}
+              teacherGroups={teacherGroups}
               fixedSetKeys={fixedSetKeys}
             />
           ) : null}

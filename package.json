@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
+    "exceljs": "^4.4.0",
     "highs": "1.15.3",
     "jose": "^5.9.6",
     "mongodb": "^7.5.0",

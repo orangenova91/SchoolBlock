@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import type { TimetableVersionSummary } from "@/components/timetable-version-panel";
+import { V3DownloadMenu } from "@/components/v3/v3-download-menu";
 import { V3TimetableView } from "@/components/v3/v3-timetable-view";
 import { formatVersionDate, V3Versions, versionNote } from "@/components/v3/v3-versions";
 import {
@@ -16,11 +17,20 @@ import {
 } from "@/lib/types";
 
 /** v3 9장 최종 시간표: 왼쪽에서 저장본을 고르면 가운데에 그 시간표를 보여 준다 */
-export function V3FinalPanel({ termId, savedVersion }: { termId: string; savedVersion: number | null }) {
+export function V3FinalPanel({
+  termId,
+  savedVersion,
+  termPeriod,
+}: {
+  termId: string;
+  savedVersion: number | null;
+  termPeriod: { academicYear: number; semester: number } | null;
+}) {
   const [loading, setLoading] = useState(true);
   const [schedules, setSchedules] = useState<GradeDaySchedules>(createDefaultGradeDaySchedules());
   const [classCounts, setClassCounts] = useState<GradeClassCounts>(createDefaultClassCounts());
   const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [teacherGroups, setTeacherGroups] = useState<string[]>([]);
   const [fixedSetKeys, setFixedSetKeys] = useState<Set<string>>(new Set());
   const [versions, setVersions] = useState<TimetableVersionSummary[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -46,14 +56,17 @@ export function V3FinalPanel({ termId, savedVersion }: { termId: string; savedVe
         fetchVersions(),
       ]);
       const schedule = (await scheduleRes.json().catch(() => ({}))) as { grades?: GradeDaySchedules; classCounts?: GradeClassCounts };
-      const teachersData = (await teachersRes.json().catch(() => ({}))) as { teachers?: Teacher[] };
+      const teachersData = (await teachersRes.json().catch(() => ({}))) as { teachers?: Teacher[]; groups?: string[] };
       const setBlocks = (await setBlocksRes.json().catch(() => ({}))) as { cells?: SetBlockCell[]; partialCells?: SetBlockCell[] };
       if (cancelled) return;
       if (scheduleRes.ok) {
         setSchedules(schedule.grades ?? createDefaultGradeDaySchedules());
         setClassCounts(schedule.classCounts ?? createDefaultClassCounts());
       }
-      if (teachersRes.ok) setTeachers(Array.isArray(teachersData.teachers) ? teachersData.teachers : []);
+      if (teachersRes.ok) {
+        setTeachers(Array.isArray(teachersData.teachers) ? teachersData.teachers : []);
+        setTeacherGroups(Array.isArray(teachersData.groups) ? teachersData.groups : []);
+      }
       if (setBlocksRes.ok) {
         const fixed = [...(setBlocks.cells ?? []), ...(setBlocks.partialCells ?? [])];
         setFixedSetKeys(new Set(fixed.map((c) => `${c.grade}|${c.set}|${c.day}|${c.period}`)));
@@ -148,6 +161,15 @@ export function V3FinalPanel({ termId, savedVersion }: { termId: string; savedVe
           setSelectedId(id);
         }}
       />
+      <V3DownloadMenu
+        cells={cells}
+        schedules={schedules}
+        classCounts={classCounts}
+        teachers={teachers}
+        teacherGroups={teacherGroups}
+        versionNumber={selected?.versionNumber ?? null}
+        termPeriod={termPeriod}
+      />
 
       {loading ? null : !selected ? (
         <section className="rounded-2xl border border-zinc-200 bg-white p-5 text-center text-sm text-zinc-600 shadow-sm">
@@ -183,7 +205,14 @@ export function V3FinalPanel({ termId, savedVersion }: { termId: string; savedVe
             </button>
           </div>
           {cells ? (
-            <V3TimetableView cells={cells} schedules={schedules} classCounts={classCounts} teachers={teachers} fixedSetKeys={fixedSetKeys} />
+            <V3TimetableView
+              cells={cells}
+              schedules={schedules}
+              classCounts={classCounts}
+              teachers={teachers}
+              teacherGroups={teacherGroups}
+              fixedSetKeys={fixedSetKeys}
+            />
           ) : (
             <p className="text-center text-sm text-zinc-600" role="status">
               시간표를 불러오는 중…

@@ -27,12 +27,15 @@ export function V3TimetableView({
   schedules,
   classCounts,
   teachers,
+  teacherGroups,
   fixedSetKeys,
 }: {
   cells: TimetableCell[];
   schedules: GradeDaySchedules;
   classCounts: GradeClassCounts;
   teachers: Teacher[];
+  /** 교사 그룹 순서 (교사 배정의 교사 그룹화). 교사별·전체 교사 보기를 그룹 순서로 */
+  teacherGroups?: string[];
   /** 사용자가 고정한 SET 칸 ("학년|SET|요일|교시"). 나머지 SET 칸은 자동 배치 */
   fixedSetKeys?: Set<string>;
 }) {
@@ -137,11 +140,11 @@ export function V3TimetableView({
           </p>
         </section>
       ) : viewMode === "teacher" ? (
-        <TimetableTeacherView cells={cells} schedules={schedules} teachers={teachers} />
+        <TimetableTeacherView cells={cells} schedules={schedules} teachers={teachers} groups={teacherGroups} />
       ) : viewMode === "grade" ? (
         <TimetableGradeView cells={cells} schedules={schedules} classCounts={classCounts} />
       ) : (
-        <TimetableAllTeachersView cells={cells} schedules={schedules} teachers={teachers} />
+        <TimetableAllTeachersView cells={cells} schedules={schedules} teachers={teachers} groups={teacherGroups} />
       )}
     </div>
   );

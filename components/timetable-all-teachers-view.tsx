@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { shortSubjectName, subjectSetBadgeClass } from "@/lib/subjects";
+import { hasTeacherGroupSections, teacherSections } from "@/lib/teachers";
 import {
   isSameClassSwapTarget,
   swapSameClassCommonCells,
@@ -24,6 +25,8 @@ type TimetableAllTeachersViewProps = {
   cells: TimetableCell[];
   schedules: GradeDaySchedules;
   teachers: Teacher[];
+  /** v3 교사 그룹 순서. 있으면 그룹별로 머리줄을 넣어 나눈다 (없으면 가나다순) */
+  groups?: string[];
   swapEnabled?: boolean;
   swapping?: boolean;
   onSwap?: (from: TimetableCellRef, to: TimetableCellRef) => void;
@@ -92,6 +95,7 @@ export function TimetableAllTeachersView({
   cells,
   schedules,
   teachers,
+  groups,
   swapEnabled = false,
   swapping = false,
   onSwap,
@@ -101,13 +105,9 @@ export function TimetableAllTeachersView({
   const scrollRef = useRef<HTMLDivElement>(null);
   const pointerRef = useRef({ x: 0, y: 0 });
 
-  const teacherNames = useMemo(
-    () =>
-      [...new Set(teachers.map((t) => t.name).filter(Boolean))].sort((a, b) =>
-        a.localeCompare(b, "ko"),
-      ),
-    [teachers],
-  );
+  const sections = useMemo(() => teacherSections(teachers, groups), [teachers, groups]);
+  const showGroupHeaders = hasTeacherGroupSections(sections);
+  const teacherNames = useMemo(() => sections.flatMap((s) => s.names), [sections]);
 
   const periodCols = useMemo(() => maxPeriodsAllGrades(schedules), [schedules]);
   const periods = useMemo(
@@ -322,7 +322,22 @@ export function TimetableAllTeachersView({
                 </tr>
               </thead>
               <tbody>
-                {teacherNames.map((name) => {
+                {sections.map((section) => (
+                  <Fragment key={section.group ?? "__none__"}>
+                {showGroupHeaders ? (
+                  <tr>
+                    <td
+                      colSpan={1 + periodCols * WEEKDAYS.length}
+                      className="border border-zinc-300 bg-zinc-100 p-0 text-left"
+                    >
+                      <span className="sticky left-0 inline-block px-2 py-1 text-xs font-semibold text-zinc-900">
+                        {section.group ?? "그룹 없음"}
+                        <span className="ml-1.5 font-normal text-zinc-500">{section.names.length}명</span>
+                      </span>
+                    </td>
+                  </tr>
+                ) : null}
+                {section.names.map((name) => {
                   const teacherCells = cellsByTeacher.get(name) ?? [];
                   return (
                     <tr key={name}>
@@ -433,6 +448,8 @@ export function TimetableAllTeachersView({
                     </tr>
                   );
                 })}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           </div>

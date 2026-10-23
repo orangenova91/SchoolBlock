@@ -7,6 +7,7 @@ import {
   hasAnyAssignment,
   hasValidAssignmentHours,
   parseTeachers,
+  sanitizeTeacherGroups,
   sanitizeTeachers,
 } from "@/lib/teachers";
 import { findOwnedTerm } from "@/lib/term-access";
@@ -53,6 +54,9 @@ export async function GET(request: Request, context: RouteContext) {
       .collection<TeachersDocument>("teachers")
       .findOne({ termId });
 
+    const teachers = sanitizeTeachers(
+      ensureTeachers(doc?.teachers ?? createDefaultTeachers()),
+    );
     return NextResponse.json({
       term: {
         id: termId,
@@ -61,9 +65,8 @@ export async function GET(request: Request, context: RouteContext) {
         academicYear: term.academicYear,
         semester: term.semester,
       },
-      teachers: sanitizeTeachers(
-        ensureTeachers(doc?.teachers ?? createDefaultTeachers()),
-      ),
+      teachers,
+      groups: sanitizeTeacherGroups(doc?.groups, teachers),
     });
   } catch (error) {
     console.error("teachers GET failed:", error);
@@ -146,6 +149,7 @@ export async function PUT(request: Request, context: RouteContext) {
       );
     }
 
+    const groups = sanitizeTeacherGroups((body as { groups?: unknown }).groups, teachers);
     const db = await getDb();
     const updatedAt = new Date();
     await db.collection<TeachersDocument>("teachers").updateOne(
@@ -154,13 +158,14 @@ export async function PUT(request: Request, context: RouteContext) {
         $set: {
           termId,
           teachers,
+          groups,
           updatedAt,
         },
       },
       { upsert: true },
     );
 
-    return NextResponse.json({ termId, teachers, updatedAt });
+    return NextResponse.json({ termId, teachers, groups, updatedAt });
   } catch (error) {
     console.error("teachers PUT failed:", error);
     return NextResponse.json(

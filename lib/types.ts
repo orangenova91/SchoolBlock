@@ -235,13 +235,19 @@ export type TeacherAssignments = Record<Grade, AssignmentItem[]>;
 export type Teacher = {
   name: string;
   assignments: TeacherAssignments;
+  /** v3 교사 그룹화: 속한 그룹명 (한 그룹에만) */
+  group?: string;
 };
 
 export type TeachersDocument = {
   termId: string;
   teachers: Teacher[];
+  /** v3 교사 그룹 목록. 아직 교사가 없는 그룹도 남긴다 */
+  groups?: string[];
   updatedAt: Date;
 };
+
+export const MAX_TEACHER_GROUP_NAME = 30;
 
 export const MIN_ASSIGNMENT_HOURS = 1;
 export const MAX_ASSIGNMENT_HOURS = 40;
